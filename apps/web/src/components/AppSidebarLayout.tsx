@@ -327,7 +327,9 @@ function ProjectProjectionRetention() {
 
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
-  const legacySidebarEnabled = useLegacySidebarEnabled();
+  // The desktop fork uses the project tree by default. Web and mobile keep
+  // the existing preference-controlled behavior.
+  const legacySidebarEnabled = useLegacySidebarEnabled() || isElectron;
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
   useThreadVisitedMigration();
