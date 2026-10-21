@@ -89,7 +89,7 @@ jobs:
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libsecret-1-dev pkg-config
+          sudo apt-get install -y build-essential imagemagick libsecret-1-dev pkg-config
 
       - name: Resolve nightly version
         id: nightly
