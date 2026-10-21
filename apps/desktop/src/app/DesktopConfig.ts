@@ -57,6 +57,11 @@ export const DesktopConfig = Config.all({
   ),
   appImagePath: trimmedString("APPIMAGE"),
   disableAutoUpdate: optionalBoolean("T3CODE_DISABLE_AUTO_UPDATE"),
+  // Custom desktop distributions can opt into downloading releases in the
+  // background and applying them the next time the app quits. Official builds
+  // keep the explicit download/install flow unless this is enabled by their
+  // launcher environment.
+  autoUpdate: optionalBoolean("T3CODE_AUTO_UPDATE"),
   mockUpdates: optionalBoolean("T3CODE_DESKTOP_MOCK_UPDATES"),
   mockUpdateServerPort: Config.Port("T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(
     Config.withDefault(3000),
