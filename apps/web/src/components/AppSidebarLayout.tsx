@@ -11,7 +11,7 @@ import {
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
 import { isCommandPaletteOpen } from "../commandPaletteBus";
-import { isElectron } from "../env";
+import { forceLegacySidebar, isElectron } from "../env";
 import {
   releaseThreadUndoShortcut,
   threadUndoClaimsShortcut,
@@ -327,9 +327,9 @@ function ProjectProjectionRetention() {
 
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
-  // The desktop fork uses the project tree by default. Web and mobile keep
-  // the existing preference-controlled behavior.
-  const legacySidebarEnabled = useLegacySidebarEnabled() || isElectron;
+  // Desktop and explicitly configured preview builds use the project tree by
+  // default. Regular web and mobile clients keep preference-controlled behavior.
+  const legacySidebarEnabled = useLegacySidebarEnabled() || isElectron || forceLegacySidebar;
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
   useThreadVisitedMigration();

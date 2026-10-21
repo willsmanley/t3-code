@@ -4,7 +4,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { useEffect } from "react";
 
 import { isCommandPaletteOpen } from "../commandPaletteBus";
-import { isElectron } from "../env";
+import { forceLegacySidebar, isElectron } from "../env";
 import { ThreadRouteView } from "../components/ThreadRouteView";
 import { ThreadLinkPrompt } from "../components/promptLinks/ThreadLinkPrompt";
 import { useClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
@@ -41,7 +41,7 @@ function ChatRouteGlobalShortcuts() {
     AuthPreviewOperateScope,
   );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const legacySidebarEnabled = useLegacySidebarEnabled() || isElectron;
+  const legacySidebarEnabled = useLegacySidebarEnabled() || isElectron || forceLegacySidebar;
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const projects = useProjects();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
