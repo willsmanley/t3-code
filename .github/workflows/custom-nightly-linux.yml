@@ -111,6 +111,8 @@ jobs:
           node scripts/update-release-package-versions.ts "$nightly_version"
 
       - name: Build JavaScript bundle
+        env:
+          T3CODE_AUTO_UPDATE: "true"
         run: vp run build:desktop
 
       - name: Package Linux desktop

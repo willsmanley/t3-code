@@ -3,6 +3,11 @@ import * as Config from "effect/Config";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Option from "effect/Option";
 
+declare const __T3CODE_AUTO_UPDATE__: boolean | undefined;
+
+const buildDefaultAutoUpdate =
+  typeof __T3CODE_AUTO_UPDATE__ !== "undefined" && __T3CODE_AUTO_UPDATE__;
+
 const trimNonEmptyOption = (value: string): Option.Option<string> => {
   const trimmed = value.trim();
   return trimmed.length > 0 ? Option.some(trimmed) : Option.none();
@@ -61,7 +66,10 @@ export const DesktopConfig = Config.all({
   // background and applying them the next time the app quits. Official builds
   // keep the explicit download/install flow unless this is enabled by their
   // launcher environment.
-  autoUpdate: optionalBoolean("T3CODE_AUTO_UPDATE"),
+  autoUpdate: Config.Boolean("T3CODE_AUTO_UPDATE").pipe(
+    Config.option,
+    Config.map(Option.getOrElse(() => buildDefaultAutoUpdate)),
+  ),
   mockUpdates: optionalBoolean("T3CODE_DESKTOP_MOCK_UPDATES"),
   mockUpdateServerPort: Config.Port("T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(
     Config.withDefault(3000),
