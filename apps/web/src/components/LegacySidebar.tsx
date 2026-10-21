@@ -843,6 +843,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                     }`}
                   >
                     <RelativeTime
+                      compact
                       timestamp={thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt}
                     />
                   </span>
