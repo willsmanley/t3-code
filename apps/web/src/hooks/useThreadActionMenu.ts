@@ -46,6 +46,7 @@ import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
 import { useThreadActions } from "./useThreadActions";
+import { useThreadConversationActions } from "./useThreadConversationActions";
 
 function failureToast(title: string, error: unknown) {
   toastManager.add(
@@ -64,6 +65,7 @@ export function useThreadActionMenu(input: {
 }) {
   const { threadRef, projectCwd, onStartRename } = input;
   const router = useRouter();
+  const { forkConversation, copyProviderSessionId } = useThreadConversationActions();
   const projects = useProjects();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
@@ -177,6 +179,12 @@ export function useThreadActionMenu(input: {
         }
       };
       switch (action) {
+        case "fork-conversation":
+          await forkConversation(threadRef);
+          return;
+        case "copy-provider-session-id":
+          await copyProviderSessionId(threadRef);
+          return;
         case "project-settings": {
           const project = projects.find(
             (candidate) =>

@@ -95,6 +95,7 @@ import {
   useThreadSelectionStore,
 } from "../threadSelectionStore";
 import { useAcknowledgeThreadWoke, useThreadActions } from "../hooks/useThreadActions";
+import { useThreadConversationActions } from "../hooks/useThreadConversationActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
 import { useTerminalFocus } from "../hooks/useTerminalFocus";
@@ -754,6 +755,7 @@ export default function Sidebar() {
     projectScopeItems,
   } = useSidebarLookups();
   const router = useRouter();
+  const { forkConversation, copyProviderSessionId } = useThreadConversationActions();
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
@@ -2314,6 +2316,14 @@ export default function Sidebar() {
           return;
         }
         switch (clicked.value) {
+          case "fork-conversation":
+            if (await forkConversation(threadRef)) {
+              if (isMobile) setOpenMobile(false);
+            }
+            return;
+          case "copy-provider-session-id":
+            await copyProviderSessionId(threadRef);
+            return;
           case "filter-by-project":
             if (threadProjectGroup) {
               setProjectScopeKey(

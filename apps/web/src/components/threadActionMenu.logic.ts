@@ -3,6 +3,7 @@ import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled"
 
 export type ThreadActionMenuId =
   | "new-thread-on-branch"
+  | "fork-conversation"
   | "filter-by-project"
   | "project-settings"
   | "pin"
@@ -22,6 +23,7 @@ export type ThreadActionMenuId =
   | "copy-path"
   | "copy-branch"
   | "copy-thread-id"
+  | "copy-provider-session-id"
   | "archive"
   | "delete";
 
@@ -98,6 +100,7 @@ export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean
     "copy-path",
     "copy-branch",
     "copy-thread-id",
+    "copy-provider-session-id",
   ].includes(action);
 }
 
@@ -105,6 +108,7 @@ export function buildThreadActionMenuItems(
   state: ThreadActionMenuState,
 ): ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> {
   const items: ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> = [
+    { id: "fork-conversation", label: "Fork conversation", icon: "git-fork" },
     ...(state.branch
       ? [
           {
@@ -202,6 +206,7 @@ export function buildThreadActionMenuItems(
           ? [{ id: "copy-branch" as const, label: "Branch", icon: "git-branch" }]
           : []),
         { id: "copy-thread-id", label: "Thread ID", icon: "hash" },
+        { id: "copy-provider-session-id", label: "Provider session ID", icon: "hash" },
       ],
     },
     { id: "project-settings", label: "Project settings", icon: "settings" },

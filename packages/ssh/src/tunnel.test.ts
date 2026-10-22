@@ -82,6 +82,15 @@ function commandArgs(command: ChildProcess.Command): ReadonlyArray<string> {
 const ARCHIVE = { archiveVersion: "1.2.3-preview.20260911.4" } as const;
 
 describe("ssh tunnel scripts", () => {
+  it("downloads pinned runtimes from the configured fork release", () => {
+    const script = SshTunnel.buildRemoteT3RunnerScript({
+      ...ARCHIVE,
+      releaseBaseUrl: "https://example.com/fork/releases/download/",
+    });
+    assert.include(script, "T3_RELEASE_BASE_URL='https://example.com/fork/releases/download'");
+    assert.include(script, `T3_ARCHIVE_VERSION='${ARCHIVE.archiveVersion}'`);
+  });
+
   it("rejects archive versions that are not a single exact version segment", () => {
     for (const archiveVersion of [
       "../other",

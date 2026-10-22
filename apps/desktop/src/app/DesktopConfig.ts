@@ -4,9 +4,14 @@ import * as ConfigProvider from "effect/ConfigProvider";
 import * as Option from "effect/Option";
 
 declare const __T3CODE_AUTO_UPDATE__: boolean | undefined;
+declare const __T3CODE_RELEASE_BASE_URL__: string | undefined;
 
 const buildDefaultAutoUpdate =
   typeof __T3CODE_AUTO_UPDATE__ !== "undefined" && __T3CODE_AUTO_UPDATE__;
+const buildDefaultReleaseBaseUrl =
+  typeof __T3CODE_RELEASE_BASE_URL__ !== "undefined" && __T3CODE_RELEASE_BASE_URL__.trim() !== ""
+    ? __T3CODE_RELEASE_BASE_URL__.trim()
+    : undefined;
 
 const trimNonEmptyOption = (value: string): Option.Option<string> => {
   const trimmed = value.trim();
@@ -43,6 +48,9 @@ export const DesktopConfig = Config.all({
   xdgConfigHome: trimmedString("XDG_CONFIG_HOME"),
   xdgDataHome: trimmedString("XDG_DATA_HOME"),
   t3Home: trimmedString("T3CODE_HOME"),
+  releaseBaseUrl: trimmedString("T3CODE_RELEASE_BASE_URL").pipe(
+    Config.map(Option.getOrElse(() => buildDefaultReleaseBaseUrl)),
+  ),
   devServerUrl: Config.URL("VITE_DEV_SERVER_URL").pipe(Config.option),
   appUserModelIdOverride: trimmedString("T3CODE_DESKTOP_APP_USER_MODEL_ID"),
   devRemoteT3ServerEntryPath: trimmedString("T3CODE_DEV_REMOTE_T3_SERVER_ENTRY_PATH"),

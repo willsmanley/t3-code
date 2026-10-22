@@ -123,6 +123,7 @@ import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useDesktopUpdateState } from "../state/desktopUpdate";
 
 import { useThreadActions } from "../hooks/useThreadActions";
+import { useThreadConversationActions } from "../hooks/useThreadConversationActions";
 import { projectEnvironment } from "../state/projects";
 import { threadEnvironment, useEnvironmentThread } from "../state/threads";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
@@ -1242,6 +1243,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     reportFailure: false,
   });
   const router = useRouter();
+  const { forkConversation, copyProviderSessionId } = useThreadConversationActions();
   const queuePendingFileDrop = useSidebarPendingFileDropStore((s) => s.queuePendingFileDrop);
   const clearPendingFileDrop = useSidebarPendingFileDropStore((s) => s.clearPendingFileDrop);
   const { isMobile, setOpenMobile } = useSidebar();
@@ -2113,6 +2115,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       );
       const clicked = await api.contextMenu.show(
         [
+          {
+            id: "fork-conversation",
+            label: "Fork conversation",
+            icon: "git-fork",
+            disabled: !canOperateThread,
+          },
           ...(thread.branch
             ? [{ id: "new-thread-on-branch", label: `New thread on ${thread.branch}` }]
             : []),
@@ -2120,6 +2128,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           { id: "mark-unread", label: "Mark unread" },
           { id: "copy-path", label: "Copy Path" },
           { id: "copy-thread-id", label: "Copy Thread ID" },
+          { id: "copy-provider-session-id", label: "Copy provider session ID", icon: "hash" },
           { id: "project-settings", label: "Project settings" },
           {
             id: "delete",
@@ -2138,6 +2147,18 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           to: "/projects/$projectKey",
           params: { projectKey: project.projectKey },
         });
+        return;
+      }
+
+      if (clicked === "fork-conversation") {
+        if (!checkTaskPermission(threadRef.environmentId)) return;
+        if (await forkConversation(threadRef)) {
+          if (isMobile) setOpenMobile(false);
+        }
+        return;
+      }
+      if (clicked === "copy-provider-session-id") {
+        await copyProviderSessionId(threadRef);
         return;
       }
 

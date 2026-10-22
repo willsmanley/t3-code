@@ -38,6 +38,7 @@ describe("buildThreadActionMenuItems", () => {
       });
       const expected = reversed
         ? [
+            "fork-conversation",
             "unpin",
             "unsettle",
             "unsnooze",
@@ -48,6 +49,7 @@ describe("buildThreadActionMenuItems", () => {
             "delete",
           ]
         : [
+            "fork-conversation",
             "pin",
             "settle",
             "snooze",
@@ -70,5 +72,19 @@ describe("buildThreadActionMenuItems", () => {
       (item) => item.id === "archive",
     );
     expect(archiveItem?.disabled).toBe(true);
+  });
+
+  it("allows native ID copying for read-only clients and forking while a newer run is active", () => {
+    const items = buildThreadActionMenuItems({ ...baseState, canOperate: false });
+    expect(items.find((item) => item.id === "copy")?.children).toContainEqual({
+      id: "copy-provider-session-id",
+      label: "Provider session ID",
+      icon: "hash",
+    });
+    expect(
+      buildThreadActionMenuItems({ ...baseState, isRunning: true }).find(
+        (item) => item.id === "fork-conversation",
+      )?.disabled,
+    ).not.toBe(true);
   });
 });

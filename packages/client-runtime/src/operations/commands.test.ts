@@ -37,6 +37,7 @@ import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import { v2Now, v2Projection, v2ThreadId } from "../state/orchestrationV2TestFixtures.ts";
 import {
   archiveThread,
+  forkThreadFromLatestStable,
   interruptThreadTurn,
   revertThreadCheckpoint,
   resumeThreadQueue,
@@ -171,6 +172,33 @@ describe("V2 environment commands", () => {
 
       expect(commands).toEqual([
         { type: "thread.archive", commandId: "queued-command", threadId: "thread-1" },
+      ]);
+    }).pipe(Effect.provide(layerTestCrypto)),
+  );
+
+  it.effect("forks at the server's latest stable response without downloading the projection", () =>
+    Effect.gen(function* () {
+      const commands: OrchestrationV2Command[] = [];
+      const projectionRequests: ThreadId[] = [];
+      const supervisor = yield* makeSupervisor({ commands, projects: [], projectionRequests });
+      yield* forkThreadFromLatestStable({
+        commandId: CommandId.make("fork-latest"),
+        sourceThreadId: ThreadId.make("source"),
+        targetThreadId: ThreadId.make("fork"),
+        title: "Conversation fork",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+      expect(projectionRequests).toEqual([]);
+      expect(commands).toEqual([
+        {
+          type: "thread.fork",
+          commandId: "fork-latest",
+          createdBy: "user",
+          creationSource: "web",
+          sourceThreadId: "source",
+          targetThreadId: "fork",
+          sourcePoint: { type: "latest_stable" },
+          title: "Conversation fork",
+        },
       ]);
     }).pipe(Effect.provide(layerTestCrypto)),
   );

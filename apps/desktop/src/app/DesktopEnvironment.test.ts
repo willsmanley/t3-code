@@ -38,6 +38,17 @@ const makeEnvironment = (
 ) => DesktopEnvironment.DesktopEnvironment.pipe(Effect.provide(layerEnvironment(overrides, env)));
 
 describe("DesktopEnvironment", () => {
+  it.effect("uses the configured release mirror for packaged SSH runtimes", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment(
+        { isPackaged: true },
+        { T3CODE_RELEASE_BASE_URL: "  https://example.com/fork/releases/download  " },
+      );
+
+      assert.equal(environment.releaseBaseUrl, "https://example.com/fork/releases/download");
+    }),
+  );
+
   it.effect("uses the packaged Windows server sidecar as the backend root", () =>
     Effect.gen(function* () {
       const environment = yield* makeEnvironment({

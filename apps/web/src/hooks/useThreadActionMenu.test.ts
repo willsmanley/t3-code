@@ -143,6 +143,12 @@ vi.mock("./useThreadActions", () => ({
       ]),
     ),
 }));
+vi.mock("./useThreadConversationActions", () => ({
+  useThreadConversationActions: () => ({
+    forkConversation: async () => recordEffect("fork-conversation"),
+    copyProviderSessionId: async () => recordEffect("copy-provider-session-id"),
+  }),
+}));
 
 import { useThreadActionMenu } from "./useThreadActionMenu";
 
@@ -166,17 +172,29 @@ beforeEach(() => {
 });
 
 describe("thread menu permissions", () => {
-  it.each(["rename", "regenerate-title", "delete", "pin", "settle", "archive"] as const)(
-    "%s rechecks after the native menu closes",
-    async (action) => {
-      state.granted.add("secondary");
-      const choice = deferred<ThreadActionMenuId | null>();
-      state.show.mockReturnValue(choice.promise);
-      createMenu().openMenu(position);
-      state.granted.delete("secondary");
-      choice.resolve(action);
-      await state.completed.promise;
-      expect(state.effects).toEqual([]);
-    },
-  );
+  it.each([
+    "rename",
+    "regenerate-title",
+    "delete",
+    "pin",
+    "settle",
+    "archive",
+    "fork-conversation",
+  ] as const)("%s rechecks after the native menu closes", async (action) => {
+    state.granted.add("secondary");
+    const choice = deferred<ThreadActionMenuId | null>();
+    state.show.mockReturnValue(choice.promise);
+    createMenu().openMenu(position);
+    state.granted.delete("secondary");
+    choice.resolve(action);
+    await state.completed.promise;
+    expect(state.effects).toEqual([]);
+  });
+
+  it("copies the provider session ID without operate permission", async () => {
+    state.show.mockResolvedValue("copy-provider-session-id");
+    createMenu().openMenu(position);
+    await state.completed.promise;
+    expect(state.effects).toEqual(["copy-provider-session-id"]);
+  });
 });
