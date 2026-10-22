@@ -50,7 +50,7 @@ import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import {
   activeHoursDeferral,
-  isMissedFixedTimeRun,
+  isMissedRun,
   isSameSchedule,
   nextScheduledRunAt,
   timerScheduleToStore,
@@ -299,6 +299,24 @@ function nextRunAt(
   } catch {
     return null;
   }
+}
+
+interface RunState {
+  readonly nextRunAt: string | null;
+  /** The schedule has no run left, so the task switches itself off. */
+  readonly ended: boolean;
+}
+
+/**
+ * A one-off that already ran stays listed, switched off with no next run, so
+ * its last run stays visible until a new time re-arms it.
+ */
+function nextRunState(
+  task: Pick<ScheduledTask, "enabled" | "schedule">,
+  from: DateTime.DateTime,
+): RunState {
+  const next = nextRunAt(task, from);
+  return { nextRunAt: next, ended: task.enabled && next === null && task.schedule.type === "once" };
 }
 
 function errorMessage(error: unknown): string {
@@ -674,6 +692,7 @@ export const layer = Layer.effect(
       readonly id: ScheduledTaskId;
       readonly completedAtIso: string;
       readonly nextRunAtIso: string | null;
+      readonly ended: boolean;
       readonly status: "succeeded" | "failed";
       readonly error: string | null;
       readonly startedAtIso: string;
@@ -682,6 +701,7 @@ export const layer = Layer.effect(
         UPDATE scheduled_tasks
         SET updated_at = ${input.completedAtIso},
             next_run_at = ${input.nextRunAtIso},
+            enabled = CASE WHEN ${input.ended ? 1 : 0} THEN 0 ELSE enabled END,
             last_run_status = ${input.status},
             last_run_error = ${input.error},
             run_count = run_count + 1
@@ -706,11 +726,13 @@ export const layer = Layer.effect(
         const reread = yield* Effect.result(findTask(task.id));
         if (Result.isSuccess(reread) && reread.success === null) return;
         const source = Result.isSuccess(reread) && reread.success !== null ? reread.success : task;
+        const state = nextRunState(source, now);
         yield* sql`
           UPDATE scheduled_tasks
           SET last_run_status = 'failed',
               last_run_error = ${message},
-              next_run_at = ${nextRunAt(source, now)},
+              next_run_at = ${state.nextRunAt},
+              enabled = CASE WHEN ${state.ended ? 1 : 0} THEN 0 ELSE enabled END,
               updated_at = ${iso(now)},
               run_count = run_count + CASE WHEN EXISTS (
                 SELECT 1 FROM scheduled_task_webhook_pending
@@ -883,11 +905,13 @@ export const layer = Layer.effect(
         const threadId = runSucceeded ? result.value : null;
         const current = yield* findTask(task.id);
         const scheduleSource = current ?? task;
+        const state = nextRunState(scheduleSource, completedAt);
         const completed: ScheduledTask = {
           ...scheduleSource,
+          enabled: scheduleSource.enabled && !state.ended,
           updatedAt: iso(completedAt),
           lastRunAt: startedAtIso,
-          nextRunAt: nextRunAt(scheduleSource, completedAt),
+          nextRunAt: state.nextRunAt,
           lastRunStatus,
           lastRunError,
           runCount: scheduleSource.runCount + 1,
@@ -900,6 +924,7 @@ export const layer = Layer.effect(
             id: task.id,
             completedAtIso: completed.updatedAt,
             nextRunAtIso: completed.nextRunAt,
+            ended: state.ended,
             status: lastRunStatus,
             error: lastRunError,
             startedAtIso,
@@ -943,16 +968,17 @@ export const layer = Layer.effect(
     const rescheduleMissedRun = Effect.fn("ScheduledTaskService.rescheduleMissedRun")(function* (
       task: ScheduledTask,
       now: DateTime.DateTime,
-      next: string | null,
+      state: RunState,
     ) {
       yield* Effect.logInfo("Skipping missed schedule task run", {
         taskId: task.id,
         missedRunAt: task.nextRunAt,
-        rescheduledTo: next,
+        rescheduledTo: state.nextRunAt,
       });
       yield* sql`
         UPDATE scheduled_tasks
-        SET next_run_at = ${next},
+        SET next_run_at = ${state.nextRunAt},
+            enabled = CASE WHEN ${state.ended ? 1 : 0} THEN 0 ELSE enabled END,
             updated_at = ${iso(now)}
         WHERE task_id = ${task.id}
       `.pipe(
@@ -975,15 +1001,15 @@ export const layer = Layer.effect(
         due,
         ({ task, dueAt }) =>
           Effect.suspend(() => {
-            if (isMissedFixedTimeRun(task.schedule, dueAt, now)) {
-              return rescheduleMissedRun(task, now, nextRunAt(task, now));
+            if (isMissedRun(task.schedule, dueAt, now)) {
+              return rescheduleMissedRun(task, now, nextRunState(task, now));
             }
             // A run that comes due outside its active hours, as after the
             // server was down, waits for the next window instead.
             const deferredTo = activeHoursDeferral(task.schedule, now);
             return deferredTo === null
               ? runTask(task, "scheduled")
-              : rescheduleMissedRun(task, now, iso(deferredTo));
+              : rescheduleMissedRun(task, now, { nextRunAt: iso(deferredTo), ended: false });
           }).pipe(
             Effect.catch((cause) =>
               Effect.logWarning("Scheduled task run failed", { taskId: task.id, cause }),
@@ -1006,11 +1032,13 @@ export const layer = Layer.effect(
           Effect.gen(function* () {
             const decoded = yield* Effect.result(decodeRow(row));
             if (Result.isSuccess(decoded)) {
+              const state = nextRunState(decoded.success, now);
               yield* sql`
                 UPDATE scheduled_tasks
                 SET last_run_status = 'failed',
                     last_run_error = 'Run was interrupted by a server restart.',
-                    next_run_at = ${nextRunAt(decoded.success, now)},
+                    next_run_at = ${state.nextRunAt},
+                    enabled = CASE WHEN ${state.ended ? 1 : 0} THEN 0 ELSE enabled END,
                     updated_at = ${iso(now)},
                     run_count = run_count + CASE WHEN EXISTS (
                       SELECT 1 FROM scheduled_task_webhook_pending
@@ -1123,6 +1151,15 @@ export const layer = Layer.effect(
               ),
             }
           : timerScheduleToStore(input.schedule, existingTask?.schedule);
+      // A time that has passed would never run. A finished one-off may still
+      // be re-saved unchanged and switched off, so its other fields stay editable.
+      if (
+        schedule.type === "once" &&
+        Date.parse(schedule.at) <= DateTime.toEpochMillis(now) &&
+        (input.enabled || existingTask === null || !isSameSchedule(existingTask.schedule, schedule))
+      ) {
+        return yield* taskError("A one-off task needs a time in the future.", { taskId: id });
+      }
       const webhook =
         input.schedule.type === "webhook"
           ? yield* Effect.gen(function* () {
@@ -1203,7 +1240,14 @@ export const layer = Layer.effect(
       const existing = yield* loadTask(input.id);
       if (existing.enabled === input.enabled) return { task: existing };
       const now = yield* localNow;
-      const next = nextRunAt({ enabled: input.enabled, schedule: existing.schedule }, now);
+      const state = nextRunState({ enabled: input.enabled, schedule: existing.schedule }, now);
+      if (state.ended) {
+        return yield* taskError(
+          "This one-off task's time has passed. Edit it and pick a new time to run it again.",
+          { taskId: input.id },
+        );
+      }
+      const next = state.nextRunAt;
       // RETURNING so a task deleted between the load and this UPDATE is a
       // visible not-found error, not a false success.
       const updated = yield* sql<{ task_id: string }>`

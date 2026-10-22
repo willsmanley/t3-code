@@ -1,4 +1,9 @@
-import { isValidTimeZone, type ScheduledTaskActiveHours } from "@t3tools/contracts";
+// @effect-diagnostics globalDate:off -- Form defaults follow the local calendar, like the pickers that edit them.
+import {
+  isValidTimeZone,
+  type ScheduledTask,
+  type ScheduledTaskActiveHours,
+} from "@t3tools/contracts";
 
 /** Blank means the environment's local time; undefined means the text is not a known zone, which blocks saving. */
 export function parseTimeZoneDraft(value: string): string | null | undefined {
@@ -61,4 +66,25 @@ export function parseActiveHoursDraft(
     return undefined;
   }
   return { start, end, ...(timeZone === null ? {} : { timeZone }) };
+}
+
+/**
+ * Why a switched-off task stopped by itself, or null when it is still on or
+ * someone paused it. A one-off "missed" its time when the server was down then.
+ */
+export function scheduledTaskEnding(
+  task: Pick<ScheduledTask, "enabled" | "schedule" | "lastRunAt">,
+  now: number,
+): "ran" | "missed" | null {
+  if (task.enabled || task.schedule.type !== "once") return null;
+  const at = Date.parse(task.schedule.at);
+  if (task.lastRunAt !== null && Date.parse(task.lastRunAt) >= at) return "ran";
+  return at <= now ? "missed" : null;
+}
+
+/** A starting time for a new one-off: the first whole hour at least an hour away. */
+export function defaultOneOffTime(now: number): Date {
+  const next = new Date(now + 60 * 60_000);
+  next.setMinutes(0, 0, 0);
+  return next.getTime() - now < 60 * 60_000 ? new Date(next.getTime() + 60 * 60_000) : next;
 }

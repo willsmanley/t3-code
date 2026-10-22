@@ -78,6 +78,12 @@ export function nextScheduledRunAt(
   from: DateTime.DateTime,
 ): DateTime.DateTime | null {
   if (schedule.type === "webhook") return null;
+  if (schedule.type === "once") {
+    const at = DateTime.make(schedule.at);
+    return Option.isSome(at) && DateTime.toEpochMillis(at.value) > DateTime.toEpochMillis(from)
+      ? at.value
+      : null;
+  }
   if (schedule.type === "interval") {
     // Persisted rows created before the one-minute floor remain readable, but
     // they must not retain their old high-frequency execution rate.
@@ -123,6 +129,9 @@ export function timerScheduleToStore(
   input: Exclude<ScheduledTaskUpsertSchedule, { readonly type: "webhook" }>,
   stored: ScheduledTaskSchedule | undefined,
 ): ScheduledTaskSchedule {
+  // Stored in UTC so every reader sees the same instant in the same form.
+  if (input.type === "once")
+    return { type: "once", at: DateTime.formatIso(DateTime.makeUnsafe(input.at)) };
   if (input.type === "interval") {
     const activeHours = kept(
       input.activeHours,
@@ -168,6 +177,7 @@ export function isSameSchedule(a: ScheduledTaskSchedule, b: ScheduledTaskSchedul
     );
   }
   if (a.type === "webhook") return b.type === "webhook";
+  if (a.type === "once") return b.type === "once" && Date.parse(a.at) === Date.parse(b.at);
   if (b.type !== "fixed_time") return false;
   // The contract accepts padded and unpadded hours ("9:00" and "09:00"), so
   // compare the parsed time — string equality would treat a format-only edit
@@ -184,33 +194,14 @@ export function isSameSchedule(a: ScheduledTaskSchedule, b: ScheduledTaskSchedul
   );
 }
 
-const MISSED_FIXED_TIME_GRACE_MS = 10 * MINUTE_MS;
+const MISSED_RUN_GRACE_MS = 10 * MINUTE_MS;
 
-export function isMissedFixedTimeRun(
+/** A fixed-time or one-off run this late, as after the server was down, is skipped; interval runs still run late. */
+export function isMissedRun(
   schedule: ScheduledTaskSchedule,
   dueAt: DateTime.DateTime,
   now: DateTime.DateTime,
 ): boolean {
-  if (schedule.type !== "fixed_time") return false;
-  return DateTime.toEpochMillis(now) - DateTime.toEpochMillis(dueAt) > MISSED_FIXED_TIME_GRACE_MS;
-}
-
-function describeSchedule(schedule: ScheduledTaskSchedule): string {
-  if (schedule.type === "webhook") return "On webhook";
-  if (schedule.type === "interval") {
-    const minutes = schedule.everyMs / MINUTE_MS;
-    if (Number.isInteger(minutes)) {
-      return `Every ${minutes === 1 ? "minute" : `${minutes} minutes`}`;
-    }
-    return `Every ${Math.round(schedule.everyMs / 1000)} seconds`;
-  }
-
-  const weekdayCount = schedule.weekdays?.length ?? 0;
-  const days =
-    weekdayCount === 0
-      ? "day"
-      : weekdayCount === 5 && schedule.weekdays?.every((day) => day >= 1 && day <= 5)
-        ? "weekday"
-        : "selected day";
-  return `At ${schedule.timeOfDay} every ${days}`;
+  if (schedule.type !== "fixed_time" && schedule.type !== "once") return false;
+  return DateTime.toEpochMillis(now) - DateTime.toEpochMillis(dueAt) > MISSED_RUN_GRACE_MS;
 }

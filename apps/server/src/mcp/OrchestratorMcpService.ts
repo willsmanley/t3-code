@@ -1909,11 +1909,18 @@ const make = Effect.gen(function* () {
           input.bindToCurrentThread === undefined
             ? existing.workspaceStrategy
             : scheduledTaskWorkspaceStrategy(input.bindToCurrentThread);
+        // A new time for a one-off turns it back on, as saving one in settings does.
+        const newOneOffTime =
+          input.schedule?.type === "once" &&
+          !(
+            existing.schedule.type === "once" &&
+            Date.parse(existing.schedule.at) === Date.parse(input.schedule.at)
+          );
         const upsertInput: ScheduledTaskUpsertInput = {
           id: existing.id,
           title: input.title ?? existing.title,
           prompt: input.prompt ?? existing.prompt,
-          enabled: input.enabled ?? existing.enabled,
+          enabled: input.enabled ?? (newOneOffTime || existing.enabled),
           schedule: input.schedule ?? existing.schedule,
           projectId: existing.projectId,
           threadId,

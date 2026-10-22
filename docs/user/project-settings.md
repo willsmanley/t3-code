@@ -90,6 +90,12 @@ the window instead of running. An end before the start makes a window that
 crosses midnight, such as 22:00 to 06:00. Active hours use the environment's
 clock unless you give them a time zone.
 
+Choose **Once** to run a task a single time. Afterwards it stays in the list,
+switched off and marked **Done**, so its last run stays visible. Pick a new
+time to run it again. If the environment is off at that time and comes back
+more than ten minutes late, the run is skipped and the task shows **Missed**,
+the same way a fixed-time task skips a run it missed.
+
 ## Webhook automations
 
 In **Settings → Scheduled tasks**, choose **On webhook**

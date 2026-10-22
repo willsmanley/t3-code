@@ -187,6 +187,17 @@ describe("timed schedule settings", () => {
   });
 });
 
+describe("one-off scheduled tasks", () => {
+  it("edits the time in this browser's zone and sends it as an instant", () => {
+    const at = "2026-07-03T14:00:00.000Z";
+    const draft = taskToDraft({ ...legacyTask, schedule: { type: "once", at } });
+    expect(draft.scheduleMode).toBe("once");
+    expect(new Date(draft.onceAt).toISOString()).toBe(at);
+    expect(scheduleFromDraft(draft)).toEqual({ type: "once", at });
+    expect(scheduleFromDraft({ ...draft, onceAt: "" })).toBeNull();
+  });
+});
+
 describe("webhook scheduled tasks", () => {
   const signature = { header: "x-signature", encoding: "base64", prefix: "" } as const;
   const webhookTask: ScheduledTask = {

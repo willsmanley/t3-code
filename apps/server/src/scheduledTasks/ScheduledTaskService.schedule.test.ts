@@ -1,7 +1,7 @@
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { expect, it } from "@effect/vitest";
-import { type ScheduledTask, ScheduledTaskUpsertInput } from "@t3tools/contracts";
+import { type ScheduledTask, ScheduledTaskUpsertInput, ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -170,21 +170,32 @@ it.effect("keeps the task list order when a toggle or edit rewrites updated_at",
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
 
-const serviceLayer = ScheduledTaskService.layer.pipe(
-  Layer.provide(
-    Layer.mergeAll(
-      NodeCrypto.layer,
-      Scheduler.layer,
-      Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
-      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
-        namedProjectsRoot: "/projects",
-        isScratchProject: () => Effect.succeed(false),
-      }),
-      Layer.mock(ThreadManagementService.ThreadManagementService)({}),
-      Layer.mock(SecretRequests.SecretRequests)({}),
+const serviceLayerWith = (
+  threadLaunch: Partial<ThreadLaunchService.ThreadLaunchService["Service"]> = {},
+) =>
+  ScheduledTaskService.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        NodeCrypto.layer,
+        Scheduler.layer,
+        Layer.mock(ThreadLaunchService.ThreadLaunchService)(threadLaunch),
+        Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+          namedProjectsRoot: "/projects",
+          isScratchProject: () => Effect.succeed(false),
+        }),
+        Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
+      ),
     ),
-  ),
-);
+  );
+
+const serviceLayer = serviceLayerWith();
+
+/** Launches succeed, so a due run completes. */
+const launchingServiceLayer = serviceLayerWith({
+  launch: () =>
+    Effect.succeed({ threadId: ThreadId.make("thread:scheduled"), resumed: false } as never),
+});
 
 const taskInput = (schedule: unknown, extra: Record<string, unknown> = {}) =>
   decodeUpsertInput({
@@ -201,13 +212,17 @@ const taskInput = (schedule: unknown, extra: Record<string, unknown> = {}) =>
     ...extra,
   });
 
-/** Pins the clock before the service starts, then runs `body` against it. */
+/**
+ * Pins the clock before the service starts: its scheduler polls every five
+ * seconds, so moving a fresh test clock to 2026 afterwards would replay decades of polls.
+ */
 const withService = <A, E>(
   at: string,
   body: Effect.Effect<A, E, ScheduledTaskService.ScheduledTaskService>,
+  layer = serviceLayer,
 ) =>
   TestClock.setTime(Date.parse(at)).pipe(
-    Effect.andThen(body.pipe(Effect.provide(serviceLayer))),
+    Effect.andThen(body.pipe(Effect.provide(layer))),
     Effect.provide(SqlitePersistence.layerMemory),
   );
 
@@ -275,6 +290,83 @@ it.effect("defers a run that comes due outside its active hours without running 
       yield* TestClock.adjust("6 seconds");
       const task = yield* deferred;
       expect(task.nextRunAt).toBe("2026-07-04T14:00:00.000Z");
+      expect(task.lastRunStatus).toBe("never");
+      expect(task.runCount).toBe(0);
+    }).pipe(Effect.provide(serviceLayer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("runs a one-off once, then keeps it listed and switched off until a new time", () =>
+  withService(
+    "2026-07-03T10:00:00.000Z",
+    Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      const once = { type: "once", at: "2026-07-03T05:02:00-05:00" };
+      const created = yield* service.upsert(yield* taskInput(once));
+      expect(created.task.schedule).toEqual({ type: "once", at: "2026-07-03T10:02:00.000Z" });
+      expect(created.task.nextRunAt).toBe("2026-07-03T10:02:00.000Z");
+
+      const ran = yield* awaitTask((task) => task.lastRunStatus === "succeeded");
+      yield* TestClock.adjust("3 minutes");
+      const finished = yield* ran;
+      expect(finished.enabled).toBe(false);
+      expect(finished.nextRunAt).toBeNull();
+      expect(finished.runCount).toBe(1);
+      expect(finished.lastRunAt).toBe("2026-07-03T10:02:00.000Z");
+
+      const resume = yield* service
+        .setEnabled({ id: created.task.id, enabled: true })
+        .pipe(Effect.flip);
+      expect(resume.message).toContain("time has passed");
+      // Unchanged and switched off, its other fields stay editable.
+      const renamed = yield* service.upsert(
+        yield* taskInput(once, { enabled: false, title: "Renamed" }),
+      );
+      expect(renamed.task.title).toBe("Renamed");
+      const stale = yield* service.upsert(yield* taskInput(once)).pipe(Effect.flip);
+      expect(stale.message).toBe("A one-off task needs a time in the future.");
+
+      const rearmed = yield* service.upsert(
+        yield* taskInput({ type: "once", at: "2026-07-03T12:00:00.000Z" }),
+      );
+      expect(rearmed.task.enabled).toBe(true);
+      expect(rearmed.task.nextRunAt).toBe("2026-07-03T12:00:00.000Z");
+      expect(rearmed.task.lastRunStatus).toBe("succeeded");
+    }),
+    launchingServiceLayer,
+  ),
+);
+
+it.effect("rejects a one-off time that has already passed", () =>
+  withService(
+    "2026-07-03T10:00:00.000Z",
+    Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      for (const enabled of [true, false]) {
+        const failure = yield* service
+          .upsert(yield* taskInput({ type: "once", at: "2026-07-03T09:59:00.000Z" }, { enabled }))
+          .pipe(Effect.flip);
+        expect(failure.message).toBe("A one-off task needs a time in the future.");
+      }
+      expect((yield* service.list()).tasks).toEqual([]);
+    }),
+  ),
+);
+
+it.effect("skips a one-off missed while the server was down and switches it off", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(Date.parse("2026-07-03T10:00:00.000Z"));
+    yield* Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      yield* service.upsert(yield* taskInput({ type: "once", at: "2026-07-03T10:02:00.000Z" }));
+    }).pipe(Effect.provide(serviceLayer));
+
+    yield* TestClock.setTime(Date.parse("2026-07-03T10:30:00.000Z"));
+    yield* Effect.gen(function* () {
+      const skipped = yield* awaitTask((task) => !task.enabled);
+      yield* TestClock.adjust("6 seconds");
+      const task = yield* skipped;
+      expect(task.nextRunAt).toBeNull();
       expect(task.lastRunStatus).toBe("never");
       expect(task.runCount).toBe(0);
     }).pipe(Effect.provide(serviceLayer));

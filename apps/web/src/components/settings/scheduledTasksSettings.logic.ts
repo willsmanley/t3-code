@@ -58,7 +58,7 @@ export function validateScheduledTasksSearch(raw: Record<string, unknown>) {
   };
 }
 
-export type ScheduleMode = "fixed" | "interval" | "webhook";
+export type ScheduleMode = "fixed" | "interval" | "once" | "webhook";
 export type WorkspaceMode = "root" | "worktree" | "existing_worktree";
 
 export interface DraftState {
@@ -73,6 +73,8 @@ export interface DraftState {
   readonly weekdays: ReadonlySet<number>;
   /** Blank runs at the environment's local time. */
   readonly timeZone: string;
+  /** A datetime-local value, read in this browser's time zone. */
+  readonly onceAt: string;
   readonly projectId: string;
   readonly threadId: string;
   readonly workspaceMode: WorkspaceMode;
@@ -117,6 +119,8 @@ export function scheduleDraftErrors(draft: DraftState) {
         description: "Pick a time zone such as America/Chicago, or leave it blank.",
       },
     ];
+  if (draft.scheduleMode === "once" && oneOffTime(draft.onceAt) === null)
+    return [{ title: "Pick a time", description: "Choose the date and time to run the task." }];
   if (draft.scheduleMode === "interval" && parseActiveHoursDraft(draft.activeHours) === undefined)
     return [
       {
@@ -174,6 +178,19 @@ export function webhookDeliveryLabel(delivery: {
   return labels[delivery.outcome] ?? delivery.outcome.replaceAll("_", " ");
 }
 
+function oneOffTime(value: string): string | null {
+  const time = new Date(value);
+  return Number.isFinite(time.getTime()) ? time.toISOString() : null;
+}
+
+/** The datetime-local value for an instant, in this browser's time zone. */
+export function localDateTimeInputValue(value: string | Date): string {
+  const time = typeof value === "string" ? new Date(value) : value;
+  if (!Number.isFinite(time.getTime())) return "";
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${time.getFullYear()}-${pad(time.getMonth() + 1)}-${pad(time.getDate())}T${pad(time.getHours())}:${pad(time.getMinutes())}`;
+}
+
 export function scheduleFromDraft(draft: DraftState): ScheduledTaskUpsertSchedule | null {
   if (scheduleDraftErrors(draft).length > 0) return null;
   if (draft.scheduleMode === "webhook") {
@@ -213,6 +230,10 @@ export function scheduleFromDraft(draft: DraftState): ScheduledTaskUpsertSchedul
         : {}),
     };
   }
+  if (draft.scheduleMode === "once") {
+    const at = oneOffTime(draft.onceAt);
+    return at === null ? null : { type: "once", at };
+  }
   if (draft.scheduleMode === "interval") {
     const everyMs = Math.round(Number(draft.intervalMinutes) * 60_000);
     return {
@@ -243,13 +264,16 @@ export function taskToDraft(task: ScheduledTask): DraftState {
     prompt: task.prompt,
     enabled: task.enabled,
     scheduleMode:
-      schedule.type === "interval" ? "interval" : schedule.type === "webhook" ? "webhook" : "fixed",
+      schedule.type === "interval" || schedule.type === "once" || schedule.type === "webhook"
+        ? schedule.type
+        : "fixed",
     intervalMinutes:
       schedule.type === "interval" ? String(Math.max(1, schedule.everyMs / 60_000)) : "15",
     activeHours: activeHoursDraft(schedule.type === "interval" ? schedule.activeHours : undefined),
     timeOfDay: schedule.type === "fixed_time" ? schedule.timeOfDay : "09:00",
     weekdays,
     timeZone: schedule.type === "fixed_time" ? (schedule.timeZone ?? "") : "",
+    onceAt: schedule.type === "once" ? localDateTimeInputValue(schedule.at) : "",
     projectId: task.projectId,
     threadId: task.threadId ?? "",
     workspaceMode: task.workspaceStrategy.type,

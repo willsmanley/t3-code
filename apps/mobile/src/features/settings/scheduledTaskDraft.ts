@@ -1,4 +1,4 @@
-import { isWebhookDedupeTemplate } from "@t3tools/contracts";
+import { isAbsoluteDateTime, isWebhookDedupeTemplate } from "@t3tools/contracts";
 import type {
   ModelSelection,
   ServerConfig,
@@ -57,13 +57,15 @@ export function scheduledTaskDefaultModel(
 }
 
 export type ScheduleDraft = {
-  readonly mode: "fixed_time" | "interval" | "webhook";
+  readonly mode: "fixed_time" | "interval" | "once" | "webhook";
   readonly timeOfDay: string;
   readonly weekdays: ReadonlyArray<number>;
   /** Blank runs at the environment's local time. */
   readonly timeZone: string;
   readonly intervalMinutes: string;
   readonly activeHours: ActiveHoursDraft;
+  /** ISO time of a one-off run, or blank before one is picked. */
+  readonly onceAt: string;
   readonly signature: ScheduledTaskWebhookSignature | null;
   readonly maxDeliveryAgeMinutes: string;
   readonly replayKey: string;
@@ -81,6 +83,7 @@ export const DEFAULT_SCHEDULE: ScheduleDraft = {
   timeZone: "",
   intervalMinutes: "15",
   activeHours: activeHoursDraft(undefined),
+  onceAt: "",
   signature: null,
   maxDeliveryAgeMinutes: "",
   replayKey: "",
@@ -108,6 +111,8 @@ export function scheduleDraftForTask(task: Pick<ScheduledTask, "schedule">): Sch
         intervalMinutes: String(Math.max(1, task.schedule.everyMs / 60_000)),
         activeHours: activeHoursDraft(task.schedule.activeHours),
       };
+    case "once":
+      return { ...DEFAULT_SCHEDULE, mode: "once", onceAt: task.schedule.at };
     case "webhook":
       return {
         ...DEFAULT_SCHEDULE,
@@ -175,6 +180,9 @@ export function scheduleFromDraft(draft: ScheduleDraft): ScheduledTaskUpsertSche
         : {}),
     };
   }
+  if (draft.mode === "once") {
+    return isAbsoluteDateTime(draft.onceAt) ? { type: "once", at: draft.onceAt } : null;
+  }
   if (draft.mode === "interval") {
     const minutes = Number(draft.intervalMinutes);
     const everyMs = Math.round(minutes * 60_000);
@@ -234,6 +242,7 @@ function draftSignature(draft: ScheduledTaskDraft): string {
     draft.schedule.timeZone,
     draft.schedule.intervalMinutes,
     draft.schedule.activeHours,
+    draft.schedule.onceAt,
     draft.schedule.maxDeliveryAgeMinutes,
     draft.schedule.replayKey,
     draft.schedule.coalesceKey,

@@ -40,6 +40,16 @@ describe("ScheduledTaskSchedule", () => {
     });
   });
 
+  it("takes a one-off time only with Z or an offset", () => {
+    expect(decodeUpsertSchedule({ type: "once", at: "2026-10-23T09:00:00-05:00" })).toEqual({
+      type: "once",
+      at: "2026-10-23T09:00:00-05:00",
+    });
+    for (const at of ["2026-10-23T09:00:00", "2026-10-23", "tomorrow", "2026-13-23T09:00:00Z"]) {
+      expect(() => decodeUpsertSchedule({ type: "once", at })).toThrow();
+    }
+  });
+
   it("accepts active hours that cross midnight but not an empty window", () => {
     const interval = { type: "interval", everyMs: 3_600_000 };
     const night = { start: "22:00", end: "06:00", timeZone: "America/Chicago" };

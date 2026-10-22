@@ -42,6 +42,22 @@ const WritableTimeZone = ScheduledTaskTimeZone.check(
   Schema.makeFilter((value) => isValidTimeZone(value) || `Unknown time zone: ${value}`),
 );
 
+const ABSOLUTE_DATE_TIME =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/i;
+
+/** An ISO date-time with Z or an offset, so it names the same instant on every machine. */
+export function isAbsoluteDateTime(value: string): boolean {
+  return ABSOLUTE_DATE_TIME.test(value) && Number.isFinite(Date.parse(value));
+}
+
+const WritableInstant = TrimmedNonEmptyString.check(
+  Schema.makeFilter(
+    (value) =>
+      isAbsoluteDateTime(value) ||
+      "Use an ISO date-time with Z or an offset, such as 2026-10-23T14:00:00Z.",
+  ),
+);
+
 export const MIN_SCHEDULED_TASK_INTERVAL_MS = 60_000;
 
 const ScheduledTaskIntervalMs = Schema.Int.check(Schema.isGreaterThan(0)).annotate({
@@ -129,6 +145,26 @@ const ScheduledTaskUpsertFixedTimeSchedule = Schema.Struct({
   description:
     "Run at a fixed wall-clock time on selected weekdays, in timeZone or the environment's local time.",
 });
+
+const ScheduledTaskOnceType = Schema.Literal("once").annotate({
+  description: "Run one time.",
+});
+
+const OnceDescription =
+  "Run once at a set time. Afterwards the task stays listed, switched off, until a new time is saved.";
+
+const ScheduledTaskOnceSchedule = Schema.Struct({
+  type: ScheduledTaskOnceType,
+  at: IsoDateTime,
+}).annotate({ description: OnceDescription });
+
+const ScheduledTaskUpsertOnceSchedule = Schema.Struct({
+  type: ScheduledTaskOnceType,
+  at: WritableInstant.annotate({
+    description:
+      "When to run, as an ISO date-time with Z or an offset, such as 2026-10-23T14:00:00Z. Must be in the future.",
+  }),
+}).annotate({ description: OnceDescription });
 
 const ScheduledTaskWebhookSignatureFields = {
   header: TrimmedNonEmptyString.annotate({
@@ -268,10 +304,11 @@ const ScheduledTaskUpsertWebhookSchedule = Schema.Struct({
 export const ScheduledTaskSchedule = Schema.Union([
   ScheduledTaskIntervalSchedule,
   ScheduledTaskFixedTimeSchedule,
+  ScheduledTaskOnceSchedule,
   ScheduledTaskWebhookSchedule,
 ]).annotate({
   description:
-    "Structured trigger. Pass an object with type 'interval', 'fixed_time' or 'webhook'.",
+    "Structured trigger. Pass an object with type 'interval', 'fixed_time', 'once' or 'webhook'.",
 });
 export type ScheduledTaskSchedule = typeof ScheduledTaskSchedule.Type;
 
@@ -292,9 +329,11 @@ export const ScheduledTaskUpsertSchedule = Schema.Union([
     description: "Run repeatedly after a fixed number of milliseconds.",
   }),
   ScheduledTaskUpsertFixedTimeSchedule,
+  ScheduledTaskUpsertOnceSchedule,
   ScheduledTaskUpsertWebhookSchedule,
 ]).annotate({
-  description: "Writable trigger. Pass an object with type 'interval', 'fixed_time' or 'webhook'.",
+  description:
+    "Writable trigger. Pass an object with type 'interval', 'fixed_time', 'once' or 'webhook'.",
 });
 export type ScheduledTaskUpsertSchedule = typeof ScheduledTaskUpsertSchedule.Type;
 

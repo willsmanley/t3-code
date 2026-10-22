@@ -52,9 +52,11 @@ import { SegmentedControl } from "../../components/ui/SegmentedControl";
 import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
 import { webhookAddress } from "@t3tools/client-runtime/webhook-address";
 import {
+  defaultOneOffTime,
   localTimeZone,
   parseActiveHoursDraft,
   parseTimeZoneDraft,
+  scheduledTaskEnding,
 } from "@t3tools/client-runtime/scheduled-task-schedule";
 import { tryCopyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { usePreparedConnection } from "../../state/session";
@@ -109,6 +111,7 @@ const DAYS = [
 
 function describeSchedule(task: ScheduledTask): string {
   if (task.schedule.type === "webhook") return "On webhook";
+  if (task.schedule.type === "once") return `Once, ${formatDateTime(new Date(task.schedule.at))}`;
   if (task.schedule.type === "interval") {
     const every = formatScheduledTaskInterval(task.schedule.everyMs);
     const window = task.schedule.activeHours;
@@ -119,6 +122,15 @@ function describeSchedule(task: ScheduledTask): string {
   const days = task.schedule.weekdays?.length ? repeatLabel(task.schedule.weekdays) : "Every day";
   const zone = task.schedule.timeZone ? ` (${task.schedule.timeZone})` : "";
   return `${days} at ${formatTime(task.schedule.timeOfDay)}${zone}`;
+}
+
+function formatDateTime(value: Date): string {
+  return value.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
+
+function stoppedLabel(task: ScheduledTask, now: number): string {
+  const ending = scheduledTaskEnding(task, now);
+  return ending === "ran" ? "Done" : ending === "missed" ? "Missed" : "Paused";
 }
 
 function formatTime(value: string): string {
@@ -247,6 +259,43 @@ function TimeOfDayRow(props: {
         )
       }
     />
+  );
+}
+
+/** Date and time rows for a one-off run, in this phone's time zone. */
+function OneOffTimeRows(props: {
+  readonly value: string;
+  readonly onChange: (value: string) => void;
+}) {
+  const at = new Date(props.value);
+  const update = (change: (next: Date) => void) => {
+    const next = new Date(at);
+    change(next);
+    props.onChange(next.toISOString());
+  };
+  return (
+    <>
+      <DateTimePickerRow
+        label="Date"
+        valueLabel={at.toLocaleDateString([], { dateStyle: "medium" })}
+        mode="date"
+        value={at}
+        onChange={(picked) =>
+          update((next) =>
+            next.setFullYear(picked.getFullYear(), picked.getMonth(), picked.getDate()),
+          )
+        }
+      />
+      <DateTimePickerRow
+        label="Time"
+        valueLabel={at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+        mode="time"
+        value={at}
+        onChange={(picked) =>
+          update((next) => next.setHours(picked.getHours(), picked.getMinutes(), 0, 0))
+        }
+      />
+    </>
   );
 }
 
@@ -1045,6 +1094,7 @@ function TaskForm({
               options={[
                 { value: "fixed_time", label: "At a time" },
                 { value: "interval", label: "Interval" },
+                { value: "once", label: "Once" },
                 { value: "webhook", label: "On webhook" },
               ]}
               selected={draft.schedule.mode}
@@ -1055,7 +1105,14 @@ function TaskForm({
                     mode === "webhook" && !draft.prompt.trim()
                       ? DEFAULT_WEBHOOK_PROMPT
                       : draft.prompt,
-                  schedule: { ...draft.schedule, mode },
+                  schedule: {
+                    ...draft.schedule,
+                    mode,
+                    onceAt:
+                      mode === "once" && !draft.schedule.onceAt
+                        ? defaultOneOffTime(Date.now()).toISOString()
+                        : draft.schedule.onceAt,
+                  },
                 });
               }}
             />
@@ -1121,6 +1178,14 @@ function TaskForm({
                 }
               />
             </>
+          ) : draft.schedule.mode === "once" ? (
+            <OneOffTimeRows
+              value={draft.schedule.onceAt}
+              // A new time re-arms a one-off that already ran.
+              onChange={(onceAt) =>
+                setDraft({ ...draft, enabled: true, schedule: { ...draft.schedule, onceAt } })
+              }
+            />
           ) : draft.schedule.mode === "webhook" ? (
             <>
               <WebhookScheduleDetails
@@ -1292,6 +1357,12 @@ function TaskForm({
             />
           </View>
         </SettingsSection>
+        {draft.schedule.mode === "once" ? (
+          <Text className="px-2 text-sm text-foreground-muted">
+            The time is in this phone's time zone, {localTimeZone()}. After the task runs, it stays
+            here switched off; pick a new time to run it again.
+          </Text>
+        ) : null}
         {draft.schedule.mode === "fixed_time" ? (
           <Text className="px-2 text-sm text-foreground-muted">
             Enter an IANA time zone such as {localTimeZone()}, this phone's. Left blank, the time
@@ -1494,7 +1565,7 @@ function EnvironmentTasks({
               <Text className="text-sm text-foreground-muted" numberOfLines={2}>
                 {describeSchedule(task)}
                 {!task.enabled
-                  ? " · Paused"
+                  ? ` · ${stoppedLabel(task, now)}`
                   : task.nextRunAt
                     ? ` · ${formatNextScheduledTaskRun(task.nextRunAt, now)}`
                     : ""}

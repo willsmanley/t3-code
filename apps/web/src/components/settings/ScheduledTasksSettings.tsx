@@ -58,6 +58,9 @@ import { requestConfirmDialog } from "../../confirmDialog";
 import { webhookAddress } from "@t3tools/client-runtime/webhook-address";
 import {
   activeHoursDraft,
+  defaultOneOffTime,
+  localTimeZone,
+  scheduledTaskEnding,
   timeZoneSuggestions,
   type ActiveHoursDraft,
 } from "@t3tools/client-runtime/scheduled-task-schedule";
@@ -88,6 +91,7 @@ import {
   scheduleDraftErrors,
   webhookDeliveryLabel,
   matchesScheduledTaskScope,
+  localDateTimeInputValue,
   scheduleFromDraft,
   scheduledTaskDefaultModel,
   taskToDraft,
@@ -146,6 +150,7 @@ const EMPTY_DRAFT: DraftState = {
   timeOfDay: "09:00",
   weekdays: new Set([1, 2, 3, 4, 5]),
   timeZone: "",
+  onceAt: "",
   projectId: "",
   threadId: "",
   workspaceMode: "worktree",
@@ -382,6 +387,10 @@ function splitModelKey(value: string): ModelSelection | null {
 
 export function scheduleLabel(schedule: ScheduledTaskSchedule): string {
   if (schedule.type === "webhook") return "On webhook";
+  if (schedule.type === "once") {
+    const at = new Date(schedule.at);
+    return `Once, ${at.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`;
+  }
   if (schedule.type === "interval") {
     const minutes = schedule.everyMs / 60_000;
     const every = Number.isInteger(minutes)
@@ -427,6 +436,17 @@ function relativeLabel(value: string | null, nowMs: number): string {
 export function ScheduledRelativeLabel(props: { value: string | null }) {
   const nowMinute = useNowMinute();
   return relativeLabel(props.value, Date.parse(`${nowMinute}:00.000Z`));
+}
+
+/** A switched-off task: paused by someone, or finished by itself. */
+export function ScheduledStoppedLabel(props: {
+  readonly task: ScheduledTask;
+  readonly lowercase?: boolean;
+}) {
+  const nowMinute = useNowMinute();
+  const ending = scheduledTaskEnding(props.task, Date.parse(`${nowMinute}:00.000Z`));
+  const label = ending === "ran" ? "Done" : ending === "missed" ? "Missed" : "Paused";
+  return props.lowercase ? label.toLowerCase() : label;
 }
 
 function deliveryOutcomeVariant(outcome: string) {
@@ -815,7 +835,7 @@ function ScheduledTaskRow({
           <span>
             {scheduleLabel(task.schedule)} ·{" "}
             {!task.enabled ? (
-              "Paused"
+              <ScheduledStoppedLabel task={task} />
             ) : isWebhook ? (
               "Listening"
             ) : task.nextRunAt ? (
@@ -1370,7 +1390,8 @@ function ScheduledTaskEditorForm({
       <DialogHeader>
         <DialogTitle>{draft.editingId ? "Edit task" : "New task"}</DialogTitle>
         <DialogDescription>
-          Run a prompt automatically on an interval, at a fixed time, or when a webhook is called.
+          Run a prompt automatically on an interval, at a fixed time, once, or when a webhook is
+          called.
         </DialogDescription>
       </DialogHeader>
 
@@ -1593,10 +1614,19 @@ function ScheduledTaskEditorForm({
                 value={[draft.scheduleMode]}
                 onValueChange={(values) => {
                   const mode = values[0] as ScheduleMode | undefined;
-                  if (mode === "fixed" || mode === "interval" || mode === "webhook")
+                  if (
+                    mode === "fixed" ||
+                    mode === "interval" ||
+                    mode === "once" ||
+                    mode === "webhook"
+                  )
                     setDraft((current) => ({
                       ...current,
                       scheduleMode: mode,
+                      onceAt:
+                        mode === "once" && !current.onceAt
+                          ? localDateTimeInputValue(defaultOneOffTime(Date.now()))
+                          : current.onceAt,
                       prompt:
                         mode === "webhook" && !current.prompt.trim()
                           ? DEFAULT_WEBHOOK_PROMPT
@@ -1606,6 +1636,7 @@ function ScheduledTaskEditorForm({
               >
                 <Toggle value="fixed">At a time</Toggle>
                 <Toggle value="interval">Every interval</Toggle>
+                <Toggle value="once">Once</Toggle>
                 <Toggle value="webhook">On webhook</Toggle>
               </ToggleGroup>
             </div>
@@ -1779,6 +1810,26 @@ function ScheduledTaskEditorForm({
                     </Field>
                   </div>
                 ) : null}
+              </div>
+            ) : draft.scheduleMode === "once" ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Label htmlFor="scheduled-task-once-at">Run at</Label>
+                <Input
+                  type="datetime-local"
+                  id="scheduled-task-once-at"
+                  nativeInput
+                  className="w-56"
+                  value={draft.onceAt}
+                  // A new time re-arms a one-off that already ran.
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      onceAt: event.target.value,
+                      enabled: true,
+                    }))
+                  }
+                />
+                <span className="text-xs text-muted-foreground">{localTimeZone()}</span>
               </div>
             ) : draft.scheduleMode === "fixed" ? (
               <div className="flex flex-wrap items-center gap-3">

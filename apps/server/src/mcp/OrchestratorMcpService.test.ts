@@ -6,9 +6,11 @@ import {
   MessageId,
   NodeId,
   type OrchestratorMcpCapabilitiesResult,
+  type OrchestratorMcpUpdateScheduledTaskInput,
   OrchestratorMcpTarget,
   type OrchestrationV2ThreadShell,
   type ScheduledTask,
+  type ScheduledTaskUpsertInput,
   ScheduledTaskId,
   ProjectId,
   ProviderDriverKind,
@@ -2212,6 +2214,53 @@ describe("OrchestratorMcpService provider resolution", () => {
           .pipe(Effect.flip);
         assert.equal(error.code, "runtime_mode_escalation_denied");
         assert.equal(yield* Ref.get(upserted), 0);
+      }),
+    );
+
+    it.effect("turns a finished one-off back on when an update gives it a new time", () =>
+      Effect.gen(function* () {
+        const { webhook: _webhook, ...base } = task({});
+        const finished: ScheduledTask = {
+          ...base,
+          enabled: false,
+          schedule: { type: "once", at: "2026-10-05T01:00:00.000Z" },
+        };
+        const saved = yield* Ref.make<ScheduledTaskUpsertInput | null>(null);
+        const mcp = yield* OrchestratorMcpService.OrchestratorMcpService.pipe(
+          Effect.provide(
+            layerOrchestratorService.pipe(
+              Layer.provide(
+                Layer.mergeAll(
+                  NodeServices.layer,
+                  Layer.mock(ThreadManagementService.ThreadManagementService)({
+                    getThreadShell: () => Effect.succeed(null),
+                  }),
+                  ServerSettings.layerTest(),
+                  Layer.mock(ProviderRegistry.ProviderRegistry)({
+                    getProviders: Effect.succeed([]),
+                  }),
+                  Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({
+                    list: () => Effect.succeed([]),
+                  }),
+                  Layer.mock(ProjectService.ProjectService)({}),
+                  Layer.mock(SecretRequests.SecretRequests)({}),
+                  Layer.mock(ScheduledTaskService.ScheduledTaskService)({
+                    list: () => Effect.succeed({ tasks: [finished] }),
+                    upsert: (input) => Ref.set(saved, input).pipe(Effect.as({ task: finished })),
+                  }),
+                ),
+              ),
+            ),
+          ),
+        );
+        const update = (input: Omit<OrchestratorMcpUpdateScheduledTaskInput, "scheduledTaskId">) =>
+          mcp
+            .updateScheduledTask(supervisedClient, { scheduledTaskId: finished.id, ...input })
+            .pipe(Effect.andThen(Ref.get(saved)));
+        const later = { type: "once", at: "2026-10-06T01:00:00.000Z" } as const;
+        assert.equal((yield* update({ schedule: later }))?.enabled, true);
+        assert.equal((yield* update({ schedule: later, enabled: false }))?.enabled, false);
+        assert.equal((yield* update({ prompt: "Something else" }))?.enabled, false);
       }),
     );
 

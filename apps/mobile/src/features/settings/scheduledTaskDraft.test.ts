@@ -118,6 +118,14 @@ describe("scheduleFromDraft", () => {
     });
   });
 
+  it("keeps a one-off time and refuses a blank one", () => {
+    const at = "2026-07-03T14:00:00.000Z";
+    const draft = scheduleDraftForTask({ schedule: { type: "once", at } });
+    expect(draft.mode).toBe("once");
+    expect(scheduleFromDraft(draft)).toEqual({ type: "once", at });
+    expect(scheduleFromDraft({ ...draft, onceAt: "" })).toBeNull();
+  });
+
   it("keeps an interval's active hours and refuses an empty window", () => {
     const activeHours = { start: "22:00", end: "06:00", timeZone: "America/Chicago" };
     const draft = scheduleDraftForTask({
