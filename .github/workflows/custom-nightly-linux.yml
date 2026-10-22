@@ -15,7 +15,7 @@ permissions:
   contents: write
 
 env:
-  UPDATE_REPOSITORY: willsmanley/t3code-codex-sidebar
+  UPDATE_REPOSITORY: willsmanley/t3-code
   # These are the public production client identifiers used by the upstream
   # release. They contain no server-side credentials.
   T3CODE_CLERK_PUBLISHABLE_KEY: pk_live_Y2xlcmsudDMuY29kZXMk
@@ -46,8 +46,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      T3CODE_DESKTOP_UPDATE_REPOSITORY: willsmanley/t3code-codex-sidebar
-      T3CODE_RELEASE_BASE_URL: https://github.com/willsmanley/t3code-codex-sidebar/releases/download
+      T3CODE_DESKTOP_UPDATE_REPOSITORY: willsmanley/t3-code
+      T3CODE_RELEASE_BASE_URL: https://github.com/willsmanley/t3-code/releases/download
       T3CODE_TELEMETRY_CHANNEL: dev
     steps:
       - name: Checkout synced commit
