@@ -6,11 +6,6 @@ on:
     # default-branch changes before producing the next desktop build.
     - cron: "23 03 * * *"
   workflow_dispatch:
-    inputs:
-      sync_upstream:
-        description: Merge upstream before building (disable to release the current fork revision)
-        type: boolean
-        default: true
 
 concurrency:
   group: custom-nightly-linux
@@ -40,26 +35,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Merge upstream
-        if: github.event_name != 'workflow_dispatch' || inputs.sync_upstream
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "t3code-nightly[bot]"
-          git config user.email "t3code-nightly[bot]@users.noreply.github.com"
-          git remote add upstream https://github.com/pingdotgg/t3code.git
-          git fetch --no-tags upstream main
-          # Keep the fork's intentional sidebar surface when upstream changes
-          # the same files so a conflict cannot skip the nightly runtime.
-          if ! git merge -X ours --no-edit upstream/main; then
-            git merge --abort || true
-            echo "Upstream sync conflicted with the sidebar customization." >&2
-            echo "Resolve the conflict on main, then rerun this workflow." >&2
-            exit 1
-          fi
-          # Build the merge result directly. GITHUB_TOKEN cannot push a merge
-          # that changes workflow files without the separate `workflow` scope.
-
       - name: Export synced commit
         id: ref
         shell: bash
@@ -80,6 +55,18 @@ jobs:
         with:
           ref: ${{ needs.sync.outputs.ref }}
           fetch-depth: 0
+
+      - name: Merge upstream for this build
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "t3code-nightly[bot]"
+          git config user.email "t3code-nightly[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/pingdotgg/t3code.git
+          git fetch --no-tags upstream main
+          # Keep the fork's intentional sidebar surface when upstream changes
+          # the same files so a conflict cannot skip the nightly runtime.
+          git merge -X ours --no-edit upstream/main
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -104,15 +91,15 @@ jobs:
         shell: bash
         env:
           NIGHTLY_DATE: ${{ github.run_started_at }}
-          NIGHTLY_SHA: ${{ needs.sync.outputs.ref }}
           NIGHTLY_RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
           date_utc="$(date -u -d "$NIGHTLY_DATE" +%Y%m%d)"
+          nightly_sha="$(git rev-parse HEAD)"
           node scripts/resolve-nightly-release.ts \
             --date "$date_utc" \
             --run-number "$NIGHTLY_RUN_NUMBER" \
-            --sha "$NIGHTLY_SHA" \
+            --sha "$nightly_sha" \
             --github-output
           nightly_version="$(sed -n 's/^version=//p' "$GITHUB_OUTPUT" | tail -n 1)"
           test -n "$nightly_version"
