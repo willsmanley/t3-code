@@ -17,6 +17,7 @@ import * as PlatformError from "effect/PlatformError";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/process";
 import { expect } from "vite-plus/test";
 import type {
@@ -1076,6 +1077,62 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     }),
   );
 
+  it.effect("branch PR lookup notifies linked threads when draft status changes", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/draft-status"]);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "feature/draft-status"]);
+      const drafts = [false, true, true, false, false, true];
+      const pullRequest = {
+        number: 1,
+        title: "Draft status",
+        url: "https://github.com/pingdotgg/codething-mvp/pull/1",
+        baseRefName: "main",
+        headRefName: "feature/draft-status",
+        state: "OPEN",
+      };
+      const { manager } = yield* makeManager({
+        ghScenario: {
+          prListSequence: [
+            ...drafts.map((isDraft) => encodeCliJson([{ ...pullRequest, isDraft }])),
+            encodeCliJson([
+              {
+                ...pullRequest,
+                number: 2,
+                url: "https://github.com/pingdotgg/codething-mvp/pull/2",
+                state: "MERGED",
+              },
+            ]),
+          ],
+        },
+      });
+      const changes = yield* manager.subscribePullRequestStateChanges;
+      for (const isDraft of drafts) {
+        const pr = yield* manager.branchPullRequest(
+          { cwd: repoDir, branch: "feature/draft-status" },
+          { refresh: true },
+        );
+        expect(pr?.isDraft === true).toBe(isDraft);
+      }
+      // A different PR ends collection without waiting on a background stream consumer.
+      yield* manager.branchPullRequest(
+        { cwd: repoDir, branch: "feature/draft-status" },
+        { refresh: true },
+      );
+      const events = yield* Stream.runCollect(
+        changes.pipe(Stream.takeUntil((event) => event.number === 2, { excludeLast: true })),
+      );
+      expect(events).toEqual([
+        { host: "github.com", repository: "pingdotgg/codething-mvp", number: 1 },
+        { host: "github.com", repository: "pingdotgg/codething-mvp", number: 1 },
+        { host: "github.com", repository: "pingdotgg/codething-mvp", number: 1 },
+      ]);
+    }),
+  );
+
   it.effect("branch PR lookup uses a saved tracked branch without changing checkout", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
@@ -1166,6 +1223,22 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         mergedAt: "2026-04-07T15:00:00Z",
         updatedAt: "2026-04-08T15:00:00.000Z",
       });
+    }),
+  );
+
+  it.effect("branch PR lookup finds nothing and runs no git while source control is off", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const gitCommands: string[] = [];
+      const { manager, ghCalls } = yield* makeManager({
+        gitCommands,
+        serverSettings: { sourceControlEnabled: false },
+      });
+
+      expect(yield* manager.branchPullRequest({ cwd: repoDir, branch: "main" })).toBeNull();
+      expect(gitCommands).toEqual([]);
+      expect(ghCalls).toEqual([]);
     }),
   );
 
@@ -1785,6 +1858,11 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       "gitlab.example.com/group/subgroup/repository",
     ],
     ["https://bitbucket.org/team/repository/pull-requests/42", "bitbucket.org/team/repository"],
+    ["https://codeberg.org/team/repository/pulls/42", "codeberg.org/team/repository"],
+    [
+      "http://code.example:3000/forgejo/team/repository/pulls/42/files",
+      "code.example/forgejo/team/repository",
+    ],
     [
       "https://dev.azure.com/org/project/_git/repository/pullrequest/42",
       "dev.azure.com/org/project/_git/repository",
@@ -4003,6 +4081,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           VcsDriverRegistry.layer.pipe(
             Layer.provide(VcsProjectConfig.layer),
             Layer.provide(VcsProcess.layer),
+            Layer.provide(ServerSettings.layerTest()),
           ),
         );
         const handle = yield* Context.get(registry, VcsDriverRegistry.VcsDriverRegistry).resolve({

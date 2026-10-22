@@ -10,6 +10,14 @@ rebases, the files Git brought in are left out. A file stays in the list when th
 committed it, or fixed a conflict in it. Use the branch comparison to review everything that changed
 against your base branch. Restore still returns the complete saved workspace.
 
+## Turn off Git integration
+
+If you manage Git yourself, turn off **Settings → Source Control → Git integration**. T3 Code then
+treats every folder on that server as having no Git repository. It stops saving checkpoints after
+turns, checking Git status, and showing diffs, branches, and pull request controls for projects.
+Worktree threads and automatic worktree cleanup are unavailable while it is off. The change applies
+right away to every project on that server.
+
 ## Connect an account
 
 Install Git and configure authentication on the machine running your T3 Code server. For a remote
@@ -116,7 +124,7 @@ kept in the server's secret store, applies right away, and is used before `CAFE_
 sent to `git.cafe`; `CAFE_TOKEN` follows `CAFE_HOST` if you set it. Repositories on
 `staging.git.cafe` need their own login with `--host https://staging.git.cafe/api`.
 
-Line comments, reviewer requests, and labels are not available for GitCafe pull requests yet.
+Line comments are not available for GitCafe pull requests yet.
 Merging a stack lands it through GitCafe, and updating a branch restacks the layers above it.
 
 ## Start, clone, or publish a project
@@ -134,7 +142,9 @@ Use **Add Project** in the command palette (`Cmd/Ctrl+K`) to clone a repository.
 provider or paste a Git URL, then choose where to save it. The project opens right away while the
 clone runs in the background: you can write your first prompt, and sending waits until the files
 are in place. A toast tracks progress and lets you cancel; if the clone fails, retry it from the
-toast or from the banner above the composer.
+toast or from the banner above the composer. When the host refuses the machine's SSH key, T3 Code
+clones over HTTPS with Git's credentials for that host instead, and the project's remote uses the
+HTTPS URL.
 
 For a local Git repository without a remote, **Publish Repository** creates a hosted repository,
 adds it as `origin`, and pushes your commits. If there are no commits yet, it creates the remote;

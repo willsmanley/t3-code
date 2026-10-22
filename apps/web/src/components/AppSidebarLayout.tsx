@@ -43,6 +43,7 @@ import ThreadSidebar from "./Sidebar";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { SidebarBrandWidthProbe, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { MainAppLocationTracker } from "./sidebar/mainAppLocation";
+import type { SidebarRouteReveal } from "./sidebar/routeReveal";
 import { useSidebarStageBackdropVariant } from "./SidebarStageBackdrop";
 import { useProjects } from "../state/entities";
 import {
@@ -219,7 +220,8 @@ function routePanelsOpen(routeThreadRef: ReturnType<typeof useThreadRouteRef>) {
   };
 }
 
-function NavigationHistoryShortcuts() {
+export function NavigationHistoryShortcuts() {
+  const usagePageOpen = useLocation({ select: (location) => location.pathname === "/usage" });
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const routeThreadRef = useThreadRouteRef();
 
@@ -239,6 +241,7 @@ function NavigationHistoryShortcuts() {
           ...routePanelsOpen(routeThreadRef),
           editableFocus: isEditableFocused(event.target),
           modelPickerOpen: isModelPickerOpen(),
+          usagePageOpen,
         },
       });
       if (command !== "navigation.back" && command !== "navigation.forward") return;
@@ -251,7 +254,7 @@ function NavigationHistoryShortcuts() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [keybindings, routeThreadRef]);
+  }, [keybindings, routeThreadRef, usagePageOpen]);
 
   return null;
 }
@@ -330,6 +333,10 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   // Desktop and explicitly configured preview builds use the project tree by
   // default. Regular web and mobile clients keep preference-controlled behavior.
   const legacySidebarEnabled = useLegacySidebarEnabled() || isElectron || forceLegacySidebar;
+  const [sidebarRouteReveal] = useState<SidebarRouteReveal>(() => ({
+    observedKey: null,
+    pendingKey: null,
+  }));
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
   useThreadVisitedMigration();
@@ -422,9 +429,9 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
               <SettingsSidebarNav pathname={pathname} />
             </>
           ) : legacySidebarEnabled ? (
-            <LegacyThreadSidebar />
+            <LegacyThreadSidebar routeReveal={sidebarRouteReveal} />
           ) : (
-            <ThreadSidebar />
+            <ThreadSidebar routeReveal={sidebarRouteReveal} />
           )}
           <SidebarRail onDoubleClick={resetSidebarWidth} />
         </Sidebar>

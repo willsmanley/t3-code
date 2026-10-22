@@ -15,6 +15,8 @@ import {
   ServerSettings,
   ServerSettingsError,
   type ServerSettingsPatch,
+  globalIdleCompaction,
+  withIdleCompaction,
 } from "@t3tools/contracts";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
@@ -117,6 +119,7 @@ const normalizeServerSettings = (
   encodeServerSettings(settings).pipe(
     Effect.flatMap(decodeServerSettings),
     Effect.map(foldProviderInstanceEnabledFlags),
+    Effect.map((next) => withIdleCompaction(next, globalIdleCompaction(next))),
     Effect.map((next) => ({ ...next, ...deriveLegacyProjectOverrides(next) })),
     Effect.mapError(
       (cause) =>
@@ -259,6 +262,16 @@ const makeTest = Effect.fn("serverSettings.makeTest")(function* (
 
 export const layerTest = (overrides: DeepPartial<ServerSettings> = {}) =>
   Layer.effect(ServerSettingsService, makeTest(overrides));
+
+/**
+ * Whether the server may run Git in project folders. Off, every folder reads as
+ * having no repository. A failed read keeps the default.
+ */
+export const sourceControlEnabled = (settings: ServerSettingsService["Service"]) =>
+  settings.getSettings.pipe(
+    Effect.map((current) => current.sourceControlEnabled),
+    Effect.orElseSucceed(() => true),
+  );
 
 // Migrate saved token delivery without accepting it in settings writes or
 // letting one retired value reset the rest of the environment's settings.
@@ -685,6 +698,10 @@ const make = Effect.gen(function* () {
         settings = decoded.value;
       }
     }
+    // Settings saved by a server that kept the mode in `compactIdleThreads` move
+    // it to `idleCompaction`, so that switch goes to clients as a boolean. The
+    // defaults gain the field too, which tells clients this server reads modes.
+    settings = withIdleCompaction(settings, globalIdleCompaction(settings));
 
     // A file that failed to decode must stay on disk for the user to repair.
     const settingsFileTrusted = Option.isNone(parseFailure);
