@@ -6,6 +6,11 @@ on:
     # default-branch changes before producing the next desktop build.
     - cron: "23 03 * * *"
   workflow_dispatch:
+    inputs:
+      sync_upstream:
+        description: Merge upstream before building (disable to release the current fork revision)
+        type: boolean
+        default: true
 
 concurrency:
   group: custom-nightly-linux
@@ -36,6 +41,7 @@ jobs:
           fetch-depth: 0
 
       - name: Merge upstream
+        if: github.event_name != 'workflow_dispatch' || inputs.sync_upstream
         shell: bash
         run: |
           set -euo pipefail
@@ -43,18 +49,15 @@ jobs:
           git config user.email "t3code-nightly[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/pingdotgg/t3code.git
           git fetch --no-tags upstream main
-          # The fork intentionally owns the sidebar surface. Keep those local
-          # files when upstream changes them so a UI conflict cannot skip the
-          # nightly build and strand SSH environments without a runtime.
-          if ! git merge -X ours --no-edit upstream/main; then
+          if ! git merge --no-edit upstream/main; then
             git merge --abort || true
             echo "Upstream sync conflicted with the sidebar customization." >&2
             echo "Resolve the conflict on main, then rerun this workflow." >&2
             exit 1
           fi
-          # The merge result is used directly by the build job. Do not push it
-          # from GITHUB_TOKEN: an upstream workflow-file change requires the
-          # separate `workflow` scope, which Actions tokens do not have.
+          if [[ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]]; then
+            git push origin HEAD:main
+          fi
 
       - name: Export synced commit
         id: ref
@@ -179,7 +182,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.nightly.outputs.tag }}
           RELEASE_NAME: ${{ steps.nightly.outputs.name }}
-          RELEASE_REF: ${{ github.sha }}
+          RELEASE_REF: ${{ needs.sync.outputs.ref }}
         shell: bash
         run: |
           set -euo pipefail
