@@ -17,7 +17,11 @@ describe("scheduleDraftForTask", () => {
   it("opens legacy sub-minute schedules at the writable minimum", () => {
     const draft = scheduleDraftForTask({ schedule: { type: "interval", everyMs: 30_000 } });
     expect(draft.intervalMinutes).toBe("1");
-    expect(scheduleFromDraft(draft)).toEqual({ type: "interval", everyMs: 60_000 });
+    expect(scheduleFromDraft(draft)).toEqual({
+      type: "interval",
+      everyMs: 60_000,
+      activeHours: null,
+    });
   });
 
   it("round-trips dedupe settings and rejects invalid windows", () => {
@@ -110,7 +114,19 @@ describe("scheduleFromDraft", () => {
     expect(scheduleFromDraft({ ...DEFAULT_SCHEDULE, mode: "interval", intervalMinutes })).toEqual({
       type: "interval",
       everyMs,
+      activeHours: null,
     });
+  });
+
+  it("keeps an interval's active hours and refuses an empty window", () => {
+    const activeHours = { start: "22:00", end: "06:00", timeZone: "America/Chicago" };
+    const draft = scheduleDraftForTask({
+      schedule: { type: "interval", everyMs: 3_600_000, activeHours },
+    });
+    expect(scheduleFromDraft(draft)).toEqual({ type: "interval", everyMs: 3_600_000, activeHours });
+    expect(
+      scheduleFromDraft({ ...draft, activeHours: { ...draft.activeHours, start: "06:00" } }),
+    ).toBeNull();
   });
 });
 

@@ -166,6 +166,25 @@ describe("timed schedule settings", () => {
     expect(scheduleFromDraft({ ...draft, timeZone: " " })).toMatchObject({ timeZone: null });
     expect(scheduleFromDraft({ ...draft, timeZone: "Chicago" })).toBeNull();
   });
+
+  it("round-trips an interval's active hours and clears them when turned off", () => {
+    const activeHours = { start: "22:00", end: "06:00", timeZone: "America/Chicago" };
+    const draft = taskToDraft({
+      ...legacyTask,
+      schedule: { type: "interval", everyMs: 3_600_000, activeHours },
+    });
+    expect(scheduleFromDraft(draft)).toEqual({
+      type: "interval",
+      everyMs: 3_600_000,
+      activeHours,
+    });
+    expect(
+      scheduleFromDraft({ ...draft, activeHours: { ...draft.activeHours, enabled: false } }),
+    ).toEqual({ type: "interval", everyMs: 3_600_000, activeHours: null });
+    expect(
+      scheduleFromDraft({ ...draft, activeHours: { ...draft.activeHours, end: "22:00" } }),
+    ).toBeNull();
+  });
 });
 
 describe("webhook scheduled tasks", () => {

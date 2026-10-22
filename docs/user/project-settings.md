@@ -84,6 +84,12 @@ A task that runs **At a time** uses the environment's clock unless you set a
 daylight saving starts or ends. A time skipped when clocks move forward runs
 an hour later that day, and a time that repeats when they move back runs once.
 
+A task that runs **Every interval** can be limited to **Active hours**, such as
+09:00 to 17:00. A run that would fall outside them waits for the next start of
+the window instead of running. An end before the start makes a window that
+crosses midnight, such as 22:00 to 06:00. Active hours use the environment's
+clock unless you give them a time zone.
+
 ## Webhook automations
 
 In **Settings → Scheduled tasks**, choose **On webhook**

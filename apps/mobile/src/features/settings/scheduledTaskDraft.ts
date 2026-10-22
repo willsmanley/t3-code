@@ -17,7 +17,12 @@ import {
   webhookFilterDraftsChanged,
   type WebhookFilterDraft,
 } from "@t3tools/client-runtime/scheduled-task-webhook";
-import { parseTimeZoneDraft } from "@t3tools/client-runtime/scheduled-task-schedule";
+import {
+  activeHoursDraft,
+  parseActiveHoursDraft,
+  parseTimeZoneDraft,
+  type ActiveHoursDraft,
+} from "@t3tools/client-runtime/scheduled-task-schedule";
 import {
   resolveProjectSettings,
   type LegacyProjectSettingsFields,
@@ -58,6 +63,7 @@ export type ScheduleDraft = {
   /** Blank runs at the environment's local time. */
   readonly timeZone: string;
   readonly intervalMinutes: string;
+  readonly activeHours: ActiveHoursDraft;
   readonly signature: ScheduledTaskWebhookSignature | null;
   readonly maxDeliveryAgeMinutes: string;
   readonly replayKey: string;
@@ -74,6 +80,7 @@ export const DEFAULT_SCHEDULE: ScheduleDraft = {
   weekdays: [1, 2, 3, 4, 5],
   timeZone: "",
   intervalMinutes: "15",
+  activeHours: activeHoursDraft(undefined),
   signature: null,
   maxDeliveryAgeMinutes: "",
   replayKey: "",
@@ -99,6 +106,7 @@ export function scheduleDraftForTask(task: Pick<ScheduledTask, "schedule">): Sch
         ...DEFAULT_SCHEDULE,
         mode: "interval",
         intervalMinutes: String(Math.max(1, task.schedule.everyMs / 60_000)),
+        activeHours: activeHoursDraft(task.schedule.activeHours),
       };
     case "webhook":
       return {
@@ -170,7 +178,10 @@ export function scheduleFromDraft(draft: ScheduleDraft): ScheduledTaskUpsertSche
   if (draft.mode === "interval") {
     const minutes = Number(draft.intervalMinutes);
     const everyMs = Math.round(minutes * 60_000);
-    return minutes >= 1 && Number.isSafeInteger(everyMs) ? { type: "interval", everyMs } : null;
+    const activeHours = parseActiveHoursDraft(draft.activeHours);
+    return minutes >= 1 && Number.isSafeInteger(everyMs) && activeHours !== undefined
+      ? { type: "interval", everyMs, activeHours }
+      : null;
   }
   const weekdays = [...new Set(draft.weekdays)].sort((a, b) => a - b);
   const timeZone = parseTimeZoneDraft(draft.timeZone);
@@ -222,6 +233,7 @@ function draftSignature(draft: ScheduledTaskDraft): string {
     [...draft.schedule.weekdays].sort((a, b) => a - b),
     draft.schedule.timeZone,
     draft.schedule.intervalMinutes,
+    draft.schedule.activeHours,
     draft.schedule.maxDeliveryAgeMinutes,
     draft.schedule.replayKey,
     draft.schedule.coalesceKey,

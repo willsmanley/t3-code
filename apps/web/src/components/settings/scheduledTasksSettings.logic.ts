@@ -18,7 +18,12 @@ import {
   webhookFilterDraftsChanged,
   type WebhookFilterDraft,
 } from "@t3tools/client-runtime/scheduled-task-webhook";
-import { parseTimeZoneDraft } from "@t3tools/client-runtime/scheduled-task-schedule";
+import {
+  activeHoursDraft,
+  parseActiveHoursDraft,
+  parseTimeZoneDraft,
+  type ActiveHoursDraft,
+} from "@t3tools/client-runtime/scheduled-task-schedule";
 
 import {
   resolveProjectSettings,
@@ -63,6 +68,7 @@ export interface DraftState {
   readonly enabled: boolean;
   readonly scheduleMode: ScheduleMode;
   readonly intervalMinutes: string;
+  readonly activeHours: ActiveHoursDraft;
   readonly timeOfDay: string;
   readonly weekdays: ReadonlySet<number>;
   /** Blank runs at the environment's local time. */
@@ -109,6 +115,14 @@ export function scheduleDraftErrors(draft: DraftState) {
       {
         title: "Unknown time zone",
         description: "Pick a time zone such as America/Chicago, or leave it blank.",
+      },
+    ];
+  if (draft.scheduleMode === "interval" && parseActiveHoursDraft(draft.activeHours) === undefined)
+    return [
+      {
+        title: "Invalid active hours",
+        description:
+          "Use different start and end times, and a time zone such as America/Chicago or none.",
       },
     ];
   return [];
@@ -201,7 +215,11 @@ export function scheduleFromDraft(draft: DraftState): ScheduledTaskUpsertSchedul
   }
   if (draft.scheduleMode === "interval") {
     const everyMs = Math.round(Number(draft.intervalMinutes) * 60_000);
-    return { type: "interval", everyMs };
+    return {
+      type: "interval",
+      everyMs,
+      activeHours: parseActiveHoursDraft(draft.activeHours) ?? null,
+    };
   }
   const selectedEveryDay = draft.weekdays.size === 0 || draft.weekdays.size === 7;
   return {
@@ -228,6 +246,7 @@ export function taskToDraft(task: ScheduledTask): DraftState {
       schedule.type === "interval" ? "interval" : schedule.type === "webhook" ? "webhook" : "fixed",
     intervalMinutes:
       schedule.type === "interval" ? String(Math.max(1, schedule.everyMs / 60_000)) : "15",
+    activeHours: activeHoursDraft(schedule.type === "interval" ? schedule.activeHours : undefined),
     timeOfDay: schedule.type === "fixed_time" ? schedule.timeOfDay : "09:00",
     weekdays,
     timeZone: schedule.type === "fixed_time" ? (schedule.timeZone ?? "") : "",

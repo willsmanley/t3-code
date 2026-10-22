@@ -56,7 +56,11 @@ import {
 import { usePrimaryCloudLinkState } from "../../cloud/primaryCloudLinkState";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { webhookAddress } from "@t3tools/client-runtime/webhook-address";
-import { timeZoneSuggestions } from "@t3tools/client-runtime/scheduled-task-schedule";
+import {
+  activeHoursDraft,
+  timeZoneSuggestions,
+  type ActiveHoursDraft,
+} from "@t3tools/client-runtime/scheduled-task-schedule";
 import { Link } from "@tanstack/react-router";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { useNowMinute } from "../../hooks/useNowMinute";
@@ -138,6 +142,7 @@ const EMPTY_DRAFT: DraftState = {
   enabled: true,
   scheduleMode: "fixed",
   intervalMinutes: "15",
+  activeHours: activeHoursDraft(undefined),
   timeOfDay: "09:00",
   weekdays: new Set([1, 2, 3, 4, 5]),
   timeZone: "",
@@ -316,6 +321,56 @@ function TimeZoneField(props: {
   );
 }
 
+function ActiveHoursField(props: {
+  readonly value: ActiveHoursDraft;
+  readonly onChange: (value: ActiveHoursDraft) => void;
+}) {
+  const { value, onChange } = props;
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <Switch
+          id="scheduled-task-active-hours"
+          checked={value.enabled}
+          onCheckedChange={(enabled) => onChange({ ...value, enabled })}
+        />
+        <Label htmlFor="scheduled-task-active-hours">Only during active hours</Label>
+      </div>
+      {value.enabled ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            type="time"
+            nativeInput
+            aria-label="Active hours start"
+            className="w-32"
+            value={value.start}
+            onChange={(event) => onChange({ ...value, start: event.target.value })}
+          />
+          <span className="text-xs text-muted-foreground">to</span>
+          <Input
+            type="time"
+            nativeInput
+            aria-label="Active hours end"
+            className="w-32"
+            value={value.end}
+            onChange={(event) => onChange({ ...value, end: event.target.value })}
+          />
+          <TimeZoneField
+            id="scheduled-task-active-hours-time-zone"
+            label="Time zone"
+            value={value.timeZone}
+            onChange={(timeZone) => onChange({ ...value, timeZone })}
+          />
+          <p className="text-xs text-muted-foreground">
+            A run that would fall outside these hours waits for the next start. An end before the
+            start crosses midnight.
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function splitModelKey(value: string): ModelSelection | null {
   const index = value.indexOf(":");
   if (index <= 0 || index === value.length - 1) return null;
@@ -329,9 +384,12 @@ export function scheduleLabel(schedule: ScheduledTaskSchedule): string {
   if (schedule.type === "webhook") return "On webhook";
   if (schedule.type === "interval") {
     const minutes = schedule.everyMs / 60_000;
-    return Number.isInteger(minutes)
+    const every = Number.isInteger(minutes)
       ? `Every ${minutes} min`
       : `Every ${Math.round(schedule.everyMs / 1000)} sec`;
+    const window = schedule.activeHours;
+    if (window === undefined) return every;
+    return `${every}, ${window.start}–${window.end}${window.timeZone ? ` (${window.timeZone})` : ""}`;
   }
   const weekdays = schedule.weekdays ?? [];
   const days =
@@ -1766,21 +1824,27 @@ function ScheduledTaskEditorForm({
                 />
               </div>
             ) : (
-              <div className="flex items-center gap-2">
-                <Label htmlFor="scheduled-task-interval">Run every</Label>
-                <Input
-                  type="number"
-                  id="scheduled-task-interval"
-                  nativeInput
-                  min={1}
-                  step="any"
-                  className="w-24"
-                  value={draft.intervalMinutes}
-                  onChange={(event) =>
-                    setDraft((current) => ({ ...current, intervalMinutes: event.target.value }))
-                  }
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="scheduled-task-interval">Run every</Label>
+                  <Input
+                    type="number"
+                    id="scheduled-task-interval"
+                    nativeInput
+                    min={1}
+                    step="any"
+                    className="w-24"
+                    value={draft.intervalMinutes}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, intervalMinutes: event.target.value }))
+                    }
+                  />
+                  <span className="text-xs text-muted-foreground">minutes</span>
+                </div>
+                <ActiveHoursField
+                  value={draft.activeHours}
+                  onChange={(activeHours) => setDraft((current) => ({ ...current, activeHours }))}
                 />
-                <span className="text-xs text-muted-foreground">minutes</span>
               </div>
             )}
           </div>

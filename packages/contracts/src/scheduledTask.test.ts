@@ -39,6 +39,21 @@ describe("ScheduledTaskSchedule", () => {
       timeZone: "Mars/Olympus_Mons",
     });
   });
+
+  it("accepts active hours that cross midnight but not an empty window", () => {
+    const interval = { type: "interval", everyMs: 3_600_000 };
+    const night = { start: "22:00", end: "06:00", timeZone: "America/Chicago" };
+    expect(decodeUpsertSchedule({ ...interval, activeHours: night })).toEqual({
+      ...interval,
+      activeHours: night,
+    });
+    expect(() =>
+      decodeUpsertSchedule({ ...interval, activeHours: { start: "9:00", end: "09:00" } }),
+    ).toThrow();
+    expect(() =>
+      decodeUpsertSchedule({ ...interval, activeHours: { ...night, timeZone: "Nowhere" } }),
+    ).toThrow();
+  });
 });
 
 it.each(["literal", " ", "\t\n", "{{body.bad", "{{unknown.field}}"])(

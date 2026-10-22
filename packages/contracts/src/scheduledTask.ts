@@ -48,11 +48,49 @@ const ScheduledTaskIntervalMs = Schema.Int.check(Schema.isGreaterThan(0)).annota
   description: "Positive interval in milliseconds.",
 });
 
+const ActiveHoursWindowFields = {
+  start: TimeOfDay.annotate({ description: "Window start in 24-hour HH:MM form." }),
+  end: TimeOfDay.annotate({
+    description:
+      "Window end in 24-hour HH:MM form, not included. Earlier than start for a window that crosses midnight.",
+  }),
+};
+
+const ActiveHoursDescription =
+  "Hours when runs may start. A run that would fall outside waits for the next window start without running.";
+
+const ScheduledTaskActiveHours = Schema.Struct({
+  ...ActiveHoursWindowFields,
+  timeZone: Schema.optional(ScheduledTaskTimeZone),
+}).annotate({ description: ActiveHoursDescription });
+export type ScheduledTaskActiveHours = typeof ScheduledTaskActiveHours.Type;
+
+const minuteOfDay = (value: string) => {
+  const [hour = 0, minute = 0] = value.split(":").map(Number);
+  return hour * 60 + minute;
+};
+
+const WritableActiveHours = Schema.Struct({
+  ...ActiveHoursWindowFields,
+  timeZone: Schema.optional(WritableTimeZone).annotate({
+    description: "IANA time zone for start and end. Omit for the environment's local time.",
+  }),
+})
+  .check(
+    Schema.makeFilter(
+      ({ start, end }) =>
+        minuteOfDay(start) !== minuteOfDay(end) ||
+        "Active hours need different start and end times.",
+    ),
+  )
+  .annotate({ description: ActiveHoursDescription });
+
 const ScheduledTaskIntervalSchedule = Schema.Struct({
   type: Schema.Literal("interval").annotate({
     description: "Select interval scheduling.",
   }),
   everyMs: ScheduledTaskIntervalMs,
+  activeHours: Schema.optional(ScheduledTaskActiveHours),
 }).annotate({
   description: "Run repeatedly after a fixed number of milliseconds.",
 });
@@ -246,6 +284,9 @@ export const ScheduledTaskUpsertSchedule = Schema.Union([
       Schema.isGreaterThanOrEqualTo(MIN_SCHEDULED_TASK_INTERVAL_MS),
     ).annotate({
       description: "Interval in milliseconds, with a minimum of 60000 (one minute).",
+    }),
+    activeHours: Schema.optional(Schema.NullOr(WritableActiveHours)).annotate({
+      description: `${ActiveHoursDescription} Omit to keep the stored window; null removes it.`,
     }),
   }).annotate({
     description: "Run repeatedly after a fixed number of milliseconds.",

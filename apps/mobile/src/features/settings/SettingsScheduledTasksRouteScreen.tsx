@@ -51,7 +51,11 @@ import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScroll
 import { SegmentedControl } from "../../components/ui/SegmentedControl";
 import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
 import { webhookAddress } from "@t3tools/client-runtime/webhook-address";
-import { localTimeZone, parseTimeZoneDraft } from "@t3tools/client-runtime/scheduled-task-schedule";
+import {
+  localTimeZone,
+  parseActiveHoursDraft,
+  parseTimeZoneDraft,
+} from "@t3tools/client-runtime/scheduled-task-schedule";
 import { tryCopyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { usePreparedConnection } from "../../state/session";
 import { buildModelOptions } from "../../lib/modelOptions";
@@ -105,7 +109,13 @@ const DAYS = [
 
 function describeSchedule(task: ScheduledTask): string {
   if (task.schedule.type === "webhook") return "On webhook";
-  if (task.schedule.type === "interval") return formatScheduledTaskInterval(task.schedule.everyMs);
+  if (task.schedule.type === "interval") {
+    const every = formatScheduledTaskInterval(task.schedule.everyMs);
+    const window = task.schedule.activeHours;
+    if (window === undefined) return every;
+    const zone = window.timeZone ? ` (${window.timeZone})` : "";
+    return `${every}, ${formatTime(window.start)}–${formatTime(window.end)}${zone}`;
+  }
   const days = task.schedule.weekdays?.length ? repeatLabel(task.schedule.weekdays) : "Every day";
   const zone = task.schedule.timeZone ? ` (${task.schedule.timeZone})` : "";
   return `${days} at ${formatTime(task.schedule.timeOfDay)}${zone}`;
@@ -174,6 +184,69 @@ function FormField(props: {
         className="min-h-8 font-sans text-base text-foreground"
       />
     </View>
+  );
+}
+
+/** A row that opens the platform picker; Android shows it as a dialog. */
+function DateTimePickerRow(props: {
+  readonly label: string;
+  readonly valueLabel: string;
+  readonly mode: "date" | "time";
+  readonly value: Date;
+  readonly onChange: (value: Date) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${props.label}, ${props.valueLabel}`}
+        onPress={() => setOpen((current) => !current)}
+        className="min-h-14 flex-row items-center gap-3 border-t border-border-subtle px-4 py-3 active:opacity-70"
+      >
+        <Text className="text-lg text-foreground">{props.label}</Text>
+        <Text className="min-w-0 flex-1 text-right text-base text-foreground-muted">
+          {props.valueLabel}
+        </Text>
+        <SymbolView
+          name="chevron.right"
+          size={14}
+          tintColorClassName="accent-chevron"
+          type="monochrome"
+        />
+      </Pressable>
+      {open ? (
+        <DateTimePicker
+          value={props.value}
+          mode={props.mode}
+          display={
+            Platform.OS === "ios" ? (props.mode === "time" ? "spinner" : "inline") : "default"
+          }
+          onDismiss={() => setOpen(false)}
+          onValueChange={(_, selected) => props.onChange(selected)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function TimeOfDayRow(props: {
+  readonly label: string;
+  readonly value: string;
+  readonly onChange: (value: string) => void;
+}) {
+  return (
+    <DateTimePickerRow
+      label={props.label}
+      valueLabel={formatTime(props.value)}
+      mode="time"
+      value={timePickerValue(props.value)}
+      onChange={(selected) =>
+        props.onChange(
+          `${String(selected.getHours()).padStart(2, "0")}:${String(selected.getMinutes()).padStart(2, "0")}`,
+        )
+      }
+    />
   );
 }
 
@@ -674,7 +747,6 @@ function TaskForm({
     reportFailure: false,
   });
   const submissionPending = useRef(false);
-  const [timePickerOpen, setTimePickerOpen] = useState(false);
   const taskMissing =
     draft.task !== null &&
     tasks.data !== null &&
@@ -724,6 +796,16 @@ function TaskForm({
       Dialog.alert(
         "Unknown time zone",
         "Enter a time zone such as America/Chicago, or leave it blank.",
+      );
+      return;
+    }
+    if (
+      draft.schedule.mode === "interval" &&
+      parseActiveHoursDraft(draft.schedule.activeHours) === undefined
+    ) {
+      Dialog.alert(
+        "Invalid active hours",
+        "Use different start and end times, and a time zone such as America/Chicago or none.",
       );
       return;
     }
@@ -967,7 +1049,6 @@ function TaskForm({
               ]}
               selected={draft.schedule.mode}
               onSelect={(mode) => {
-                setTimePickerOpen(false);
                 setDraft({
                   ...draft,
                   prompt:
@@ -981,35 +1062,13 @@ function TaskForm({
           </View>
           {draft.schedule.mode === "fixed_time" ? (
             <>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Time, ${formatTime(draft.schedule.timeOfDay)}`}
-                onPress={() => setTimePickerOpen((open) => !open)}
-                className="min-h-14 flex-row items-center gap-3 border-t border-border-subtle px-4 py-3 active:opacity-70"
-              >
-                <Text className="text-lg text-foreground">Time</Text>
-                <Text className="min-w-0 flex-1 text-right text-base text-foreground-muted">
-                  {formatTime(draft.schedule.timeOfDay)}
-                </Text>
-                <SymbolView
-                  name="chevron.right"
-                  size={14}
-                  tintColorClassName="accent-chevron"
-                  type="monochrome"
-                />
-              </Pressable>
-              {timePickerOpen ? (
-                <DateTimePicker
-                  value={timePickerValue(draft.schedule.timeOfDay)}
-                  mode="time"
-                  display={Platform.OS === "ios" ? "spinner" : "default"}
-                  onDismiss={() => setTimePickerOpen(false)}
-                  onValueChange={(_, selected) => {
-                    const timeOfDay = `${String(selected.getHours()).padStart(2, "0")}:${String(selected.getMinutes()).padStart(2, "0")}`;
-                    setDraft({ ...draft, schedule: { ...draft.schedule, timeOfDay } });
-                  }}
-                />
-              ) : null}
+              <TimeOfDayRow
+                label="Time"
+                value={draft.schedule.timeOfDay}
+                onChange={(timeOfDay) =>
+                  setDraft({ ...draft, schedule: { ...draft.schedule, timeOfDay } })
+                }
+              />
               <SelectRow
                 label="Repeat"
                 value={repeatLabel(draft.schedule.weekdays)}
@@ -1152,6 +1211,75 @@ function TaskForm({
                   This task previously ran more than once per minute. Saving requires an interval of
                   at least 1 minute.
                 </Text>
+              ) : null}
+              <View className="min-h-14 flex-row items-center gap-3 border-t border-border-subtle px-4 py-3">
+                <Text className="min-w-0 flex-1 text-lg text-foreground">
+                  Only during active hours
+                </Text>
+                <ThemedSwitch
+                  accessibilityLabel="Only during active hours"
+                  value={draft.schedule.activeHours.enabled}
+                  onValueChange={(enabled) =>
+                    setDraft({
+                      ...draft,
+                      schedule: {
+                        ...draft.schedule,
+                        activeHours: { ...draft.schedule.activeHours, enabled },
+                      },
+                    })
+                  }
+                />
+              </View>
+              {draft.schedule.activeHours.enabled ? (
+                <>
+                  <TimeOfDayRow
+                    label="From"
+                    value={draft.schedule.activeHours.start}
+                    onChange={(start) =>
+                      setDraft({
+                        ...draft,
+                        schedule: {
+                          ...draft.schedule,
+                          activeHours: { ...draft.schedule.activeHours, start },
+                        },
+                      })
+                    }
+                  />
+                  <TimeOfDayRow
+                    label="Until"
+                    value={draft.schedule.activeHours.end}
+                    onChange={(end) =>
+                      setDraft({
+                        ...draft,
+                        schedule: {
+                          ...draft.schedule,
+                          activeHours: { ...draft.schedule.activeHours, end },
+                        },
+                      })
+                    }
+                  />
+                  <FormField
+                    label="Time zone"
+                    value={draft.schedule.activeHours.timeZone}
+                    placeholder="Environment's time zone"
+                    disabled={saving}
+                    borderTop
+                    literal
+                    onChange={(timeZone) =>
+                      setDraft({
+                        ...draft,
+                        schedule: {
+                          ...draft.schedule,
+                          activeHours: { ...draft.schedule.activeHours, timeZone },
+                        },
+                      })
+                    }
+                  />
+                  <Text className="px-4 pb-3 text-sm text-foreground-muted">
+                    A run that would fall outside these hours waits for the next start. An end
+                    before the start crosses midnight.
+                  </Text>
+                </>
               ) : null}
             </>
           )}

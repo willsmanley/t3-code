@@ -1,11 +1,13 @@
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { expect, it } from "@effect/vitest";
-import { ScheduledTaskUpsertInput } from "@t3tools/contracts";
+import { type ScheduledTask, ScheduledTaskUpsertInput } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
@@ -232,4 +234,49 @@ it.effect("keeps a stored time zone when a save omits it and removes it on null"
       expect(cleared.task.schedule).toEqual({ type: "fixed_time", timeOfDay: "09:00" });
     }),
   ),
+);
+
+/** The task list once `matches` holds for the first task, as subscribers see it. */
+const awaitTask = (matches: (task: ScheduledTask) => boolean) =>
+  Effect.gen(function* () {
+    const service = yield* ScheduledTaskService.ScheduledTaskService;
+    const seen = yield* Deferred.make<ScheduledTask>();
+    yield* service.subscribeList().pipe(
+      Stream.runForEach(({ tasks }) =>
+        tasks[0] !== undefined && matches(tasks[0])
+          ? Deferred.succeed(seen, tasks[0])
+          : Effect.void,
+      ),
+      Effect.forkChild,
+    );
+    return Deferred.await(seen);
+  });
+
+it.effect("defers a run that comes due outside its active hours without running it", () =>
+  Effect.gen(function* () {
+    // 16:30 in Chicago.
+    yield* TestClock.setTime(Date.parse("2026-07-03T21:30:00.000Z"));
+    const created = yield* Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      return yield* service.upsert(
+        yield* taskInput({
+          type: "interval",
+          everyMs: 20 * 60_000,
+          activeHours: { start: "09:00", end: "17:00", timeZone: "America/Chicago" },
+        }),
+      );
+    }).pipe(Effect.provide(serviceLayer));
+    expect(created.task.nextRunAt).toBe("2026-07-03T21:50:00.000Z");
+
+    // The server was down past the window, so the 16:50 run is due at 03:00.
+    yield* TestClock.setTime(Date.parse("2026-07-04T08:00:00.000Z"));
+    yield* Effect.gen(function* () {
+      const deferred = yield* awaitTask((task) => task.nextRunAt !== created.task.nextRunAt);
+      yield* TestClock.adjust("6 seconds");
+      const task = yield* deferred;
+      expect(task.nextRunAt).toBe("2026-07-04T14:00:00.000Z");
+      expect(task.lastRunStatus).toBe("never");
+      expect(task.runCount).toBe(0);
+    }).pipe(Effect.provide(serviceLayer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );

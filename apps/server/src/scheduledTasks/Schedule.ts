@@ -1,5 +1,6 @@
 import {
   MIN_SCHEDULED_TASK_INTERVAL_MS,
+  type ScheduledTaskActiveHours,
   type ScheduledTaskSchedule,
   type ScheduledTaskUpsertSchedule,
 } from "@t3tools/contracts";
@@ -20,6 +21,58 @@ function inTimeZone(from: DateTime.DateTime, timeZone: string | undefined) {
   return Option.getOrNull(DateTime.setZoneNamed(from, timeZone));
 }
 
+/** Whether a wall-clock minute falls in [start, end), wrapping past midnight when end < start. */
+function inWindow(minute: number, start: number, end: number): boolean {
+  return start < end ? minute >= start && minute < end : minute >= start || minute < end;
+}
+
+/** `at` when it is inside the active hours, otherwise the next window start after it. */
+function intoActiveHours(
+  activeHours: ScheduledTaskActiveHours,
+  at: DateTime.DateTime,
+): DateTime.DateTime | null {
+  const start = parseTimeOfDay(activeHours.start);
+  const end = parseTimeOfDay(activeHours.end);
+  if (start === null || end === null) return at;
+  const zoned = inTimeZone(at, activeHours.timeZone);
+  if (zoned === null) return null;
+  const parts = DateTime.toParts(zoned);
+  if (
+    inWindow(
+      parts.hour * 60 + parts.minute,
+      start.hour * 60 + start.minute,
+      end.hour * 60 + end.minute,
+    )
+  ) {
+    return at;
+  }
+  for (let offset = 0; offset <= 1; offset += 1) {
+    const windowStart = DateTime.setParts(DateTime.add(zoned, { days: offset }), {
+      hour: start.hour,
+      minute: start.minute,
+      second: 0,
+      millisecond: 0,
+    });
+    if (DateTime.toEpochMillis(windowStart) > DateTime.toEpochMillis(at)) return windowStart;
+  }
+  return null;
+}
+
+/**
+ * The window start a due interval run waits for when it comes due outside its
+ * active hours, as after the server was down; null when it may run now.
+ */
+export function activeHoursDeferral(
+  schedule: ScheduledTaskSchedule,
+  now: DateTime.DateTime,
+): DateTime.DateTime | null {
+  if (schedule.type !== "interval" || schedule.activeHours === undefined) return null;
+  const allowed = intoActiveHours(schedule.activeHours, now);
+  return allowed !== null && DateTime.toEpochMillis(allowed) > DateTime.toEpochMillis(now)
+    ? allowed
+    : null;
+}
+
 export function nextScheduledRunAt(
   schedule: ScheduledTaskSchedule,
   from: DateTime.DateTime,
@@ -29,7 +82,11 @@ export function nextScheduledRunAt(
     // Persisted rows created before the one-minute floor remain readable, but
     // they must not retain their old high-frequency execution rate.
     // Intervals advance elapsed time, including across daylight-saving changes.
-    return DateTime.addDuration(from, Math.max(schedule.everyMs, MIN_SCHEDULED_TASK_INTERVAL_MS));
+    const next = DateTime.addDuration(
+      from,
+      Math.max(schedule.everyMs, MIN_SCHEDULED_TASK_INTERVAL_MS),
+    );
+    return schedule.activeHours === undefined ? next : intoActiveHours(schedule.activeHours, next);
   }
 
   const time = parseTimeOfDay(schedule.timeOfDay);
@@ -66,7 +123,17 @@ export function timerScheduleToStore(
   input: Exclude<ScheduledTaskUpsertSchedule, { readonly type: "webhook" }>,
   stored: ScheduledTaskSchedule | undefined,
 ): ScheduledTaskSchedule {
-  if (input.type === "interval") return input;
+  if (input.type === "interval") {
+    const activeHours = kept(
+      input.activeHours,
+      stored?.type === "interval" ? stored.activeHours : undefined,
+    );
+    return {
+      type: "interval",
+      everyMs: input.everyMs,
+      ...(activeHours === undefined ? {} : { activeHours }),
+    };
+  }
   const timeZone = kept(
     input.timeZone,
     stored?.type === "fixed_time" ? stored.timeZone : undefined,
@@ -85,9 +152,20 @@ function weekdayKey(weekdays: ReadonlyArray<number> | undefined): string {
   return unique.join(",");
 }
 
+function activeHoursKey(activeHours: ScheduledTaskActiveHours | undefined): string {
+  if (activeHours === undefined) return "always";
+  const start = parseTimeOfDay(activeHours.start);
+  const end = parseTimeOfDay(activeHours.end);
+  return JSON.stringify([start, end, activeHours.timeZone ?? null]);
+}
+
 export function isSameSchedule(a: ScheduledTaskSchedule, b: ScheduledTaskSchedule): boolean {
   if (a.type === "interval") {
-    return b.type === "interval" && a.everyMs === b.everyMs;
+    return (
+      b.type === "interval" &&
+      a.everyMs === b.everyMs &&
+      activeHoursKey(a.activeHours) === activeHoursKey(b.activeHours)
+    );
   }
   if (a.type === "webhook") return b.type === "webhook";
   if (b.type !== "fixed_time") return false;

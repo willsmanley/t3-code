@@ -49,6 +49,7 @@ import * as ThreadManagementService from "../orchestration-v2/ThreadManagementSe
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import {
+  activeHoursDeferral,
   isMissedFixedTimeRun,
   isSameSchedule,
   nextScheduledRunAt,
@@ -942,8 +943,8 @@ export const layer = Layer.effect(
     const rescheduleMissedRun = Effect.fn("ScheduledTaskService.rescheduleMissedRun")(function* (
       task: ScheduledTask,
       now: DateTime.DateTime,
+      next: string | null,
     ) {
-      const next = nextRunAt(task, now);
       yield* Effect.logInfo("Skipping missed schedule task run", {
         taskId: task.id,
         missedRunAt: task.nextRunAt,
@@ -973,11 +974,17 @@ export const layer = Layer.effect(
       yield* Effect.forEach(
         due,
         ({ task, dueAt }) =>
-          Effect.suspend(() =>
-            isMissedFixedTimeRun(task.schedule, dueAt, now)
-              ? rescheduleMissedRun(task, now)
-              : runTask(task, "scheduled"),
-          ).pipe(
+          Effect.suspend(() => {
+            if (isMissedFixedTimeRun(task.schedule, dueAt, now)) {
+              return rescheduleMissedRun(task, now, nextRunAt(task, now));
+            }
+            // A run that comes due outside its active hours, as after the
+            // server was down, waits for the next window instead.
+            const deferredTo = activeHoursDeferral(task.schedule, now);
+            return deferredTo === null
+              ? runTask(task, "scheduled")
+              : rescheduleMissedRun(task, now, iso(deferredTo));
+          }).pipe(
             Effect.catch((cause) =>
               Effect.logWarning("Scheduled task run failed", { taskId: task.id, cause }),
             ),
