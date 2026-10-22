@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   defaultOneOffTime,
   parseActiveHoursDraft,
+  parseRunLimitDraft,
   parseTimeZoneDraft,
   scheduledTaskEnding,
 } from "./scheduledTaskSchedule.ts";
@@ -34,7 +35,12 @@ describe("parseActiveHoursDraft", () => {
 
 describe("scheduledTaskEnding", () => {
   const at = "2026-07-03T14:00:00.000Z";
-  const once = { enabled: false, schedule: { type: "once", at }, lastRunAt: null } as const;
+  const once = {
+    enabled: false,
+    schedule: { type: "once", at },
+    lastRunAt: null,
+    runCount: 0,
+  } as const;
   const before = Date.parse("2026-07-03T13:00:00.000Z");
   const after = Date.parse("2026-07-03T15:00:00.000Z");
 
@@ -48,6 +54,24 @@ describe("scheduledTaskEnding", () => {
     );
     expect(scheduledTaskEnding({ ...once, enabled: true }, after)).toBeNull();
   });
+
+  it("shows a repeating task as ended only once its limit or end time is reached", () => {
+    const interval = {
+      ...once,
+      schedule: { type: "interval", everyMs: 60_000, endAfterRuns: 2, endAt: at },
+    } as const;
+    expect(scheduledTaskEnding({ ...interval, runCount: 2 }, before)).toBe("ended");
+    expect(scheduledTaskEnding({ ...interval, runCount: 1 }, after)).toBe("ended");
+    expect(scheduledTaskEnding({ ...interval, runCount: 1 }, before)).toBeNull();
+  });
+});
+
+it("reads a run limit as blank for none or a whole number of runs", () => {
+  expect(parseRunLimitDraft(" ")).toBeNull();
+  expect(parseRunLimitDraft("3")).toBe(3);
+  for (const invalid of ["0", "1.5", "-2", "lots"]) {
+    expect(parseRunLimitDraft(invalid)).toBeUndefined();
+  }
 });
 
 it("starts a new one-off on a whole hour at least an hour away", () => {

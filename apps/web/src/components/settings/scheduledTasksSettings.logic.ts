@@ -21,6 +21,7 @@ import {
 import {
   activeHoursDraft,
   parseActiveHoursDraft,
+  parseRunLimitDraft,
   parseTimeZoneDraft,
   type ActiveHoursDraft,
 } from "@t3tools/client-runtime/scheduled-task-schedule";
@@ -75,6 +76,10 @@ export interface DraftState {
   readonly timeZone: string;
   /** A datetime-local value, read in this browser's time zone. */
   readonly onceAt: string;
+  /** Blank for no limit. */
+  readonly endAfterRuns: string;
+  /** A datetime-local value, or blank for no end time. */
+  readonly endAt: string;
   readonly projectId: string;
   readonly threadId: string;
   readonly workspaceMode: WorkspaceMode;
@@ -111,28 +116,43 @@ export const WEBHOOK_SIGNATURE_DEFAULTS = {
 } as const;
 
 export function scheduleDraftErrors(draft: DraftState) {
-  if (draft.scheduleMode === "webhook") return webhookDraftErrors(draft);
+  if (draft.scheduleMode === "once") {
+    return oneOffTime(draft.onceAt) === null
+      ? [{ title: "Pick a time", description: "Choose the date and time to run the task." }]
+      : [];
+  }
+  const errors: Array<{ title: string; description: string }> =
+    draft.scheduleMode === "webhook" ? webhookDraftErrors(draft) : [];
   if (draft.scheduleMode === "fixed" && parseTimeZoneDraft(draft.timeZone) === undefined)
-    return [
-      {
-        title: "Unknown time zone",
-        description: "Pick a time zone such as America/Chicago, or leave it blank.",
-      },
-    ];
-  if (draft.scheduleMode === "once" && oneOffTime(draft.onceAt) === null)
-    return [{ title: "Pick a time", description: "Choose the date and time to run the task." }];
+    errors.push({
+      title: "Unknown time zone",
+      description: "Pick a time zone such as America/Chicago, or leave it blank.",
+    });
   if (draft.scheduleMode === "interval" && parseActiveHoursDraft(draft.activeHours) === undefined)
-    return [
-      {
-        title: "Invalid active hours",
-        description:
-          "Use different start and end times, and a time zone such as America/Chicago or none.",
-      },
-    ];
-  return [];
+    errors.push({
+      title: "Invalid active hours",
+      description:
+        "Use different start and end times, and a time zone such as America/Chicago or none.",
+    });
+  if (parseRunLimitDraft(draft.endAfterRuns) === undefined)
+    errors.push({
+      title: "Invalid run limit",
+      description: "Enter a whole number of runs, or leave it blank.",
+    });
+  if (draft.endAt.trim() && oneOffTime(draft.endAt) === null)
+    errors.push({ title: "Invalid end time", description: "Pick a date and time, or clear it." });
+  return errors;
 }
 
-function webhookDraftErrors(draft: DraftState) {
+/** Sent in full, so clearing a field in the form removes it on the server. */
+function endsFromDraft(draft: DraftState) {
+  return {
+    endAfterRuns: parseRunLimitDraft(draft.endAfterRuns) ?? null,
+    endAt: draft.endAt.trim() ? oneOffTime(draft.endAt) : null,
+  };
+}
+
+function webhookDraftErrors(draft: DraftState): Array<{ title: string; description: string }> {
   if (parseMaxDeliveryAge(draft.maxDeliveryAgeMinutes) === undefined)
     return [
       {
@@ -228,6 +248,7 @@ export function scheduleFromDraft(draft: DraftState): ScheduledTaskUpsertSchedul
       ...(webhookFilterDraftsChanged(draft.savedFilters, draft.filters)
         ? { filters: parsedFilters.filters }
         : {}),
+      ...endsFromDraft(draft),
     };
   }
   if (draft.scheduleMode === "once") {
@@ -240,6 +261,7 @@ export function scheduleFromDraft(draft: DraftState): ScheduledTaskUpsertSchedul
       type: "interval",
       everyMs,
       activeHours: parseActiveHoursDraft(draft.activeHours) ?? null,
+      ...endsFromDraft(draft),
     };
   }
   const selectedEveryDay = draft.weekdays.size === 0 || draft.weekdays.size === 7;
@@ -248,6 +270,7 @@ export function scheduleFromDraft(draft: DraftState): ScheduledTaskUpsertSchedul
     timeOfDay: draft.timeOfDay || "09:00",
     ...(selectedEveryDay ? {} : { weekdays: [...draft.weekdays].toSorted() }),
     timeZone: parseTimeZoneDraft(draft.timeZone) ?? null,
+    ...endsFromDraft(draft),
   };
 }
 
@@ -274,6 +297,14 @@ export function taskToDraft(task: ScheduledTask): DraftState {
     weekdays,
     timeZone: schedule.type === "fixed_time" ? (schedule.timeZone ?? "") : "",
     onceAt: schedule.type === "once" ? localDateTimeInputValue(schedule.at) : "",
+    endAfterRuns:
+      schedule.type !== "once" && schedule.endAfterRuns !== undefined
+        ? String(schedule.endAfterRuns)
+        : "",
+    endAt:
+      schedule.type !== "once" && schedule.endAt !== undefined
+        ? localDateTimeInputValue(schedule.endAt)
+        : "",
     projectId: task.projectId,
     threadId: task.threadId ?? "",
     workspaceMode: task.workspaceStrategy.type,

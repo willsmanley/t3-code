@@ -50,6 +50,27 @@ describe("ScheduledTaskSchedule", () => {
     }
   });
 
+  it("takes stop conditions on repeating schedules only", () => {
+    for (const schedule of [
+      { type: "interval", everyMs: 60_000 },
+      { type: "fixed_time", timeOfDay: "09:00" },
+      { type: "webhook" },
+    ]) {
+      expect(
+        decodeUpsertSchedule({ ...schedule, endAfterRuns: 3, endAt: "2026-10-23T14:00:00Z" }),
+      ).toMatchObject({ endAfterRuns: 3, endAt: "2026-10-23T14:00:00Z" });
+      expect(decodeUpsertSchedule({ ...schedule, endAfterRuns: null, endAt: null })).toMatchObject({
+        endAfterRuns: null,
+        endAt: null,
+      });
+      expect(() => decodeUpsertSchedule({ ...schedule, endAfterRuns: 0 })).toThrow();
+      expect(() => decodeUpsertSchedule({ ...schedule, endAt: "2026-10-23T14:00" })).toThrow();
+    }
+    expect(
+      decodeUpsertSchedule({ type: "once", at: "2026-10-23T14:00:00Z", endAfterRuns: 3 }),
+    ).not.toHaveProperty("endAfterRuns");
+  });
+
   it("accepts active hours that cross midnight but not an empty window", () => {
     const interval = { type: "interval", everyMs: 3_600_000 };
     const night = { start: "22:00", end: "06:00", timeZone: "America/Chicago" };

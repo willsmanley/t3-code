@@ -55,6 +55,7 @@ import {
   defaultOneOffTime,
   localTimeZone,
   parseActiveHoursDraft,
+  parseRunLimitDraft,
   parseTimeZoneDraft,
   scheduledTaskEnding,
 } from "@t3tools/client-runtime/scheduled-task-schedule";
@@ -110,6 +111,17 @@ const DAYS = [
 ] as const;
 
 function describeSchedule(task: ScheduledTask): string {
+  const cadence = describeCadence(task);
+  if (task.schedule.type === "once") return cadence;
+  const { endAfterRuns, endAt } = task.schedule;
+  return [
+    cadence,
+    ...(endAfterRuns === undefined ? [] : [`up to ${endAfterRuns} runs`]),
+    ...(endAt === undefined ? [] : [`until ${formatDateTime(new Date(endAt))}`]),
+  ].join(", ");
+}
+
+function describeCadence(task: ScheduledTask): string {
   if (task.schedule.type === "webhook") return "On webhook";
   if (task.schedule.type === "once") return `Once, ${formatDateTime(new Date(task.schedule.at))}`;
   if (task.schedule.type === "interval") {
@@ -130,7 +142,13 @@ function formatDateTime(value: Date): string {
 
 function stoppedLabel(task: ScheduledTask, now: number): string {
   const ending = scheduledTaskEnding(task, now);
-  return ending === "ran" ? "Done" : ending === "missed" ? "Missed" : "Paused";
+  return ending === "ran"
+    ? "Done"
+    : ending === "missed"
+      ? "Missed"
+      : ending === "ended"
+        ? "Ended"
+        : "Paused";
 }
 
 function formatTime(value: string): string {
@@ -262,8 +280,8 @@ function TimeOfDayRow(props: {
   );
 }
 
-/** Date and time rows for a one-off run, in this phone's time zone. */
-function OneOffTimeRows(props: {
+/** Date and time rows for one instant, in this phone's time zone. */
+function InstantRows(props: {
   readonly value: string;
   readonly onChange: (value: string) => void;
 }) {
@@ -849,6 +867,13 @@ function TaskForm({
       return;
     }
     if (
+      draft.schedule.mode !== "once" &&
+      parseRunLimitDraft(draft.schedule.endAfterRuns) === undefined
+    ) {
+      Dialog.alert("Invalid run limit", "Enter a whole number of runs, or leave it blank.");
+      return;
+    }
+    if (
       draft.schedule.mode === "interval" &&
       parseActiveHoursDraft(draft.schedule.activeHours) === undefined
     ) {
@@ -1179,7 +1204,7 @@ function TaskForm({
               />
             </>
           ) : draft.schedule.mode === "once" ? (
-            <OneOffTimeRows
+            <InstantRows
               value={draft.schedule.onceAt}
               // A new time re-arms a one-off that already ran.
               onChange={(onceAt) =>
@@ -1346,6 +1371,50 @@ function TaskForm({
                   </Text>
                 </>
               ) : null}
+            </>
+          )}
+          {draft.schedule.mode === "once" ? null : (
+            <>
+              <FormField
+                label="Stop after this many runs"
+                value={draft.schedule.endAfterRuns}
+                placeholder="No limit"
+                keyboardType="number-pad"
+                disabled={saving}
+                borderTop
+                onChange={(endAfterRuns) =>
+                  setDraft({ ...draft, schedule: { ...draft.schedule, endAfterRuns } })
+                }
+              />
+              <View className="min-h-14 flex-row items-center gap-3 border-t border-border-subtle px-4 py-3">
+                <Text className="min-w-0 flex-1 text-lg text-foreground">Stop at a time</Text>
+                <ThemedSwitch
+                  accessibilityLabel="Stop at a time"
+                  value={draft.schedule.endAt !== ""}
+                  onValueChange={(on) =>
+                    setDraft({
+                      ...draft,
+                      schedule: {
+                        ...draft.schedule,
+                        endAt: on ? defaultOneOffTime(Date.now()).toISOString() : "",
+                      },
+                    })
+                  }
+                />
+              </View>
+              {draft.schedule.endAt === "" ? null : (
+                <InstantRows
+                  value={draft.schedule.endAt}
+                  onChange={(endAt) =>
+                    setDraft({ ...draft, schedule: { ...draft.schedule, endAt } })
+                  }
+                />
+              )}
+              <Text className="px-4 pb-3 text-sm text-foreground-muted">
+                When either is reached the task switches off and stays listed. Every run counts,
+                including manual ones
+                {draft.task ? `; this task has run ${draft.task.runCount} times` : ""}.
+              </Text>
             </>
           )}
           <View className="min-h-14 flex-row items-center gap-3 border-t border-border-subtle px-4 py-3">

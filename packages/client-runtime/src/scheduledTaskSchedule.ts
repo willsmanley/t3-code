@@ -71,15 +71,30 @@ export function parseActiveHoursDraft(
 /**
  * Why a switched-off task stopped by itself, or null when it is still on or
  * someone paused it. A one-off "missed" its time when the server was down then.
+ * A repeating task shows as ended once its run limit or end time is reached.
  */
 export function scheduledTaskEnding(
-  task: Pick<ScheduledTask, "enabled" | "schedule" | "lastRunAt">,
+  task: Pick<ScheduledTask, "enabled" | "schedule" | "lastRunAt" | "runCount">,
   now: number,
-): "ran" | "missed" | null {
-  if (task.enabled || task.schedule.type !== "once") return null;
-  const at = Date.parse(task.schedule.at);
-  if (task.lastRunAt !== null && Date.parse(task.lastRunAt) >= at) return "ran";
-  return at <= now ? "missed" : null;
+): "ran" | "missed" | "ended" | null {
+  if (task.enabled) return null;
+  const schedule = task.schedule;
+  if (schedule.type === "once") {
+    const at = Date.parse(schedule.at);
+    if (task.lastRunAt !== null && Date.parse(task.lastRunAt) >= at) return "ran";
+    return at <= now ? "missed" : null;
+  }
+  const limitReached =
+    schedule.endAfterRuns !== undefined && task.runCount >= schedule.endAfterRuns;
+  const endPassed = schedule.endAt !== undefined && Date.parse(schedule.endAt) <= now;
+  return limitReached || endPassed ? "ended" : null;
+}
+
+/** Blank means no limit; undefined means the text is not a whole number of runs, which blocks saving. */
+export function parseRunLimitDraft(value: string): number | null | undefined {
+  if (value.trim() === "") return null;
+  const runs = Number(value.trim());
+  return Number.isSafeInteger(runs) && runs >= 1 ? runs : undefined;
 }
 
 /** A starting time for a new one-off: the first whole hour at least an hour away. */

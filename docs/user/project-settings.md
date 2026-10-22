@@ -96,6 +96,14 @@ time to run it again. If the environment is off at that time and comes back
 more than ten minutes late, the run is skipped and the task shows **Missed**,
 the same way a fixed-time task skips a run it missed.
 
+Any other task can stop by itself. Set **Stop after** a number of runs, a time
+to stop at, or both. When either is reached, the task switches itself off and
+stays in the list marked **Ended**; a webhook task then refuses requests the
+way a paused one does. Every run counts toward the limit, including ones you
+start with **Run now**, and the count starts when the task is created. To run
+an ended task again, raise or clear the limit or move the stop time, then turn
+it back on.
+
 ## Webhook automations
 
 In **Settings → Scheduled tasks**, choose **On webhook**

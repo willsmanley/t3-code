@@ -20,6 +20,7 @@ import {
 import {
   activeHoursDraft,
   parseActiveHoursDraft,
+  parseRunLimitDraft,
   parseTimeZoneDraft,
   type ActiveHoursDraft,
 } from "@t3tools/client-runtime/scheduled-task-schedule";
@@ -66,6 +67,10 @@ export type ScheduleDraft = {
   readonly activeHours: ActiveHoursDraft;
   /** ISO time of a one-off run, or blank before one is picked. */
   readonly onceAt: string;
+  /** Blank for no run limit. */
+  readonly endAfterRuns: string;
+  /** ISO end time, or blank for none. */
+  readonly endAt: string;
   readonly signature: ScheduledTaskWebhookSignature | null;
   readonly maxDeliveryAgeMinutes: string;
   readonly replayKey: string;
@@ -84,6 +89,8 @@ export const DEFAULT_SCHEDULE: ScheduleDraft = {
   intervalMinutes: "15",
   activeHours: activeHoursDraft(undefined),
   onceAt: "",
+  endAfterRuns: "",
+  endAt: "",
   signature: null,
   maxDeliveryAgeMinutes: "",
   replayKey: "",
@@ -94,10 +101,19 @@ export const DEFAULT_SCHEDULE: ScheduleDraft = {
 };
 
 export function scheduleDraftForTask(task: Pick<ScheduledTask, "schedule">): ScheduleDraft {
+  const ends =
+    task.schedule.type === "once"
+      ? {}
+      : {
+          endAfterRuns:
+            task.schedule.endAfterRuns === undefined ? "" : String(task.schedule.endAfterRuns),
+          endAt: task.schedule.endAt ?? "",
+        };
   switch (task.schedule.type) {
     case "fixed_time":
       return {
         ...DEFAULT_SCHEDULE,
+        ...ends,
         timeOfDay: task.schedule.timeOfDay,
         weekdays: task.schedule.weekdays?.length
           ? [...new Set(task.schedule.weekdays)].sort((a, b) => a - b)
@@ -107,6 +123,7 @@ export function scheduleDraftForTask(task: Pick<ScheduledTask, "schedule">): Sch
     case "interval":
       return {
         ...DEFAULT_SCHEDULE,
+        ...ends,
         mode: "interval",
         intervalMinutes: String(Math.max(1, task.schedule.everyMs / 60_000)),
         activeHours: activeHoursDraft(task.schedule.activeHours),
@@ -116,6 +133,7 @@ export function scheduleDraftForTask(task: Pick<ScheduledTask, "schedule">): Sch
     case "webhook":
       return {
         ...DEFAULT_SCHEDULE,
+        ...ends,
         mode: "webhook",
         signature: task.schedule.signature,
         replayKey: task.schedule.dedupe?.replayKey ?? "",
@@ -135,6 +153,15 @@ export function scheduleDraftForTask(task: Pick<ScheduledTask, "schedule">): Sch
 }
 
 export function scheduleFromDraft(draft: ScheduleDraft): ScheduledTaskUpsertSchedule | null {
+  if (draft.mode === "once") {
+    return isAbsoluteDateTime(draft.onceAt) ? { type: "once", at: draft.onceAt } : null;
+  }
+  // Sent in full, so clearing a field in the form removes it on the server.
+  const endAfterRuns = parseRunLimitDraft(draft.endAfterRuns);
+  if (endAfterRuns === undefined || (draft.endAt !== "" && !isAbsoluteDateTime(draft.endAt))) {
+    return null;
+  }
+  const ends = { endAfterRuns, endAt: draft.endAt === "" ? null : draft.endAt };
   if (draft.mode === "webhook") {
     const maxDeliveryAgeMinutes = parseMaxDeliveryAge(draft.maxDeliveryAgeMinutes);
     if (maxDeliveryAgeMinutes === undefined) return null;
@@ -178,17 +205,15 @@ export function scheduleFromDraft(draft: ScheduleDraft): ScheduledTaskUpsertSche
       ...(webhookFilterDraftsChanged(draft.savedFilters, draft.filters)
         ? { filters: parsedFilters.filters }
         : {}),
+      ...ends,
     };
-  }
-  if (draft.mode === "once") {
-    return isAbsoluteDateTime(draft.onceAt) ? { type: "once", at: draft.onceAt } : null;
   }
   if (draft.mode === "interval") {
     const minutes = Number(draft.intervalMinutes);
     const everyMs = Math.round(minutes * 60_000);
     const activeHours = parseActiveHoursDraft(draft.activeHours);
     return minutes >= 1 && Number.isSafeInteger(everyMs) && activeHours !== undefined
-      ? { type: "interval", everyMs, activeHours }
+      ? { type: "interval", everyMs, activeHours, ...ends }
       : null;
   }
   const weekdays = [...new Set(draft.weekdays)].sort((a, b) => a - b);
@@ -206,6 +231,7 @@ export function scheduleFromDraft(draft: ScheduleDraft): ScheduledTaskUpsertSche
     timeOfDay: draft.timeOfDay,
     ...(weekdays.length === 7 ? {} : { weekdays }),
     timeZone,
+    ...ends,
   };
 }
 
@@ -243,6 +269,8 @@ function draftSignature(draft: ScheduledTaskDraft): string {
     draft.schedule.intervalMinutes,
     draft.schedule.activeHours,
     draft.schedule.onceAt,
+    draft.schedule.endAfterRuns,
+    draft.schedule.endAt,
     draft.schedule.maxDeliveryAgeMinutes,
     draft.schedule.replayKey,
     draft.schedule.coalesceKey,

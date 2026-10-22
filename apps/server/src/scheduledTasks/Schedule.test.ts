@@ -4,9 +4,11 @@ import * as DateTime from "effect/DateTime";
 
 import {
   activeHoursDeferral,
+  endsToStore,
   isMissedRun,
   isSameSchedule,
   nextScheduledRunAt,
+  scheduleEnd,
   timerScheduleToStore,
 } from "./Schedule.ts";
 
@@ -176,6 +178,42 @@ describe("scheduled task schedule calculation", () => {
       expect(
         isMissedRun({ type: "interval", everyMs: 60_000 }, due, at("2026-07-04T00:00:00.000Z")),
       ).toBe(false);
+    });
+  });
+
+  describe("stop conditions", () => {
+    const at = (value: string) => DateTime.makeUnsafe(value);
+    const now = at("2026-07-03T10:00:00.000Z");
+    const endAt = "2026-07-03T12:00:00.000Z";
+
+    it("ends a timer at its run limit or when its next run is after the end time", () => {
+      const interval = { type: "interval", everyMs: 3_600_000, endAfterRuns: 3, endAt } as const;
+      expect(scheduleEnd(interval, 2, at("2026-07-03T11:00:00.000Z"), now)).toBeNull();
+      expect(scheduleEnd(interval, 3, at("2026-07-03T11:00:00.000Z"), now)).toBe("run_limit");
+      expect(scheduleEnd(interval, 0, at(endAt), now)).toBeNull();
+      expect(scheduleEnd(interval, 0, at("2026-07-03T12:00:01.000Z"), now)).toBe("end_time");
+      const fixed = { type: "fixed_time", timeOfDay: "09:00", endAt } as const;
+      expect(scheduleEnd(fixed, 9, at("2026-07-04T09:00:00.000Z"), now)).toBe("end_time");
+      expect(scheduleEnd({ type: "fixed_time", timeOfDay: "09:00" }, 9, null, now)).toBeNull();
+    });
+
+    it("ends a webhook once the time passes, and a one-off once its time has gone", () => {
+      const webhook = { type: "webhook", signature: null, endAt } as const;
+      expect(scheduleEnd(webhook, 0, null, now)).toBeNull();
+      expect(scheduleEnd(webhook, 0, null, at("2026-07-03T12:00:01.000Z"))).toBe("end_time");
+      expect(scheduleEnd({ ...webhook, endAfterRuns: 1 }, 1, null, now)).toBe("run_limit");
+      expect(scheduleEnd({ type: "once", at: endAt }, 0, null, now)).toBe("once");
+    });
+
+    it("stores ends in UTC and keeps omitted ones across trigger types", () => {
+      const stored = timerScheduleToStore(
+        { type: "interval", everyMs: 60_000, endAfterRuns: 2, endAt: "2026-07-03T07:00:00-05:00" },
+        undefined,
+      );
+      expect(stored).toEqual({ type: "interval", everyMs: 60_000, endAfterRuns: 2, endAt });
+      expect(endsToStore({}, stored)).toEqual({ endAfterRuns: 2, endAt });
+      expect(endsToStore({ endAfterRuns: null }, stored)).toEqual({ endAt });
+      expect(endsToStore({}, { type: "once", at: endAt })).toEqual({});
     });
   });
 

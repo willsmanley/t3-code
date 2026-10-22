@@ -120,6 +120,9 @@ describe("scheduled task settings scope", () => {
   });
 });
 
+/** The form sends cleared stop conditions as null so the server removes them. */
+const noEnds = { endAfterRuns: null, endAt: null };
+
 const legacyTask: ScheduledTask = {
   id: ScheduledTaskId.make("legacy-task"),
   title: "Review issues",
@@ -162,6 +165,7 @@ describe("timed schedule settings", () => {
       type: "fixed_time",
       timeOfDay: "09:00",
       timeZone: "America/Chicago",
+      ...noEnds,
     });
     expect(scheduleFromDraft({ ...draft, timeZone: " " })).toMatchObject({ timeZone: null });
     expect(scheduleFromDraft({ ...draft, timeZone: "Chicago" })).toBeNull();
@@ -177,13 +181,36 @@ describe("timed schedule settings", () => {
       type: "interval",
       everyMs: 3_600_000,
       activeHours,
+      ...noEnds,
     });
     expect(
       scheduleFromDraft({ ...draft, activeHours: { ...draft.activeHours, enabled: false } }),
-    ).toEqual({ type: "interval", everyMs: 3_600_000, activeHours: null });
+    ).toEqual({ type: "interval", everyMs: 3_600_000, activeHours: null, ...noEnds });
     expect(
       scheduleFromDraft({ ...draft, activeHours: { ...draft.activeHours, end: "22:00" } }),
     ).toBeNull();
+  });
+});
+
+describe("stop conditions", () => {
+  it("round-trips ends, sends cleared ones as null, and rejects a bad limit", () => {
+    const endAt = "2026-07-04T14:00:00.000Z";
+    const draft = taskToDraft({
+      ...legacyTask,
+      schedule: { type: "interval", everyMs: 60_000, endAfterRuns: 3, endAt },
+    });
+    expect(draft.endAfterRuns).toBe("3");
+    expect(scheduleFromDraft(draft)).toMatchObject({ endAfterRuns: 3, endAt });
+    expect(scheduleFromDraft({ ...draft, endAfterRuns: "", endAt: "" })).toMatchObject({
+      endAfterRuns: null,
+      endAt: null,
+    });
+    expect(scheduleFromDraft({ ...draft, endAfterRuns: "0" })).toBeNull();
+    const webhook = taskToDraft({
+      ...legacyTask,
+      schedule: { type: "webhook", signature: null, endAfterRuns: 1 },
+    });
+    expect(scheduleFromDraft(webhook)).toMatchObject({ endAfterRuns: 1, endAt: null });
   });
 });
 
@@ -252,12 +279,14 @@ describe("webhook scheduled tasks", () => {
       signature,
       maxDeliveryAgeMinutes: null,
       dedupe: {},
+      ...noEnds,
     });
     expect(scheduleFromDraft({ ...draft, signatureSecret: " new " })).toEqual({
       type: "webhook",
       signature: { ...signature, secret: "new" },
       maxDeliveryAgeMinutes: null,
       dedupe: {},
+      ...noEnds,
     });
   });
 

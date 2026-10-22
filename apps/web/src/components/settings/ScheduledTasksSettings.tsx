@@ -151,6 +151,8 @@ const EMPTY_DRAFT: DraftState = {
   weekdays: new Set([1, 2, 3, 4, 5]),
   timeZone: "",
   onceAt: "",
+  endAfterRuns: "",
+  endAt: "",
   projectId: "",
   threadId: "",
   workspaceMode: "worktree",
@@ -385,12 +387,23 @@ function splitModelKey(value: string): ModelSelection | null {
   };
 }
 
+function dateTimeLabel(value: string): string {
+  return new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
+
 export function scheduleLabel(schedule: ScheduledTaskSchedule): string {
+  const cadence = cadenceLabel(schedule);
+  if (schedule.type === "once") return cadence;
+  const ends = [
+    ...(schedule.endAfterRuns === undefined ? [] : [`up to ${schedule.endAfterRuns} runs`]),
+    ...(schedule.endAt === undefined ? [] : [`until ${dateTimeLabel(schedule.endAt)}`]),
+  ];
+  return [cadence, ...ends].join(", ");
+}
+
+function cadenceLabel(schedule: ScheduledTaskSchedule): string {
   if (schedule.type === "webhook") return "On webhook";
-  if (schedule.type === "once") {
-    const at = new Date(schedule.at);
-    return `Once, ${at.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`;
-  }
+  if (schedule.type === "once") return `Once, ${dateTimeLabel(schedule.at)}`;
   if (schedule.type === "interval") {
     const minutes = schedule.everyMs / 60_000;
     const every = Number.isInteger(minutes)
@@ -445,7 +458,14 @@ export function ScheduledStoppedLabel(props: {
 }) {
   const nowMinute = useNowMinute();
   const ending = scheduledTaskEnding(props.task, Date.parse(`${nowMinute}:00.000Z`));
-  const label = ending === "ran" ? "Done" : ending === "missed" ? "Missed" : "Paused";
+  const label =
+    ending === "ran"
+      ? "Done"
+      : ending === "missed"
+        ? "Missed"
+        : ending === "ended"
+          ? "Ended"
+          : "Paused";
   return props.lowercase ? label.toLowerCase() : label;
 }
 
@@ -1899,6 +1919,43 @@ function ScheduledTaskEditorForm({
               </div>
             )}
           </div>
+
+          {draft.scheduleMode === "once" ? null : (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Label htmlFor="scheduled-task-end-after-runs">Stop after</Label>
+                <Input
+                  type="number"
+                  id="scheduled-task-end-after-runs"
+                  nativeInput
+                  min={1}
+                  step={1}
+                  className="w-20"
+                  placeholder="Any"
+                  value={draft.endAfterRuns}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, endAfterRuns: event.target.value }))
+                  }
+                />
+                <span className="text-xs text-muted-foreground">runs, or at</span>
+                <Input
+                  type="datetime-local"
+                  aria-label="Stop at"
+                  nativeInput
+                  className="w-56"
+                  value={draft.endAt}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, endAt: event.target.value }))
+                  }
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Leave both blank to keep running. Once either is reached the task switches off and
+                stays listed. Every run counts toward the limit, including manual ones
+                {liveTask ? `; this task has run ${liveTask.runCount} times` : ""}.
+              </p>
+            </div>
+          )}
 
           <div className="flex items-center justify-between gap-4">
             <div className="min-w-0 space-y-1">

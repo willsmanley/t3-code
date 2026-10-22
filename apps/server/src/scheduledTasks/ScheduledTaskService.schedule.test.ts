@@ -372,3 +372,85 @@ it.effect("skips a one-off missed while the server was down and switches it off"
     }).pipe(Effect.provide(serviceLayer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
+
+it.effect("switches an interval task off after its run limit and keeps it listed", () =>
+  withService(
+    "2026-07-03T10:00:00.000Z",
+    Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      const created = yield* service.upsert(
+        yield* taskInput({ type: "interval", everyMs: 60_000, endAfterRuns: 2 }),
+      );
+      expect(created.task.nextRunAt).toBe("2026-07-03T10:01:00.000Z");
+
+      const ended = yield* awaitTask((task) => !task.enabled);
+      yield* TestClock.adjust("5 minutes");
+      const task = yield* ended;
+      expect(task.runCount).toBe(2);
+      expect(task.nextRunAt).toBeNull();
+      expect(task.lastRunStatus).toBe("succeeded");
+
+      const resume = yield* service.setEnabled({ id: task.id, enabled: true }).pipe(Effect.flip);
+      expect(resume.message).toContain("limit of 2");
+      const keep = yield* service
+        .upsert(yield* taskInput({ type: "interval", everyMs: 60_000 }))
+        .pipe(Effect.flip);
+      expect(keep.message).toContain("limit of 2");
+      const raised = yield* service.upsert(
+        yield* taskInput({ type: "interval", everyMs: 60_000, endAfterRuns: 3 }),
+      );
+      expect(raised.task.enabled).toBe(true);
+      expect(raised.task.nextRunAt).not.toBeNull();
+    }),
+    launchingServiceLayer,
+  ),
+);
+
+it.effect("switches a fixed-time task off when its next run would be after the end time", () =>
+  withService(
+    "2026-07-03T08:00:00.000Z",
+    Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      const daily = { type: "fixed_time", timeOfDay: "09:00", timeZone: "UTC" };
+      const created = yield* service.upsert(
+        yield* taskInput({ ...daily, endAt: "2026-07-04T08:00:00Z" }),
+      );
+      expect(created.task.schedule).toMatchObject({ endAt: "2026-07-04T08:00:00.000Z" });
+      expect(created.task.nextRunAt).toBe("2026-07-03T09:00:00.000Z");
+
+      const ended = yield* awaitTask((task) => !task.enabled);
+      yield* TestClock.adjust("2 hours");
+      const task = yield* ended;
+      expect(task.runCount).toBe(1);
+      expect(task.nextRunAt).toBeNull();
+
+      const stale = yield* service.upsert(yield* taskInput(daily)).pipe(Effect.flip);
+      expect(stale.message).toContain("end time");
+      // Without the end, the task runs again; null removes a stored end.
+      const reopened = yield* service.upsert(yield* taskInput({ ...daily, endAt: null }));
+      expect(reopened.task.nextRunAt).toBe("2026-07-04T09:00:00.000Z");
+      expect(reopened.task.schedule).not.toHaveProperty("endAt");
+    }),
+    launchingServiceLayer,
+  ),
+);
+
+it.effect("keeps stored ends when a save omits them, even across trigger types", () =>
+  withService(
+    "2026-07-03T08:00:00.000Z",
+    Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      const ends = { endAfterRuns: 5, endAt: "2026-08-01T00:00:00.000Z" };
+      yield* service.upsert(yield* taskInput({ type: "interval", everyMs: 60_000, ...ends }));
+      const switched = yield* service.upsert(
+        yield* taskInput({ type: "fixed_time", timeOfDay: "09:00" }),
+      );
+      expect(switched.task.schedule).toMatchObject(ends);
+      const cleared = yield* service.upsert(
+        yield* taskInput({ type: "fixed_time", timeOfDay: "09:00", endAfterRuns: null }),
+      );
+      expect(cleared.task.schedule).not.toHaveProperty("endAfterRuns");
+      expect(cleared.task.schedule).toMatchObject({ endAt: ends.endAt });
+    }),
+  ),
+);

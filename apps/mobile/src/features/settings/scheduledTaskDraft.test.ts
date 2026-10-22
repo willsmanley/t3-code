@@ -13,6 +13,9 @@ import {
   scheduleFromDraft,
 } from "./scheduledTaskDraft";
 
+/** The form sends cleared stop conditions as null so the server removes them. */
+const noEnds = { endAfterRuns: null, endAt: null };
+
 describe("scheduleDraftForTask", () => {
   it("opens legacy sub-minute schedules at the writable minimum", () => {
     const draft = scheduleDraftForTask({ schedule: { type: "interval", everyMs: 30_000 } });
@@ -21,6 +24,7 @@ describe("scheduleDraftForTask", () => {
       type: "interval",
       everyMs: 60_000,
       activeHours: null,
+      ...noEnds,
     });
   });
 
@@ -64,7 +68,13 @@ describe("scheduleDraftForTask", () => {
     const saved = scheduleFromDraft(
       scheduleDraftForTask({ schedule: { type: "webhook", signature } }),
     );
-    expect(saved).toEqual({ type: "webhook", signature, maxDeliveryAgeMinutes: null, dedupe: {} });
+    expect(saved).toEqual({
+      type: "webhook",
+      signature,
+      maxDeliveryAgeMinutes: null,
+      dedupe: {},
+      ...noEnds,
+    });
     expect(saved?.type === "webhook" && saved.signature && "secret" in saved.signature).toBe(false);
   });
 
@@ -99,6 +109,7 @@ describe("scheduleFromDraft", () => {
       type: "fixed_time",
       timeOfDay: "09:00",
       timeZone: "America/Chicago",
+      ...noEnds,
     });
     expect(scheduleFromDraft({ ...draft, timeZone: "america/chicago" })).toMatchObject({
       timeZone: "America/Chicago",
@@ -115,7 +126,18 @@ describe("scheduleFromDraft", () => {
       type: "interval",
       everyMs,
       activeHours: null,
+      ...noEnds,
     });
+  });
+
+  it("keeps stop conditions, clears them when blank, and refuses a bad limit", () => {
+    const ends = { endAfterRuns: 3, endAt: "2026-07-04T14:00:00.000Z" };
+    const draft = scheduleDraftForTask({
+      schedule: { type: "fixed_time", timeOfDay: "09:00", ...ends },
+    });
+    expect(scheduleFromDraft(draft)).toMatchObject(ends);
+    expect(scheduleFromDraft({ ...draft, endAfterRuns: "", endAt: "" })).toMatchObject(noEnds);
+    expect(scheduleFromDraft({ ...draft, endAfterRuns: "1.5" })).toBeNull();
   });
 
   it("keeps a one-off time and refuses a blank one", () => {
@@ -131,7 +153,12 @@ describe("scheduleFromDraft", () => {
     const draft = scheduleDraftForTask({
       schedule: { type: "interval", everyMs: 3_600_000, activeHours },
     });
-    expect(scheduleFromDraft(draft)).toEqual({ type: "interval", everyMs: 3_600_000, activeHours });
+    expect(scheduleFromDraft(draft)).toEqual({
+      type: "interval",
+      everyMs: 3_600_000,
+      activeHours,
+      ...noEnds,
+    });
     expect(
       scheduleFromDraft({ ...draft, activeHours: { ...draft.activeHours, start: "06:00" } }),
     ).toBeNull();

@@ -125,13 +125,36 @@ function kept<A>(value: A | null | undefined, stored: A | undefined): A | undefi
   return value === undefined ? stored : (value ?? undefined);
 }
 
+/** Stored in UTC so every reader sees the same instant in the same form. */
+function utcInstant(value: string): string {
+  return DateTime.formatIso(DateTime.makeUnsafe(value));
+}
+
+/** Ends carry over when a repeating task changes trigger type, as nothing else ties them to one. */
+export function endsToStore(
+  input: {
+    readonly endAfterRuns?: number | null | undefined;
+    readonly endAt?: string | null | undefined;
+  },
+  stored: ScheduledTaskSchedule | undefined,
+): { readonly endAfterRuns?: number; readonly endAt?: string } {
+  const storedEnds = stored === undefined || stored.type === "once" ? undefined : stored;
+  const endAfterRuns = kept(input.endAfterRuns, storedEnds?.endAfterRuns);
+  const endAt = kept(
+    input.endAt == null ? input.endAt : utcInstant(input.endAt),
+    storedEnds?.endAt,
+  );
+  return {
+    ...(endAfterRuns === undefined ? {} : { endAfterRuns }),
+    ...(endAt === undefined ? {} : { endAt }),
+  };
+}
+
 export function timerScheduleToStore(
   input: Exclude<ScheduledTaskUpsertSchedule, { readonly type: "webhook" }>,
   stored: ScheduledTaskSchedule | undefined,
 ): ScheduledTaskSchedule {
-  // Stored in UTC so every reader sees the same instant in the same form.
-  if (input.type === "once")
-    return { type: "once", at: DateTime.formatIso(DateTime.makeUnsafe(input.at)) };
+  if (input.type === "once") return { type: "once", at: utcInstant(input.at) };
   if (input.type === "interval") {
     const activeHours = kept(
       input.activeHours,
@@ -141,6 +164,7 @@ export function timerScheduleToStore(
       type: "interval",
       everyMs: input.everyMs,
       ...(activeHours === undefined ? {} : { activeHours }),
+      ...endsToStore(input, stored),
     };
   }
   const timeZone = kept(
@@ -152,6 +176,7 @@ export function timerScheduleToStore(
     timeOfDay: input.timeOfDay,
     ...(input.weekdays === undefined ? {} : { weekdays: input.weekdays }),
     ...(timeZone === undefined ? {} : { timeZone }),
+    ...endsToStore(input, stored),
   };
 }
 
@@ -204,4 +229,28 @@ export function isMissedRun(
 ): boolean {
   if (schedule.type !== "fixed_time" && schedule.type !== "once") return false;
   return DateTime.toEpochMillis(now) - DateTime.toEpochMillis(dueAt) > MISSED_RUN_GRACE_MS;
+}
+
+export type ScheduleEnd = "once" | "run_limit" | "end_time";
+
+/**
+ * Why a schedule has no run left, or null while it has: a one-off past its
+ * time, a run limit reached, or no run before the end time. `next` is the run
+ * the schedule would make next; webhooks have none and end when the time passes.
+ */
+export function scheduleEnd(
+  schedule: ScheduledTaskSchedule,
+  runCount: number,
+  next: DateTime.DateTime | null,
+  now: DateTime.DateTime,
+): ScheduleEnd | null {
+  if (schedule.type === "once") return next === null ? "once" : null;
+  if (schedule.endAfterRuns !== undefined && runCount >= schedule.endAfterRuns) return "run_limit";
+  const endAt =
+    schedule.endAt === undefined ? null : Option.getOrNull(DateTime.make(schedule.endAt));
+  if (endAt === null) return null;
+  const last = schedule.type === "webhook" ? now : next;
+  return last !== null && DateTime.toEpochMillis(last) > DateTime.toEpochMillis(endAt)
+    ? "end_time"
+    : null;
 }
