@@ -52,9 +52,9 @@ jobs:
             echo "Resolve the conflict on main, then rerun this workflow." >&2
             exit 1
           fi
-          if [[ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]]; then
-            git push origin HEAD:main
-          fi
+          # The merge result is used directly by the build job. Do not push it
+          # from GITHUB_TOKEN: an upstream workflow-file change requires the
+          # separate `workflow` scope, which Actions tokens do not have.
 
       - name: Export synced commit
         id: ref
@@ -179,7 +179,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.nightly.outputs.tag }}
           RELEASE_NAME: ${{ steps.nightly.outputs.name }}
-          RELEASE_REF: ${{ needs.sync.outputs.ref }}
+          RELEASE_REF: ${{ github.sha }}
         shell: bash
         run: |
           set -euo pipefail
