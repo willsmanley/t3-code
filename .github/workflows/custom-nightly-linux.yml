@@ -68,14 +68,6 @@ jobs:
           # the same files so a conflict cannot skip the nightly runtime.
           git merge -X ours --no-edit upstream/main
 
-      - name: Resolve CLI build Node version
-        shell: bash
-        run: |
-          set -euo pipefail
-          sea_node_version="$(sed -n 's/^const SEA_NODE_VERSION = "\([0-9][^"]*\)";.*/\1/p' apps/server/vite.config.ts | head -n 1)"
-          test -n "$sea_node_version"
-          echo "VP_NODE_VERSION=$sea_node_version" >> "$GITHUB_ENV"
-
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
