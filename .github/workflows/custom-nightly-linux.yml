@@ -43,7 +43,10 @@ jobs:
           git config user.email "t3code-nightly[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/pingdotgg/t3code.git
           git fetch --no-tags upstream main
-          if ! git merge --no-edit upstream/main; then
+          # The fork intentionally owns the sidebar surface. Keep those local
+          # files when upstream changes them so a UI conflict cannot skip the
+          # nightly build and strand SSH environments without a runtime.
+          if ! git merge -X ours --no-edit upstream/main; then
             git merge --abort || true
             echo "Upstream sync conflicted with the sidebar customization." >&2
             echo "Resolve the conflict on main, then rerun this workflow." >&2
