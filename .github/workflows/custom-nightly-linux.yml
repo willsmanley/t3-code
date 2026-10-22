@@ -68,6 +68,14 @@ jobs:
           # the same files so a conflict cannot skip the nightly runtime.
           git merge -X ours --no-edit upstream/main
 
+      - name: Resolve CLI build Node version
+        shell: bash
+        run: |
+          set -euo pipefail
+          sea_node_version="$(sed -n 's/^const SEA_NODE_VERSION = "\([0-9][^"]*\)";.*/\1/p' apps/server/vite.config.ts | head -n 1)"
+          test -n "$sea_node_version"
+          echo "VP_NODE_VERSION=$sea_node_version" >> "$GITHUB_ENV"
+
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
@@ -113,8 +121,6 @@ jobs:
       # SSH environments install the desktop's exact version. Publish its
       # runtime in the same release so upgrading cannot strand remote hosts.
       - name: Build CLI single-executable
-        env:
-          VP_NODE_VERSION: "26.8.2"
         run: node apps/server/scripts/cli.ts build-exe --verbose
 
       - name: Build resource monitor for the CLI archive
