@@ -4,6 +4,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodePlatformCrypto from "@effect/platform-node/NodeCrypto";
 import { assert, it } from "@effect/vitest";
 import {
+  type ScheduledTask,
   ScheduledTaskUpsertInput,
   ScheduledTaskWebhookDeliveryId,
   SecretRequestError,
@@ -17,6 +18,7 @@ import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as EffectScheduler from "effect/Scheduler";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 import * as Tracer from "effect/Tracer";
@@ -435,6 +437,58 @@ it.effect("logs but does not run deliveries to a disabled task, and refuses run 
       assert.equal(yield* Queue.size(launches), 0);
       const runNow = yield* service.runNow({ id: task.id }).pipe(Effect.flip);
       assert.equal(runNow.message, "Webhook tasks run when their URL receives a request.");
+    }),
+  ),
+);
+
+/** Resolves once a list snapshot shows the first task switched off. */
+const awaitSwitchedOff = (service: ScheduledTaskService.ScheduledTaskService["Service"]) =>
+  Effect.gen(function* () {
+    const off = yield* Deferred.make<ScheduledTask>();
+    yield* service.subscribeList().pipe(
+      Stream.runForEach(({ tasks }) =>
+        tasks[0]?.enabled === false ? Deferred.succeed(off, tasks[0]) : Effect.void,
+      ),
+      Effect.forkChild,
+    );
+    return Deferred.await(off);
+  });
+
+it.effect("stops taking deliveries after its end time and switches itself off", () =>
+  withService(({ service, launches }) =>
+    Effect.gen(function* () {
+      const endAt = DateTime.formatIso(DateTime.add(yield* DateTime.now, { hours: 1 }));
+      const { task } = yield* service.upsert(
+        yield* webhookTaskInput({ schedule: { type: "webhook", endAt } }),
+      );
+      assert.equal((yield* service.triggerWebhook(requestFor(task)))._tag, "accepted");
+      yield* Queue.take(launches);
+      const switchedOff = yield* awaitSwitchedOff(service);
+      yield* TestClock.adjust("61 minutes");
+      assert.equal((yield* service.triggerWebhook(requestFor(task)))._tag, "disabled");
+      assert.equal(yield* Queue.size(launches), 0);
+      assert.equal((yield* switchedOff).runCount, 1);
+    }),
+  ),
+);
+
+it.effect("stops taking deliveries once its run limit is reached", () =>
+  withService(({ service, launches }) =>
+    Effect.gen(function* () {
+      const { task } = yield* service.upsert(
+        yield* webhookTaskInput({ schedule: { type: "webhook", endAfterRuns: 2 } }),
+      );
+      const switchedOff = yield* awaitSwitchedOff(service);
+      for (let run = 0; run < 2; run += 1) {
+        assert.equal((yield* service.triggerWebhook(requestFor(task)))._tag, "accepted");
+        yield* Queue.take(launches);
+      }
+      const ended = yield* switchedOff;
+      assert.equal(ended.runCount, 2);
+      assert.equal((yield* service.triggerWebhook(requestFor(task)))._tag, "disabled");
+      assert.equal(yield* Queue.size(launches), 0);
+      const resume = yield* service.setEnabled({ id: task.id, enabled: true }).pipe(Effect.flip);
+      assert.include(resume.message, "limit of 2");
     }),
   ),
 );

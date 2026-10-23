@@ -67,7 +67,7 @@ const OrchestratorMcpSchedule = Schema.Union([
   OrchestratorMcpScheduleFromJsonString,
 ]).annotate({
   description:
-    "Trigger object: {type:'interval', everyMs}, {type:'fixed_time', timeOfDay, weekdays?}, or {type:'webhook'} to run on each request to a generated URL. Never stringify it unless the provider requires the compatibility form.",
+    "Trigger object: {type:'interval', everyMs, activeHours?}, {type:'fixed_time', timeOfDay, weekdays?, timeZone?}, {type:'once', at} for a single run, or {type:'webhook'} to run on each request to a generated URL. Repeating triggers also take endAfterRuns? and endAt? to stop by themselves. Never stringify it unless the provider requires the compatibility form.",
 });
 
 const OrchestratorMcpTargetOptionsFromRecord = Schema.Record(
@@ -612,6 +612,10 @@ export const OrchestratorMcpScheduledTask = Schema.Struct({
   schedule: ScheduledTaskSchedule,
   nextRunAt: Schema.NullOr(IsoDateTime),
   lastRunStatus: ScheduledTaskRunStatus,
+  runCount: Schema.Int.annotate({
+    description:
+      "Runs so far, including manual and webhook runs. A schedule's endAfterRuns is compared with this.",
+  }),
   webhookUrl: Schema.optional(Schema.String).annotate({
     description:
       "Public URL to give the sender. Absent when this environment has no T3 Connect managed tunnel; the user must enable T3 Connect remote access first.",

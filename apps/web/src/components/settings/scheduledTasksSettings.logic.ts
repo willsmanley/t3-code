@@ -18,6 +18,13 @@ import {
   webhookFilterDraftsChanged,
   type WebhookFilterDraft,
 } from "@t3tools/client-runtime/scheduled-task-webhook";
+import {
+  activeHoursDraft,
+  parseActiveHoursDraft,
+  parseRunLimitDraft,
+  parseTimeZoneDraft,
+  type ActiveHoursDraft,
+} from "@t3tools/client-runtime/scheduled-task-schedule";
 
 import {
   resolveProjectSettings,
@@ -52,7 +59,7 @@ export function validateScheduledTasksSearch(raw: Record<string, unknown>) {
   };
 }
 
-export type ScheduleMode = "fixed" | "interval" | "webhook";
+export type ScheduleMode = "fixed" | "interval" | "once" | "webhook";
 export type WorkspaceMode = "root" | "worktree" | "existing_worktree";
 
 export interface DraftState {
@@ -62,8 +69,17 @@ export interface DraftState {
   readonly enabled: boolean;
   readonly scheduleMode: ScheduleMode;
   readonly intervalMinutes: string;
+  readonly activeHours: ActiveHoursDraft;
   readonly timeOfDay: string;
   readonly weekdays: ReadonlySet<number>;
+  /** Blank runs at the environment's local time. */
+  readonly timeZone: string;
+  /** A datetime-local value, read in this browser's time zone. */
+  readonly onceAt: string;
+  /** Blank for no limit. */
+  readonly endAfterRuns: string;
+  /** A datetime-local value, or blank for no end time. */
+  readonly endAt: string;
   readonly projectId: string;
   readonly threadId: string;
   readonly workspaceMode: WorkspaceMode;
@@ -99,8 +115,44 @@ export const WEBHOOK_SIGNATURE_DEFAULTS = {
   signaturePrefix: "sha256=",
 } as const;
 
-export function webhookDraftErrors(draft: DraftState) {
-  if (draft.scheduleMode !== "webhook") return [];
+export function scheduleDraftErrors(draft: DraftState) {
+  if (draft.scheduleMode === "once") {
+    return oneOffTime(draft.onceAt) === null
+      ? [{ title: "Pick a time", description: "Choose the date and time to run the task." }]
+      : [];
+  }
+  const errors: Array<{ title: string; description: string }> =
+    draft.scheduleMode === "webhook" ? webhookDraftErrors(draft) : [];
+  if (draft.scheduleMode === "fixed" && parseTimeZoneDraft(draft.timeZone) === undefined)
+    errors.push({
+      title: "Unknown time zone",
+      description: "Pick a time zone such as America/Chicago, or leave it blank.",
+    });
+  if (draft.scheduleMode === "interval" && parseActiveHoursDraft(draft.activeHours) === undefined)
+    errors.push({
+      title: "Invalid active hours",
+      description:
+        "Use different start and end times, and a time zone such as America/Chicago or none.",
+    });
+  if (parseRunLimitDraft(draft.endAfterRuns) === undefined)
+    errors.push({
+      title: "Invalid run limit",
+      description: "Enter a whole number of runs, or leave it blank.",
+    });
+  if (draft.endAt.trim() && oneOffTime(draft.endAt) === null)
+    errors.push({ title: "Invalid end time", description: "Pick a date and time, or clear it." });
+  return errors;
+}
+
+/** Sent in full, so clearing a field in the form removes it on the server. */
+function endsFromDraft(draft: DraftState) {
+  return {
+    endAfterRuns: parseRunLimitDraft(draft.endAfterRuns) ?? null,
+    endAt: draft.endAt.trim() ? oneOffTime(draft.endAt) : null,
+  };
+}
+
+function webhookDraftErrors(draft: DraftState): Array<{ title: string; description: string }> {
   if (parseMaxDeliveryAge(draft.maxDeliveryAgeMinutes) === undefined)
     return [
       {
@@ -146,9 +198,22 @@ export function webhookDeliveryLabel(delivery: {
   return labels[delivery.outcome] ?? delivery.outcome.replaceAll("_", " ");
 }
 
+function oneOffTime(value: string): string | null {
+  const time = new Date(value);
+  return Number.isFinite(time.getTime()) ? time.toISOString() : null;
+}
+
+/** The datetime-local value for an instant, in this browser's time zone. */
+export function localDateTimeInputValue(value: string | Date): string {
+  const time = typeof value === "string" ? new Date(value) : value;
+  if (!Number.isFinite(time.getTime())) return "";
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${time.getFullYear()}-${pad(time.getMonth() + 1)}-${pad(time.getDate())}T${pad(time.getHours())}:${pad(time.getMinutes())}`;
+}
+
 export function scheduleFromDraft(draft: DraftState): ScheduledTaskUpsertSchedule | null {
+  if (scheduleDraftErrors(draft).length > 0) return null;
   if (draft.scheduleMode === "webhook") {
-    if (webhookDraftErrors(draft).length > 0) return null;
     const maxDeliveryAgeMinutes = parseMaxDeliveryAge(draft.maxDeliveryAgeMinutes);
     const replayKey = draft.replayKey.trim();
     const coalesceKey = draft.coalesceKey.trim();
@@ -183,17 +248,29 @@ export function scheduleFromDraft(draft: DraftState): ScheduledTaskUpsertSchedul
       ...(webhookFilterDraftsChanged(draft.savedFilters, draft.filters)
         ? { filters: parsedFilters.filters }
         : {}),
+      ...endsFromDraft(draft),
     };
+  }
+  if (draft.scheduleMode === "once") {
+    const at = oneOffTime(draft.onceAt);
+    return at === null ? null : { type: "once", at };
   }
   if (draft.scheduleMode === "interval") {
     const everyMs = Math.round(Number(draft.intervalMinutes) * 60_000);
-    return { type: "interval", everyMs };
+    return {
+      type: "interval",
+      everyMs,
+      activeHours: parseActiveHoursDraft(draft.activeHours) ?? null,
+      ...endsFromDraft(draft),
+    };
   }
   const selectedEveryDay = draft.weekdays.size === 0 || draft.weekdays.size === 7;
   return {
     type: "fixed_time",
     timeOfDay: draft.timeOfDay || "09:00",
     ...(selectedEveryDay ? {} : { weekdays: [...draft.weekdays].toSorted() }),
+    timeZone: parseTimeZoneDraft(draft.timeZone) ?? null,
+    ...endsFromDraft(draft),
   };
 }
 
@@ -210,11 +287,24 @@ export function taskToDraft(task: ScheduledTask): DraftState {
     prompt: task.prompt,
     enabled: task.enabled,
     scheduleMode:
-      schedule.type === "interval" ? "interval" : schedule.type === "webhook" ? "webhook" : "fixed",
+      schedule.type === "interval" || schedule.type === "once" || schedule.type === "webhook"
+        ? schedule.type
+        : "fixed",
     intervalMinutes:
       schedule.type === "interval" ? String(Math.max(1, schedule.everyMs / 60_000)) : "15",
+    activeHours: activeHoursDraft(schedule.type === "interval" ? schedule.activeHours : undefined),
     timeOfDay: schedule.type === "fixed_time" ? schedule.timeOfDay : "09:00",
     weekdays,
+    timeZone: schedule.type === "fixed_time" ? (schedule.timeZone ?? "") : "",
+    onceAt: schedule.type === "once" ? localDateTimeInputValue(schedule.at) : "",
+    endAfterRuns:
+      schedule.type !== "once" && schedule.endAfterRuns !== undefined
+        ? String(schedule.endAfterRuns)
+        : "",
+    endAt:
+      schedule.type !== "once" && schedule.endAt !== undefined
+        ? localDateTimeInputValue(schedule.endAt)
+        : "",
     projectId: task.projectId,
     threadId: task.threadId ?? "",
     workspaceMode: task.workspaceStrategy.type,
