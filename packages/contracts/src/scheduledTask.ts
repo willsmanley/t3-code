@@ -1,3 +1,5 @@
+import * as DateTime from "effect/DateTime";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import {
@@ -23,22 +25,113 @@ const TimeOfDay = TrimmedNonEmptyString.check(
   Schema.isPattern(/^([01]?\d|2[0-3]):([0-5]\d)$/),
 ).annotate({ description: "Local wall-clock time in 24-hour HH:MM form, such as 09:30." });
 
+/** Whether this runtime's Intl data knows the time zone. */
+export function isValidTimeZone(value: string): boolean {
+  return Option.isSome(DateTime.zoneMakeNamed(value));
+}
+
+/**
+ * Stored zones are read without the Intl check, so a client whose time zone
+ * data lacks one still lists the task.
+ */
+const ScheduledTaskTimeZone = TrimmedNonEmptyString.annotate({
+  description: "IANA time zone name, such as America/Chicago.",
+});
+
+const WritableTimeZone = ScheduledTaskTimeZone.check(
+  Schema.makeFilter((value) => isValidTimeZone(value) || `Unknown time zone: ${value}`),
+);
+
+const ABSOLUTE_DATE_TIME =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/i;
+
+/** An ISO date-time with Z or an offset, so it names the same instant on every machine. */
+export function isAbsoluteDateTime(value: string): boolean {
+  return ABSOLUTE_DATE_TIME.test(value) && Number.isFinite(Date.parse(value));
+}
+
+const WritableInstant = TrimmedNonEmptyString.check(
+  Schema.makeFilter(
+    (value) =>
+      isAbsoluteDateTime(value) ||
+      "Use an ISO date-time with Z or an offset, such as 2026-10-23T14:00:00Z.",
+  ),
+);
+
+const ScheduledTaskRunLimit = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
+
+/** Stored ends of a repeating task; it switches itself off when one is reached. */
+const ScheduledTaskEndFields = {
+  endAfterRuns: Schema.optional(ScheduledTaskRunLimit),
+  endAt: Schema.optional(IsoDateTime),
+};
+
+const WritableEndFields = {
+  endAfterRuns: Schema.optional(Schema.NullOr(ScheduledTaskRunLimit)).annotate({
+    description:
+      "Switch the task off once its run count reaches this many. Every run since the task was created counts, including manual and webhook runs, so for N more runs on an existing task use its runCount + N. Omit to keep the stored limit; null removes it.",
+  }),
+  endAt: Schema.optional(Schema.NullOr(WritableInstant)).annotate({
+    description:
+      "Switch the task off instead of running after this time, an ISO date-time with Z or an offset. Omit to keep the stored end; null removes it.",
+  }),
+};
+
 export const MIN_SCHEDULED_TASK_INTERVAL_MS = 60_000;
 
 const ScheduledTaskIntervalMs = Schema.Int.check(Schema.isGreaterThan(0)).annotate({
   description: "Positive interval in milliseconds.",
 });
 
+const ActiveHoursWindowFields = {
+  start: TimeOfDay.annotate({ description: "Window start in 24-hour HH:MM form." }),
+  end: TimeOfDay.annotate({
+    description:
+      "Window end in 24-hour HH:MM form, not included. Earlier than start for a window that crosses midnight.",
+  }),
+};
+
+const ActiveHoursDescription =
+  "Hours when runs may start. A run that would fall outside waits for the next window start without running.";
+
+const ScheduledTaskActiveHours = Schema.Struct({
+  ...ActiveHoursWindowFields,
+  timeZone: Schema.optional(ScheduledTaskTimeZone),
+}).annotate({ description: ActiveHoursDescription });
+export type ScheduledTaskActiveHours = typeof ScheduledTaskActiveHours.Type;
+
+const minuteOfDay = (value: string) => {
+  const [hour = 0, minute = 0] = value.split(":").map(Number);
+  return hour * 60 + minute;
+};
+
+const WritableActiveHours = Schema.Struct({
+  ...ActiveHoursWindowFields,
+  timeZone: Schema.optional(WritableTimeZone).annotate({
+    description: "IANA time zone for start and end. Omit for the environment's local time.",
+  }),
+})
+  .check(
+    Schema.makeFilter(
+      ({ start, end }) =>
+        minuteOfDay(start) !== minuteOfDay(end) ||
+        "Active hours need different start and end times.",
+    ),
+  )
+  .annotate({ description: ActiveHoursDescription });
+
 const ScheduledTaskIntervalSchedule = Schema.Struct({
   type: Schema.Literal("interval").annotate({
     description: "Select interval scheduling.",
   }),
   everyMs: ScheduledTaskIntervalMs,
+  activeHours: Schema.optional(ScheduledTaskActiveHours),
+  ...ScheduledTaskEndFields,
 }).annotate({
   description: "Run repeatedly after a fixed number of milliseconds.",
 });
 
-const ScheduledTaskFixedTimeSchedule = Schema.Struct({
+const ScheduledTaskFixedTimeFields = {
   type: Schema.Literal("fixed_time").annotate({
     description: "Select a fixed local wall-clock time.",
   }),
@@ -52,9 +145,48 @@ const ScheduledTaskFixedTimeSchedule = Schema.Struct({
       description: "Optional weekdays; omit to run every day.",
     }),
   ),
+};
+
+const ScheduledTaskFixedTimeSchedule = Schema.Struct({
+  ...ScheduledTaskFixedTimeFields,
+  timeZone: Schema.optional(ScheduledTaskTimeZone),
+  ...ScheduledTaskEndFields,
 }).annotate({
-  description: "Run at a fixed local wall-clock time on selected weekdays.",
+  description:
+    "Run at a fixed wall-clock time on selected weekdays, in timeZone or the environment's local time.",
 });
+
+const ScheduledTaskUpsertFixedTimeSchedule = Schema.Struct({
+  ...ScheduledTaskFixedTimeFields,
+  timeZone: Schema.optional(Schema.NullOr(WritableTimeZone)).annotate({
+    description:
+      "IANA time zone for timeOfDay, such as America/Chicago. Without one, the time is the environment's local time. Omit to keep the stored zone; null removes it.",
+  }),
+  ...WritableEndFields,
+}).annotate({
+  description:
+    "Run at a fixed wall-clock time on selected weekdays, in timeZone or the environment's local time.",
+});
+
+const ScheduledTaskOnceType = Schema.Literal("once").annotate({
+  description: "Run one time.",
+});
+
+const OnceDescription =
+  "Run once at a set time. Afterwards the task stays listed, switched off, until a new time is saved.";
+
+const ScheduledTaskOnceSchedule = Schema.Struct({
+  type: ScheduledTaskOnceType,
+  at: IsoDateTime,
+}).annotate({ description: OnceDescription });
+
+const ScheduledTaskUpsertOnceSchedule = Schema.Struct({
+  type: ScheduledTaskOnceType,
+  at: WritableInstant.annotate({
+    description:
+      "When to run, as an ISO date-time with Z or an offset, such as 2026-10-23T14:00:00Z. Must be in the future.",
+  }),
+}).annotate({ description: OnceDescription });
 
 const ScheduledTaskWebhookSignatureFields = {
   header: TrimmedNonEmptyString.annotate({
@@ -154,6 +286,7 @@ const ScheduledTaskWebhookSchedule = Schema.Struct({
   maxDeliveryAgeMinutes: Schema.optional(Schema.NullOr(WebhookMaxDeliveryAgeMinutes)),
   dedupe: Schema.optional(ScheduledTaskWebhookDedupe),
   filters: Schema.optional(ScheduledTaskWebhookFilters),
+  ...ScheduledTaskEndFields,
 }).annotate({
   description:
     "Run on each request to the task's webhook URL. The prompt may use {{body.path}}, {{headers.name}}, {{query.name}}, {{body}} and {{request}} placeholders.",
@@ -182,6 +315,7 @@ const ScheduledTaskUpsertWebhookSchedule = Schema.Struct({
   maxDeliveryAgeMinutes: Schema.optional(Schema.NullOr(WebhookMaxDeliveryAgeMinutes)),
   dedupe: Schema.optional(ScheduledTaskWebhookDedupe),
   filters: Schema.optional(ScheduledTaskWebhookFilters),
+  ...WritableEndFields,
 }).annotate({
   description:
     "Run on each request to the task's webhook URL. The prompt may use {{body.path}}, {{headers.name}}, {{query.name}}, {{body}} and {{request}} placeholders.",
@@ -194,10 +328,11 @@ const ScheduledTaskUpsertWebhookSchedule = Schema.Struct({
 export const ScheduledTaskSchedule = Schema.Union([
   ScheduledTaskIntervalSchedule,
   ScheduledTaskFixedTimeSchedule,
+  ScheduledTaskOnceSchedule,
   ScheduledTaskWebhookSchedule,
 ]).annotate({
   description:
-    "Structured trigger. Pass an object with type 'interval', 'fixed_time' or 'webhook'.",
+    "Structured trigger. Pass an object with type 'interval', 'fixed_time', 'once' or 'webhook'.",
 });
 export type ScheduledTaskSchedule = typeof ScheduledTaskSchedule.Type;
 
@@ -211,13 +346,19 @@ export const ScheduledTaskUpsertSchedule = Schema.Union([
     ).annotate({
       description: "Interval in milliseconds, with a minimum of 60000 (one minute).",
     }),
+    activeHours: Schema.optional(Schema.NullOr(WritableActiveHours)).annotate({
+      description: `${ActiveHoursDescription} Omit to keep the stored window; null removes it.`,
+    }),
+    ...WritableEndFields,
   }).annotate({
     description: "Run repeatedly after a fixed number of milliseconds.",
   }),
-  ScheduledTaskFixedTimeSchedule,
+  ScheduledTaskUpsertFixedTimeSchedule,
+  ScheduledTaskUpsertOnceSchedule,
   ScheduledTaskUpsertWebhookSchedule,
 ]).annotate({
-  description: "Writable trigger. Pass an object with type 'interval', 'fixed_time' or 'webhook'.",
+  description:
+    "Writable trigger. Pass an object with type 'interval', 'fixed_time', 'once' or 'webhook'.",
 });
 export type ScheduledTaskUpsertSchedule = typeof ScheduledTaskUpsertSchedule.Type;
 

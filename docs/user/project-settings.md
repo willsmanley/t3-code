@@ -66,7 +66,8 @@ Open **Settings → Scheduled tasks** to create recurring tasks or manage existi
 ones across your connected environments. Use the settings filter to narrow the
 list by environment or project. Each task runs on the environment you choose,
 using its project, model, and workspace settings. Fixed-time schedules use that
-environment's time zone, which may differ from your phone's.
+environment's time zone, which may differ from your phone's, unless the task
+sets its own.
 
 Deleting a thread also deletes tasks that post into that thread. Tasks that start
 a new thread on each run survive deletion of their previous threads.
@@ -75,6 +76,33 @@ You can edit, pause, resume, run immediately, or delete a task from the list.
 Webhook tasks only run when their URL is called, so they can't be run
 immediately.
 Leaving an edited form asks before discarding unsaved changes.
+
+## Scheduled task timing
+
+A task that runs **At a time** uses the environment's clock unless you set a
+**Time zone**, such as `America/Chicago`. It then keeps that local time when
+daylight saving starts or ends. A time skipped when clocks move forward runs
+an hour later that day, and a time that repeats when they move back runs once.
+
+A task that runs **Every interval** can be limited to **Active hours**, such as
+09:00 to 17:00. A run that would fall outside them waits for the next start of
+the window instead of running. An end before the start makes a window that
+crosses midnight, such as 22:00 to 06:00. Active hours use the environment's
+clock unless you give them a time zone.
+
+Choose **Once** to run a task a single time. Afterwards it stays in the list,
+switched off and marked **Done**, so its last run stays visible. Pick a new
+time to run it again. If the environment is off at that time and comes back
+more than ten minutes late, the run is skipped and the task shows **Missed**,
+the same way a fixed-time task skips a run it missed.
+
+Any other task can stop by itself. Set **Stop after** a number of runs, a time
+to stop at, or both. When either is reached, the task switches itself off and
+stays in the list marked **Ended**; a webhook task then refuses requests the
+way a paused one does. Every run counts toward the limit, including ones you
+start with **Run now**, and the count starts when the task is created. To run
+an ended task again, raise or clear the limit or move the stop time, then turn
+it back on.
 
 ## Webhook automations
 

@@ -56,6 +56,14 @@ import {
 import { usePrimaryCloudLinkState } from "../../cloud/primaryCloudLinkState";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { webhookAddress } from "@t3tools/client-runtime/webhook-address";
+import {
+  activeHoursDraft,
+  defaultOneOffTime,
+  localTimeZone,
+  scheduledTaskEnding,
+  timeZoneSuggestions,
+  type ActiveHoursDraft,
+} from "@t3tools/client-runtime/scheduled-task-schedule";
 import { Link } from "@tanstack/react-router";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { useNowMinute } from "../../hooks/useNowMinute";
@@ -80,9 +88,10 @@ import { SettingsGroup } from "./SettingsGroup";
 import { settingsScopeEnvironmentLabel, settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
 import {
   WEBHOOK_SIGNATURE_DEFAULTS,
-  webhookDraftErrors,
+  scheduleDraftErrors,
   webhookDeliveryLabel,
   matchesScheduledTaskScope,
+  localDateTimeInputValue,
   scheduleFromDraft,
   scheduledTaskDefaultModel,
   taskToDraft,
@@ -137,8 +146,13 @@ const EMPTY_DRAFT: DraftState = {
   enabled: true,
   scheduleMode: "fixed",
   intervalMinutes: "15",
+  activeHours: activeHoursDraft(undefined),
   timeOfDay: "09:00",
   weekdays: new Set([1, 2, 3, 4, 5]),
+  timeZone: "",
+  onceAt: "",
+  endAfterRuns: "",
+  endAt: "",
   projectId: "",
   threadId: "",
   workspaceMode: "worktree",
@@ -277,6 +291,93 @@ function Field({
   );
 }
 
+const TIME_ZONE_LIST_ID = "scheduled-task-time-zones";
+
+function TimeZoneOptions() {
+  return (
+    <datalist id={TIME_ZONE_LIST_ID}>
+      {timeZoneSuggestions().map((zone) => (
+        <option key={zone} value={zone} />
+      ))}
+    </datalist>
+  );
+}
+
+/** Blank means the environment's local time, which may differ from this browser's. */
+function TimeZoneField(props: {
+  readonly id: string;
+  readonly label: string;
+  readonly value: string;
+  readonly onChange: (value: string) => void;
+}) {
+  return (
+    <div className="flex w-full items-center gap-2">
+      <Label htmlFor={props.id}>{props.label}</Label>
+      <Input
+        id={props.id}
+        nativeInput
+        list={TIME_ZONE_LIST_ID}
+        className="min-w-0 flex-1"
+        placeholder="Environment's time zone"
+        autoComplete="off"
+        spellCheck={false}
+        value={props.value}
+        onChange={(event) => props.onChange(event.target.value)}
+      />
+    </div>
+  );
+}
+
+function ActiveHoursField(props: {
+  readonly value: ActiveHoursDraft;
+  readonly onChange: (value: ActiveHoursDraft) => void;
+}) {
+  const { value, onChange } = props;
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <Switch
+          id="scheduled-task-active-hours"
+          checked={value.enabled}
+          onCheckedChange={(enabled) => onChange({ ...value, enabled })}
+        />
+        <Label htmlFor="scheduled-task-active-hours">Only during active hours</Label>
+      </div>
+      {value.enabled ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            type="time"
+            nativeInput
+            aria-label="Active hours start"
+            className="w-32"
+            value={value.start}
+            onChange={(event) => onChange({ ...value, start: event.target.value })}
+          />
+          <span className="text-xs text-muted-foreground">to</span>
+          <Input
+            type="time"
+            nativeInput
+            aria-label="Active hours end"
+            className="w-32"
+            value={value.end}
+            onChange={(event) => onChange({ ...value, end: event.target.value })}
+          />
+          <TimeZoneField
+            id="scheduled-task-active-hours-time-zone"
+            label="Time zone"
+            value={value.timeZone}
+            onChange={(timeZone) => onChange({ ...value, timeZone })}
+          />
+          <p className="text-xs text-muted-foreground">
+            A run that would fall outside these hours waits for the next start. An end before the
+            start crosses midnight.
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function splitModelKey(value: string): ModelSelection | null {
   const index = value.indexOf(":");
   if (index <= 0 || index === value.length - 1) return null;
@@ -286,13 +387,31 @@ function splitModelKey(value: string): ModelSelection | null {
   };
 }
 
+function dateTimeLabel(value: string): string {
+  return new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
+
 export function scheduleLabel(schedule: ScheduledTaskSchedule): string {
+  const cadence = cadenceLabel(schedule);
+  if (schedule.type === "once") return cadence;
+  const ends = [
+    ...(schedule.endAfterRuns === undefined ? [] : [`up to ${schedule.endAfterRuns} runs`]),
+    ...(schedule.endAt === undefined ? [] : [`until ${dateTimeLabel(schedule.endAt)}`]),
+  ];
+  return [cadence, ...ends].join(", ");
+}
+
+function cadenceLabel(schedule: ScheduledTaskSchedule): string {
   if (schedule.type === "webhook") return "On webhook";
+  if (schedule.type === "once") return `Once, ${dateTimeLabel(schedule.at)}`;
   if (schedule.type === "interval") {
     const minutes = schedule.everyMs / 60_000;
-    return Number.isInteger(minutes)
+    const every = Number.isInteger(minutes)
       ? `Every ${minutes} min`
       : `Every ${Math.round(schedule.everyMs / 1000)} sec`;
+    const window = schedule.activeHours;
+    if (window === undefined) return every;
+    return `${every}, ${window.start}–${window.end}${window.timeZone ? ` (${window.timeZone})` : ""}`;
   }
   const weekdays = schedule.weekdays ?? [];
   const days =
@@ -301,7 +420,7 @@ export function scheduleLabel(schedule: ScheduledTaskSchedule): string {
       : weekdays.length === 5 && weekdays.every((day) => day >= 1 && day <= 5)
         ? "Weekdays"
         : weekdays.map((day) => WEEKDAY_LABELS[day]).join(", ");
-  return `${days} at ${schedule.timeOfDay}`;
+  return `${days} at ${schedule.timeOfDay}${schedule.timeZone ? ` (${schedule.timeZone})` : ""}`;
 }
 
 /**
@@ -330,6 +449,24 @@ function relativeLabel(value: string | null, nowMs: number): string {
 export function ScheduledRelativeLabel(props: { value: string | null }) {
   const nowMinute = useNowMinute();
   return relativeLabel(props.value, Date.parse(`${nowMinute}:00.000Z`));
+}
+
+/** A switched-off task: paused by someone, or finished by itself. */
+export function ScheduledStoppedLabel(props: {
+  readonly task: ScheduledTask;
+  readonly lowercase?: boolean;
+}) {
+  const nowMinute = useNowMinute();
+  const ending = scheduledTaskEnding(props.task, Date.parse(`${nowMinute}:00.000Z`));
+  const label =
+    ending === "ran"
+      ? "Done"
+      : ending === "missed"
+        ? "Missed"
+        : ending === "ended"
+          ? "Ended"
+          : "Paused";
+  return props.lowercase ? label.toLowerCase() : label;
 }
 
 function deliveryOutcomeVariant(outcome: string) {
@@ -718,7 +855,7 @@ function ScheduledTaskRow({
           <span>
             {scheduleLabel(task.schedule)} ·{" "}
             {!task.enabled ? (
-              "Paused"
+              <ScheduledStoppedLabel task={task} />
             ) : isWebhook ? (
               "Listening"
             ) : task.nextRunAt ? (
@@ -1199,7 +1336,7 @@ function ScheduledTaskEditorForm({
     }
     const schedule = scheduleFromDraft(draft);
     if (schedule === null) {
-      for (const error of webhookDraftErrors(draft)) reportFailure(error.title, error.description);
+      for (const error of scheduleDraftErrors(draft)) reportFailure(error.title, error.description);
       return;
     }
     if (
@@ -1273,7 +1410,8 @@ function ScheduledTaskEditorForm({
       <DialogHeader>
         <DialogTitle>{draft.editingId ? "Edit task" : "New task"}</DialogTitle>
         <DialogDescription>
-          Run a prompt automatically on an interval, at a fixed time, or when a webhook is called.
+          Run a prompt automatically on an interval, at a fixed time, once, or when a webhook is
+          called.
         </DialogDescription>
       </DialogHeader>
 
@@ -1496,10 +1634,19 @@ function ScheduledTaskEditorForm({
                 value={[draft.scheduleMode]}
                 onValueChange={(values) => {
                   const mode = values[0] as ScheduleMode | undefined;
-                  if (mode === "fixed" || mode === "interval" || mode === "webhook")
+                  if (
+                    mode === "fixed" ||
+                    mode === "interval" ||
+                    mode === "once" ||
+                    mode === "webhook"
+                  )
                     setDraft((current) => ({
                       ...current,
                       scheduleMode: mode,
+                      onceAt:
+                        mode === "once" && !current.onceAt
+                          ? localDateTimeInputValue(defaultOneOffTime(Date.now()))
+                          : current.onceAt,
                       prompt:
                         mode === "webhook" && !current.prompt.trim()
                           ? DEFAULT_WEBHOOK_PROMPT
@@ -1509,6 +1656,7 @@ function ScheduledTaskEditorForm({
               >
                 <Toggle value="fixed">At a time</Toggle>
                 <Toggle value="interval">Every interval</Toggle>
+                <Toggle value="once">Once</Toggle>
                 <Toggle value="webhook">On webhook</Toggle>
               </ToggleGroup>
             </div>
@@ -1683,6 +1831,26 @@ function ScheduledTaskEditorForm({
                   </div>
                 ) : null}
               </div>
+            ) : draft.scheduleMode === "once" ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Label htmlFor="scheduled-task-once-at">Run at</Label>
+                <Input
+                  type="datetime-local"
+                  id="scheduled-task-once-at"
+                  nativeInput
+                  className="w-56"
+                  value={draft.onceAt}
+                  // A new time re-arms a one-off that already ran.
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      onceAt: event.target.value,
+                      enabled: true,
+                    }))
+                  }
+                />
+                <span className="text-xs text-muted-foreground">{localTimeZone()}</span>
+              </div>
             ) : draft.scheduleMode === "fixed" ? (
               <div className="flex flex-wrap items-center gap-3">
                 <div className="flex items-center gap-2">
@@ -1719,26 +1887,75 @@ function ScheduledTaskEditorForm({
                     </Toggle>
                   ))}
                 </ToggleGroup>
+                <TimeZoneField
+                  id="scheduled-task-time-zone"
+                  label="Time zone"
+                  value={draft.timeZone}
+                  onChange={(timeZone) => setDraft((current) => ({ ...current, timeZone }))}
+                />
               </div>
             ) : (
-              <div className="flex items-center gap-2">
-                <Label htmlFor="scheduled-task-interval">Run every</Label>
-                <Input
-                  type="number"
-                  id="scheduled-task-interval"
-                  nativeInput
-                  min={1}
-                  step="any"
-                  className="w-24"
-                  value={draft.intervalMinutes}
-                  onChange={(event) =>
-                    setDraft((current) => ({ ...current, intervalMinutes: event.target.value }))
-                  }
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="scheduled-task-interval">Run every</Label>
+                  <Input
+                    type="number"
+                    id="scheduled-task-interval"
+                    nativeInput
+                    min={1}
+                    step="any"
+                    className="w-24"
+                    value={draft.intervalMinutes}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, intervalMinutes: event.target.value }))
+                    }
+                  />
+                  <span className="text-xs text-muted-foreground">minutes</span>
+                </div>
+                <ActiveHoursField
+                  value={draft.activeHours}
+                  onChange={(activeHours) => setDraft((current) => ({ ...current, activeHours }))}
                 />
-                <span className="text-xs text-muted-foreground">minutes</span>
               </div>
             )}
           </div>
+
+          {draft.scheduleMode === "once" ? null : (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Label htmlFor="scheduled-task-end-after-runs">Stop after</Label>
+                <Input
+                  type="number"
+                  id="scheduled-task-end-after-runs"
+                  nativeInput
+                  min={1}
+                  step={1}
+                  className="w-20"
+                  placeholder="Any"
+                  value={draft.endAfterRuns}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, endAfterRuns: event.target.value }))
+                  }
+                />
+                <span className="text-xs text-muted-foreground">runs, or at</span>
+                <Input
+                  type="datetime-local"
+                  aria-label="Stop at"
+                  nativeInput
+                  className="w-56"
+                  value={draft.endAt}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, endAt: event.target.value }))
+                  }
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Leave both blank to keep running. Once either is reached the task switches off and
+                stays listed. Every run counts toward the limit, including manual ones
+                {liveTask ? `; this task has run ${liveTask.runCount} times` : ""}.
+              </p>
+            </div>
+          )}
 
           <div className="flex items-center justify-between gap-4">
             <div className="min-w-0 space-y-1">
@@ -1754,6 +1971,7 @@ function ScheduledTaskEditorForm({
               onCheckedChange={(enabled) => setDraft((current) => ({ ...current, enabled }))}
             />
           </div>
+          <TimeZoneOptions />
         </fieldset>
       </DialogPanel>
 
