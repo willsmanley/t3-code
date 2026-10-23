@@ -49,6 +49,7 @@ function buildTree(
     readonly collapsed?: ReadonlyArray<string>;
     readonly expanded?: ReadonlyArray<string>;
     readonly selectedThreadKey?: string;
+    readonly groups?: typeof projectGroups;
   } = {},
 ): ThreadListV2ListItem[] {
   const layout = buildThreadListV2Items({
@@ -70,7 +71,7 @@ function buildTree(
       settledShelfExpanded: true,
       settledShelfHeaderIndex: layout.settledShelfHeaderIndex,
     }),
-    projectGroups,
+    projectGroups: options.groups ?? projectGroups,
     collapsedProjectKeys: new Set(options.collapsed ?? []),
     expandedProjectKeys: new Set(options.expanded ?? []),
     selectedThreadKey: options.selectedThreadKey,
@@ -154,6 +155,23 @@ describe("buildProjectThreadTreeListItems", () => {
       (item) => item.type === "v2-project" && item.projectKey === "group:api",
     );
     expect(header?.type === "v2-project" ? header.status : undefined).toBe("approval");
+  });
+
+  it("starts new threads in the project's most recently active environment", () => {
+    const laptop = EnvironmentId.make("environment-2");
+    const groups = new Map([
+      ...projectGroups,
+      [`${laptop}:${api}`, { key: "group:api", title: "API" }],
+    ]);
+    const items = buildTree(
+      [makeThread("server", api, 30), makeThread("laptop", api, 2, { environmentId: laptop })],
+      { groups },
+    );
+
+    const header = items.find((item) => item.type === "v2-project");
+    expect(header?.type === "v2-project" ? header.newThreadProjectKey : undefined).toBe(
+      `${laptop}:${api}`,
+    );
   });
 
   it("shows the compact time on rows that also show a status", () => {

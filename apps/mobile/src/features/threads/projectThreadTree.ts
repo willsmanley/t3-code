@@ -59,6 +59,7 @@ interface ProjectGroup {
   readonly title: string;
   readonly rows: ThreadListV2ThreadListItem[];
   latestActivity: number;
+  newThreadProjectKey: string;
 }
 
 /**
@@ -96,10 +97,14 @@ export function buildProjectThreadTreeListItems(input: {
         title: projectGroup?.title ?? "Project",
         rows: [entry],
         latestActivity: activity,
+        newThreadProjectKey: scopedKey,
       });
     } else {
       group.rows.push(entry);
-      group.latestActivity = Math.max(group.latestActivity, activity);
+      if (activity > group.latestActivity) {
+        group.latestActivity = activity;
+        group.newThreadProjectKey = scopedKey;
+      }
     }
   }
 
@@ -135,6 +140,7 @@ export function buildProjectThreadTreeListItems(input: {
       threadCount: rows.length,
       collapsed,
       status: collapsed ? status : null,
+      newThreadProjectKey: group.newThreadProjectKey,
       disabled: input.preferencesLoading === true,
     };
     result.push(header);

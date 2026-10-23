@@ -52,41 +52,63 @@ export const ProjectThreadTreeHeader = memo(function ProjectThreadTreeHeader(pro
   readonly disabled?: boolean;
   readonly pane?: "screen" | "sidebar";
   readonly onToggle: () => void;
+  readonly onNewThread: () => void;
 }) {
   const sidebarPane = props.pane === "sidebar";
+  const iconTint = sidebarPane ? "accent-drawer-foreground-muted" : "accent-icon-muted";
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`${props.title}, ${props.threadCount} ${props.threadCount === 1 ? "thread" : "threads"}`}
-      accessibilityHint={`${props.collapsed ? "Shows" : "Hides"} this project's threads.`}
-      accessibilityState={{ disabled: props.disabled, expanded: !props.collapsed }}
-      className={cn("mt-3 flex-row items-center gap-2 py-1.5", sidebarPane ? "px-3" : "px-5")}
-      disabled={props.disabled}
-      onPress={props.onToggle}
-      style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
-    >
-      <View className="w-3 items-center">
+    <View className={cn("mt-3 flex-row items-center", sidebarPane ? "pr-1.5" : "pr-3")}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${props.title}, ${props.threadCount} ${props.threadCount === 1 ? "thread" : "threads"}`}
+        accessibilityHint={`${props.collapsed ? "Shows" : "Hides"} this project's threads.`}
+        accessibilityState={{ disabled: props.disabled, expanded: !props.collapsed }}
+        className={cn(
+          "min-w-0 flex-1 flex-row items-center gap-2 py-1.5",
+          sidebarPane ? "pl-3" : "pl-5",
+        )}
+        disabled={props.disabled}
+        onPress={props.onToggle}
+        style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+      >
+        <View className="w-3 items-center">
+          <SymbolView
+            name={props.collapsed ? "chevron.right" : "chevron.down"}
+            size={12}
+            tintColorClassName={iconTint}
+            type="monochrome"
+          />
+        </View>
+        <Text
+          className={cn(
+            "min-w-0 flex-1 text-sm font-t3-medium",
+            sidebarPane ? "text-drawer-foreground-muted" : "text-foreground-secondary",
+          )}
+          numberOfLines={1}
+        >
+          {props.title}
+        </Text>
+        {props.collapsed && props.status !== null ? <ThreadStatusDot kind={props.status} /> : null}
+        {props.collapsed ? (
+          <Text className="text-xs tabular-nums text-foreground-muted">{props.threadCount}</Text>
+        ) : null}
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`New thread in ${props.title}`}
+        className="ml-1 p-2"
+        hitSlop={6}
+        onPress={props.onNewThread}
+        style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+      >
         <SymbolView
-          name={props.collapsed ? "chevron.right" : "chevron.down"}
-          size={12}
-          tintColorClassName={sidebarPane ? "accent-drawer-foreground-muted" : "accent-icon-muted"}
+          name="square.and.pencil"
+          size={16}
+          tintColorClassName={iconTint}
           type="monochrome"
         />
-      </View>
-      <Text
-        className={cn(
-          "min-w-0 flex-1 text-sm font-t3-medium",
-          sidebarPane ? "text-drawer-foreground-muted" : "text-foreground-secondary",
-        )}
-        numberOfLines={1}
-      >
-        {props.title}
-      </Text>
-      {props.collapsed && props.status !== null ? <ThreadStatusDot kind={props.status} /> : null}
-      {props.collapsed ? (
-        <Text className="text-xs tabular-nums text-foreground-muted">{props.threadCount}</Text>
-      ) : null}
-    </Pressable>
+      </Pressable>
+    </View>
   );
 });
 

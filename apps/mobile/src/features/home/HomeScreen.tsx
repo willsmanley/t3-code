@@ -682,6 +682,10 @@ export function HomeScreen(props: HomeScreenProps) {
           disabled={item.disabled}
           pane={primaryColumn ? "sidebar" : "screen"}
           onToggle={() => projectTree.toggleProjectCollapsed(item.projectKey)}
+          onNewThread={() => {
+            const project = projectByKey.get(item.newThreadProjectKey);
+            if (project) props.onNewThreadInProject(project);
+          }}
         />
       );
     }

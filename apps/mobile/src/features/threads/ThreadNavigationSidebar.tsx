@@ -753,6 +753,10 @@ function ThreadNavigationSidebarPane(
             disabled={item.disabled}
             pane="sidebar"
             onToggle={() => projectTree.toggleProjectCollapsed(item.projectKey)}
+            onNewThread={() => {
+              const project = projectByKey.get(item.newThreadProjectKey);
+              if (project) props.onNewThreadInProject(project);
+            }}
           />
         );
       case "v2-project-more":

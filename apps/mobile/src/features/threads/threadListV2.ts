@@ -348,6 +348,11 @@ export interface ThreadListV2ProjectHeaderListItem {
   /** The most urgent thread status, shown only while the project is collapsed. */
   readonly status: ThreadStatusDotKind | null;
   /**
+   * The environment project a new thread from this header starts in: the one
+   * most recently active, when the project is open in several environments.
+   */
+  readonly newThreadProjectKey: string;
+  /**
    * Carried on the item because a recycled cell ignores the render closure, so
    * the header must re-render once the collapsed-project preference loads.
    */
@@ -449,6 +454,7 @@ export function threadListV2ListItemsAreEqual(
         previous.threadCount === item.threadCount &&
         previous.collapsed === item.collapsed &&
         previous.status === item.status &&
+        previous.newThreadProjectKey === item.newThreadProjectKey &&
         previous.disabled === item.disabled
       );
     case "v2-project-more":
