@@ -73,8 +73,12 @@ import {
   ProjectThreadTreeHeader,
   ProjectThreadTreeMoreRow,
 } from "./project-thread-tree-items";
-import { buildProjectThreadTreeListItems } from "./projectThreadTree";
-import { useProjectThreadTreeState } from "./use-project-thread-tree-state";
+import { ProjectArrangementSheet } from "./ProjectArrangementSheet";
+import { buildProjectThreadTreeListItems, projectTreeHeaderKeys } from "./projectThreadTree";
+import {
+  useProjectThreadTreeState,
+  useRememberProjectOrder,
+} from "./use-project-thread-tree-state";
 import type { ThreadPrPresentation } from "../../state/thread-pr-presentation";
 import {
   buildThreadListV2Items,
@@ -420,6 +424,7 @@ function ThreadNavigationSidebarPane(
           ),
           collapsedProjectKeys: projectTree.collapsedProjectKeys,
           expandedProjectKeys: projectTree.expandedProjectKeys,
+          projectOrder: projectTree.projectOrder,
           selectedThreadKey: props.selectedThreadKey ?? null,
           preferencesLoading: !projectTree.loaded,
         })
@@ -433,6 +438,7 @@ function ThreadNavigationSidebarPane(
     }
     return items;
   })();
+  useRememberProjectOrder(projectTree, projectTreeHeaderKeys(listItems));
   const listMenuActions = [
     {
       id: "environment",
@@ -750,6 +756,8 @@ function ThreadNavigationSidebarPane(
             threadCount={item.threadCount}
             collapsed={item.collapsed}
             status={item.status}
+            canMoveUp={item.previousProjectKey !== null}
+            canMoveDown={item.nextProjectKey !== null}
             disabled={item.disabled}
             pane="sidebar"
             onToggle={() => projectTree.toggleProjectCollapsed(item.projectKey)}
@@ -757,6 +765,15 @@ function ThreadNavigationSidebarPane(
               const project = projectByKey.get(item.newThreadProjectKey);
               if (project) props.onNewThreadInProject(project);
             }}
+            onMove={(direction) => {
+              const targetKey = direction === "up" ? item.previousProjectKey : item.nextProjectKey;
+              if (targetKey === null) return;
+              projectTree.moveProject(item.projectKey, {
+                targetKey,
+                placement: direction === "up" ? "before" : "after",
+              });
+            }}
+            onArrange={projectTree.openProjectArrangement}
           />
         );
       case "v2-project-more":
@@ -1012,6 +1029,15 @@ function ThreadNavigationSidebarPane(
         </View>
       )}
       <ThreadUndoNotice visible={props.visible} />
+      {projectTree.arrangingProjects ? (
+        <ProjectArrangementSheet
+          projects={listItems.flatMap((item) =>
+            item.type === "v2-project" ? [{ key: item.projectKey, title: item.title }] : [],
+          )}
+          onMove={projectTree.moveProject}
+          onClose={projectTree.closeProjectArrangement}
+        />
+      ) : null}
     </View>
   );
 }

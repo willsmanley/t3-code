@@ -66,6 +66,8 @@ export interface Preferences {
   readonly mathRenderingEnabled?: boolean;
   readonly connectOnboardingOptOutAccounts?: ReadonlyArray<string>;
   readonly collapsedProjectGroups?: readonly string[];
+  /** The Android project tree's arranged order, by logical project key. */
+  readonly projectOrder?: readonly string[];
   /** Environments whose "reclaim database space" notice was dismissed. */
   readonly dismissedDatabaseStorageNotices?: readonly string[];
   /** What the Return key does in the composer on a hardware keyboard. iOS only. */
@@ -141,6 +143,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     mathRenderingEnabled?: boolean;
     connectOnboardingOptOutAccounts?: ReadonlyArray<string>;
     collapsedProjectGroups?: readonly string[];
+    projectOrder?: readonly string[];
     dismissedDatabaseStorageNotices?: readonly string[];
     composerEnterBehavior?: ComposerEnterBehavior;
     followUpBehavior?: FollowUpBehavior;
@@ -217,6 +220,11 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   }
   if (Array.isArray(parsed.collapsedProjectGroups)) {
     preferences.collapsedProjectGroups = parsed.collapsedProjectGroups.filter(
+      (key): key is string => typeof key === "string",
+    );
+  }
+  if (Array.isArray(parsed.projectOrder)) {
+    preferences.projectOrder = parsed.projectOrder.filter(
       (key): key is string => typeof key === "string",
     );
   }

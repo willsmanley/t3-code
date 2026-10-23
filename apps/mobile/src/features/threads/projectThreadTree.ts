@@ -54,6 +54,46 @@ function mostUrgentDot(
   return DOT_PRIORITY[candidate] < DOT_PRIORITY[current] ? candidate : current;
 }
 
+/** Places a project just before or after another one. */
+export interface ProjectMove {
+  readonly targetKey: string;
+  readonly placement: "before" | "after";
+}
+
+/** The saved order with the projects it has not seen yet in front, in the given order. */
+export function mergeProjectOrder(
+  savedOrder: ReadonlyArray<string>,
+  projectKeys: ReadonlyArray<string>,
+): string[] {
+  const known = new Set(savedOrder);
+  return [...new Set(projectKeys.filter((key) => !known.has(key))), ...savedOrder];
+}
+
+/**
+ * Moves a project next to another in the saved order. Projects hidden by a
+ * filter or a disconnected environment keep their place among the rest.
+ */
+export function applyProjectMove(
+  savedOrder: ReadonlyArray<string>,
+  projectKey: string,
+  move: ProjectMove,
+): string[] {
+  const order = mergeProjectOrder(savedOrder, [projectKey, move.targetKey]);
+  if (projectKey === move.targetKey) return order;
+  const next = order.filter((key) => key !== projectKey);
+  const targetIndex = next.indexOf(move.targetKey);
+  next.splice(move.placement === "before" ? targetIndex : targetIndex + 1, 0, projectKey);
+  return next;
+}
+
+export function projectTreeHeaderKeys(
+  items: ReadonlyArray<{ readonly type: string; readonly projectKey?: string }>,
+): string[] {
+  return items.flatMap((item) =>
+    item.type === "v2-project" && item.projectKey !== undefined ? [item.projectKey] : [],
+  );
+}
+
 interface ProjectGroup {
   readonly projectKey: string;
   readonly title: string;
@@ -67,13 +107,16 @@ interface ProjectGroup {
  * project tree. Pass list items built with every shelf expanded and no settled
  * limit: settled and snoozed threads stay in their project instead of a shelf.
  * `projectGroups` maps each environment project to its logical project, so one
- * repository open in several environments shares a header.
+ * repository open in several environments shares a header. Projects follow
+ * `projectOrder`; one it does not list yet goes above the listed ones, most
+ * recently active first.
  */
 export function buildProjectThreadTreeListItems(input: {
   readonly listItems: ReadonlyArray<ThreadListV2ListItem>;
   readonly projectGroups: ReadonlyMap<string, { readonly key: string; readonly title: string }>;
   readonly collapsedProjectKeys: ReadonlySet<string>;
   readonly expandedProjectKeys: ReadonlySet<string>;
+  readonly projectOrder?: ReadonlyArray<string>;
   readonly selectedThreadKey?: string | null;
   readonly preferencesLoading?: boolean;
 }): ThreadListV2ListItem[] {
@@ -113,12 +156,15 @@ export function buildProjectThreadTreeListItems(input: {
       ? { ...entry, showTrailingDivider: false }
       : entry,
   );
+  const rankByProjectKey = new Map(input.projectOrder?.map((key, index) => [key, index]));
   const orderedGroups = [...groups.values()].sort(
     (left, right) =>
+      (rankByProjectKey.get(left.projectKey) ?? -1) -
+        (rankByProjectKey.get(right.projectKey) ?? -1) ||
       right.latestActivity - left.latestActivity ||
       (left.projectKey < right.projectKey ? -1 : left.projectKey > right.projectKey ? 1 : 0),
   );
-  for (const group of orderedGroups) {
+  for (const [groupIndex, group] of orderedGroups.entries()) {
     // Pinned threads keep their arranged order at the top; the rest follow the
     // desktop tree's most-recent-first order.
     const pinned = group.rows.filter((row) => row.item.pinned);
@@ -141,6 +187,8 @@ export function buildProjectThreadTreeListItems(input: {
       collapsed,
       status: collapsed ? status : null,
       newThreadProjectKey: group.newThreadProjectKey,
+      previousProjectKey: orderedGroups[groupIndex - 1]?.projectKey ?? null,
+      nextProjectKey: orderedGroups[groupIndex + 1]?.projectKey ?? null,
       disabled: input.preferencesLoading === true,
     };
     result.push(header);

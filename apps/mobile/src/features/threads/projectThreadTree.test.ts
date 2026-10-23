@@ -4,7 +4,9 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { makeThreadShellFixture } from "../../test-fixtures";
 import {
+  applyProjectMove,
   buildProjectThreadTreeListItems,
+  mergeProjectOrder,
   PROJECT_THREAD_TREE_PREVIEW_COUNT,
 } from "./projectThreadTree";
 import {
@@ -50,6 +52,7 @@ function buildTree(
     readonly expanded?: ReadonlyArray<string>;
     readonly selectedThreadKey?: string;
     readonly groups?: typeof projectGroups;
+    readonly projectOrder?: ReadonlyArray<string>;
   } = {},
 ): ThreadListV2ListItem[] {
   const layout = buildThreadListV2Items({
@@ -74,6 +77,7 @@ function buildTree(
     projectGroups: options.groups ?? projectGroups,
     collapsedProjectKeys: new Set(options.collapsed ?? []),
     expandedProjectKeys: new Set(options.expanded ?? []),
+    projectOrder: options.projectOrder,
     selectedThreadKey: options.selectedThreadKey,
   });
 }
@@ -109,6 +113,39 @@ describe("buildProjectThreadTreeListItems", () => {
       "# API",
       "api-settled",
       "api-old",
+    ]);
+  });
+
+  it("keeps the arranged project order whatever was active last", () => {
+    const threads = [makeThread("api-old", api, 30), makeThread("web-new", web, 1)];
+
+    expect(outline(buildTree(threads, { projectOrder: ["group:api", "group:web"] }))).toEqual([
+      "# API",
+      "api-old",
+      "# Web",
+      "web-new",
+    ]);
+  });
+
+  it("puts a project the order has not listed yet above the arranged ones", () => {
+    const items = buildTree([makeThread("api", api, 30), makeThread("web", web, 60)], {
+      projectOrder: ["group:api"],
+    });
+
+    expect(outline(items)).toEqual(["# Web", "web", "# API", "api"]);
+  });
+
+  it("gives each project header its neighbours for Move up and Move down", () => {
+    const items = buildTree([makeThread("api", api, 30), makeThread("web", web, 1)]);
+    const headers = items.flatMap((item) =>
+      item.type === "v2-project"
+        ? [[item.previousProjectKey, item.projectKey, item.nextProjectKey]]
+        : [],
+    );
+
+    expect(headers).toEqual([
+      [null, "group:web", "group:api"],
+      ["group:web", "group:api", null],
     ]);
   });
 
@@ -180,5 +217,36 @@ describe("buildProjectThreadTreeListItems", () => {
     const row = items.find((item) => item.type === "v2-thread");
 
     expect(row?.type === "v2-thread" ? row.timeLabel : undefined).toBe("5m");
+  });
+});
+
+describe("project order", () => {
+  it("adds projects it has not seen in front, without duplicates", () => {
+    expect(mergeProjectOrder(["b", "c"], ["a", "c", "a", "d"])).toEqual(["a", "d", "b", "c"]);
+  });
+
+  it("moves a project past its neighbour and leaves hidden projects in place", () => {
+    const order = ["a", "hidden", "b", "c"];
+
+    expect(applyProjectMove(order, "b", { targetKey: "a", placement: "before" })).toEqual([
+      "b",
+      "a",
+      "hidden",
+      "c",
+    ]);
+    expect(applyProjectMove(order, "a", { targetKey: "c", placement: "after" })).toEqual([
+      "hidden",
+      "b",
+      "c",
+      "a",
+    ]);
+  });
+
+  it("records an unlisted project when it moves", () => {
+    expect(applyProjectMove(["a", "b"], "new", { targetKey: "b", placement: "after" })).toEqual([
+      "a",
+      "b",
+      "new",
+    ]);
   });
 });

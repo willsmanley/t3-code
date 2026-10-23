@@ -352,6 +352,9 @@ export interface ThreadListV2ProjectHeaderListItem {
    * most recently active, when the project is open in several environments.
    */
   readonly newThreadProjectKey: string;
+  /** The neighbouring projects, which Move up and Move down place this one past. */
+  readonly previousProjectKey: string | null;
+  readonly nextProjectKey: string | null;
   /**
    * Carried on the item because a recycled cell ignores the render closure, so
    * the header must re-render once the collapsed-project preference loads.
@@ -455,6 +458,8 @@ export function threadListV2ListItemsAreEqual(
         previous.collapsed === item.collapsed &&
         previous.status === item.status &&
         previous.newThreadProjectKey === item.newThreadProjectKey &&
+        previous.previousProjectKey === item.previousProjectKey &&
+        previous.nextProjectKey === item.nextProjectKey &&
         previous.disabled === item.disabled
       );
     case "v2-project-more":

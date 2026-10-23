@@ -85,8 +85,15 @@ import {
   ProjectThreadTreeHeader,
   ProjectThreadTreeMoreRow,
 } from "../threads/project-thread-tree-items";
-import { buildProjectThreadTreeListItems } from "../threads/projectThreadTree";
-import { useProjectThreadTreeState } from "../threads/use-project-thread-tree-state";
+import { ProjectArrangementSheet } from "../threads/ProjectArrangementSheet";
+import {
+  buildProjectThreadTreeListItems,
+  projectTreeHeaderKeys,
+} from "../threads/projectThreadTree";
+import {
+  useProjectThreadTreeState,
+  useRememberProjectOrder,
+} from "../threads/use-project-thread-tree-state";
 import type { HomeListFilterMenuEnvironment } from "./home-list-filter-menu";
 import {
   buildHomeProjectScopes,
@@ -595,10 +602,12 @@ export function HomeScreen(props: HomeScreenProps) {
         ),
         collapsedProjectKeys: projectTree.collapsedProjectKeys,
         expandedProjectKeys: projectTree.expandedProjectKeys,
+        projectOrder: projectTree.projectOrder,
         selectedThreadKey,
         preferencesLoading: !projectTree.loaded,
       })
     : flatThreadListV2Items;
+  useRememberProjectOrder(projectTree, projectTreeHeaderKeys(threadListV2Items));
 
   useThreadJumpShortcuts(threadListV2Items, props.onSelectThread);
   useEffect(() => {
@@ -679,6 +688,8 @@ export function HomeScreen(props: HomeScreenProps) {
           threadCount={item.threadCount}
           collapsed={item.collapsed}
           status={item.status}
+          canMoveUp={item.previousProjectKey !== null}
+          canMoveDown={item.nextProjectKey !== null}
           disabled={item.disabled}
           pane={primaryColumn ? "sidebar" : "screen"}
           onToggle={() => projectTree.toggleProjectCollapsed(item.projectKey)}
@@ -686,6 +697,15 @@ export function HomeScreen(props: HomeScreenProps) {
             const project = projectByKey.get(item.newThreadProjectKey);
             if (project) props.onNewThreadInProject(project);
           }}
+          onMove={(direction) => {
+            const targetKey = direction === "up" ? item.previousProjectKey : item.nextProjectKey;
+            if (targetKey === null) return;
+            projectTree.moveProject(item.projectKey, {
+              targetKey,
+              placement: direction === "up" ? "before" : "after",
+            });
+          }}
+          onArrange={projectTree.openProjectArrangement}
         />
       );
     }
@@ -972,6 +992,15 @@ export function HomeScreen(props: HomeScreenProps) {
           </GestureDetector>
         </SwipeableScrollGateProvider>
       </View>
+      {projectTree.arrangingProjects ? (
+        <ProjectArrangementSheet
+          projects={threadListV2Items.flatMap((item) =>
+            item.type === "v2-project" ? [{ key: item.projectKey, title: item.title }] : [],
+          )}
+          onMove={projectTree.moveProject}
+          onClose={projectTree.closeProjectArrangement}
+        />
+      ) : null}
     </View>
   );
 }
