@@ -388,9 +388,11 @@ const config: ExpoConfig = {
       "expo-audio",
       {
         microphonePermission: "Allow T3 Code to use your microphone for voice input.",
-        recordAudioAndroid: false,
+        // The fork's Android build transcribes voice input with ElevenLabs, and
+        // keeps recording behind a notification when you switch apps.
+        recordAudioAndroid: true,
         enableBackgroundPlayback: false,
-        enableBackgroundRecording: false,
+        enableBackgroundRecording: true,
       },
     ],
     [
