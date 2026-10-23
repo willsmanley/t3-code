@@ -388,9 +388,11 @@ const config: ExpoConfig = {
       "expo-audio",
       {
         microphonePermission: "Allow T3 Code to use your microphone for voice input.",
-        recordAudioAndroid: false,
+        // The fork's Android build transcribes voice input with ElevenLabs, and
+        // keeps recording behind a notification when you switch apps.
+        recordAudioAndroid: true,
         enableBackgroundPlayback: false,
-        enableBackgroundRecording: false,
+        enableBackgroundRecording: true,
       },
     ],
     [
@@ -402,7 +404,9 @@ const config: ExpoConfig = {
         recordAudioAndroid: false,
       },
     ],
-    ["expo-image-picker", { photosPermission: false, microphonePermission: false }],
+    // `microphonePermission: false` would also block Android's RECORD_AUDIO,
+    // which the fork's voice input needs. iOS keeps expo-audio's description.
+    ["expo-image-picker", { photosPermission: false }],
     [
       "expo-splash-screen",
       {

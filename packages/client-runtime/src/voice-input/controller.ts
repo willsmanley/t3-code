@@ -1,6 +1,10 @@
 import { replaceTextRange } from "@t3tools/shared/composerTrigger";
 
-import type { PreparedVoiceTranscription, VoiceTranscriber } from "./transcription.ts";
+import {
+  VoiceTranscriptionError,
+  type PreparedVoiceTranscription,
+  type VoiceTranscriber,
+} from "./transcription.ts";
 
 export const VOICE_RECORDING_LIMIT_SECONDS = 5 * 60;
 
@@ -41,6 +45,8 @@ export interface VoiceRecorder {
 
 export type VoiceInputControllerDependencies = {
   readonly recorder: VoiceRecorder;
+  /** Defaults to VOICE_RECORDING_LIMIT_SECONDS. */
+  readonly recordingLimitSeconds?: number;
   readonly getTranscriber: () => VoiceTranscriber | null;
   readonly requestPermission: () => Promise<{
     readonly granted: boolean;
@@ -167,12 +173,19 @@ function preparationErrorMessage(error: unknown): string {
   if (errorCode(error) === "unsupported-locale") {
     return "Voice transcription is not available for this language.";
   }
+  if (error instanceof VoiceTranscriptionError && error.code === "unavailable") {
+    return error.message;
+  }
   return "Could not prepare voice transcription.";
 }
 
 function transcriptionErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message === "voice-operation-busy") {
     return "Voice transcription is still finishing. Try again shortly.";
+  }
+  // A transcriber that keeps the recording says where it can be found.
+  if (error instanceof VoiceTranscriptionError && error.code === "transcription-failed") {
+    return error.message;
   }
   return "Could not transcribe this recording.";
 }
@@ -269,7 +282,9 @@ export class VoiceInputController {
         return;
       }
       this.capturedDraft = capturedDraft;
-      this.dependencies.recorder.record({ forDuration: VOICE_RECORDING_LIMIT_SECONDS });
+      this.dependencies.recorder.record({
+        forDuration: this.dependencies.recordingLimitSeconds ?? VOICE_RECORDING_LIMIT_SECONDS,
+      });
       this.setState({ phase: "recording", error: null, errorAction: null });
     } catch {
       if (this.isCurrent(operationToken))

@@ -9,7 +9,11 @@ import {
   type VoiceInputControllerDependencies,
   type VoiceRecorder,
 } from "./controller.ts";
-import type { PreparedVoiceTranscription, VoiceTranscriber } from "./transcription.ts";
+import {
+  VoiceTranscriptionError,
+  type PreparedVoiceTranscription,
+  type VoiceTranscriber,
+} from "./transcription.ts";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -302,6 +306,29 @@ describe("VoiceInputController", () => {
       await next.controller.interruptRecording();
     },
   );
+
+  it("shows the transcriber's reason when a recording is kept for later", async () => {
+    const harness = createHarness({
+      getTranscriber: () => ({
+        prepare: async () =>
+          preparedTranscription(async () => {
+            throw new VoiceTranscriptionError(
+              "transcription-failed",
+              "Could not reach the service. The recording is saved.",
+            );
+          }),
+      }),
+    });
+    await harness.controller.start();
+    await harness.controller.stop();
+
+    expect(harness.controller.currentState).toEqual({
+      phase: "error",
+      error: "Could not reach the service. The recording is saved.",
+      errorAction: "retry",
+    });
+    expect(harness.commits).toEqual([]);
+  });
 
   it("releases the microphone before transcription starts", async () => {
     const events: string[] = [];

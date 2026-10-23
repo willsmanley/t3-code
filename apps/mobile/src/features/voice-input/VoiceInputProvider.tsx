@@ -38,6 +38,7 @@ import {
   type VoiceInputState,
 } from "@t3tools/client-runtime/voice-input";
 import { createLazyVoiceRecorder, type LazyVoiceRecorder } from "./lazyVoiceRecorder";
+import { pruneSavedTranscripts, releaseRecording } from "./savedRecordings";
 import { normalizeVoiceInputDecibels, VOICE_WAVEFORM_SAMPLE_COUNT } from "./voiceInputMetering";
 import { VoiceInputSession } from "./voiceInputSession";
 
@@ -45,16 +46,31 @@ const INITIAL_STATE: VoiceInputState = { phase: "idle", error: null, errorAction
 const VOICE_METERING_INTERVAL_MS = 80;
 // The native constructor takes platform-flattened options, as `useAudioRecorder`
 // builds them with expo-audio's internal `createRecordingOptions`.
-const { ios: IOS_RECORDING_OPTIONS, android: ANDROID_RECORDING_OPTIONS } =
-  RecordingPresets.HIGH_QUALITY;
-const VOICE_RECORDING_OPTIONS = {
-  extension: RecordingPresets.HIGH_QUALITY.extension,
-  sampleRate: RecordingPresets.HIGH_QUALITY.sampleRate,
-  numberOfChannels: RecordingPresets.HIGH_QUALITY.numberOfChannels,
-  bitRate: RecordingPresets.HIGH_QUALITY.bitRate,
-  isMeteringEnabled: true,
-  ...(Platform.OS === "ios" ? IOS_RECORDING_OPTIONS : ANDROID_RECORDING_OPTIONS),
-};
+const { ios: IOS_RECORDING_OPTIONS } = RecordingPresets.HIGH_QUALITY;
+// Android uploads its recordings, so it keeps them in document storage as
+// ADTS AAC: unlike an MP4 container, a file cut off by a crash still plays.
+const VOICE_RECORDING_OPTIONS =
+  Platform.OS === "ios"
+    ? {
+        extension: RecordingPresets.HIGH_QUALITY.extension,
+        sampleRate: RecordingPresets.HIGH_QUALITY.sampleRate,
+        numberOfChannels: RecordingPresets.HIGH_QUALITY.numberOfChannels,
+        bitRate: RecordingPresets.HIGH_QUALITY.bitRate,
+        isMeteringEnabled: true,
+        ...IOS_RECORDING_OPTIONS,
+      }
+    : {
+        extension: ".aac",
+        sampleRate: 44_100,
+        numberOfChannels: 1,
+        bitRate: 96_000,
+        isMeteringEnabled: true,
+        outputFormat: "aac_adts",
+        audioEncoder: "aac",
+        directory: "document" as const,
+      };
+// Android recordings are uploaded, so they are not bound by on-device limits.
+const RECORDING_LIMIT_SECONDS = Platform.OS === "android" ? 20 * 60 : VOICE_RECORDING_LIMIT_SECONDS;
 
 async function releaseVoiceRecordingAudio(): Promise<void> {
   try {
@@ -73,6 +89,8 @@ async function configureVoiceRecordingAudio(): Promise<void> {
       interruptionMode: "doNotMix",
       playsInSilentMode: true,
       shouldPlayInBackground: false,
+      // Android keeps recording behind a notification when you switch apps.
+      allowsBackgroundRecording: Platform.OS === "android",
     });
     await setIsAudioActiveAsync(true);
   } catch (error) {
@@ -153,6 +171,7 @@ function useVoiceInputRuntime() {
     recorderRef.current = recorder;
     sessionRef.current = new VoiceInputSession({
       recorder,
+      recordingLimitSeconds: RECORDING_LIMIT_SECONDS,
       getTranscriber: getLocalVoiceTranscriber,
       requestPermission: async () => {
         const permission = await requestRecordingPermissionsAsync();
@@ -160,7 +179,8 @@ function useVoiceInputRuntime() {
       },
       configureRecording: configureVoiceRecordingAudio,
       releaseRecording: releaseVoiceRecordingAudio,
-      deleteRecording: (uri) => new File(uri).delete(),
+      deleteRecording: (uri) =>
+        Platform.OS === "android" ? releaseRecording(uri) : new File(uri).delete(),
       onStateChange: (nextState) =>
         setState({
           state: nextState,
@@ -179,10 +199,19 @@ function useVoiceInputRuntime() {
       // iOS reports `inactive` while its permission dialog is open. Only the
       // real background state cancels preparation; recorder status handles
       // calls and route interruptions during capture.
-      if (nextState === "background") controller.appMovedToBackground();
+      if (nextState !== "background") return;
+      if (Platform.OS === "android" && controller.currentState.phase === "recording") return;
+      controller.appMovedToBackground();
     });
     return () => subscription.remove();
   }, [controller]);
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    try {
+      pruneSavedTranscripts();
+    } catch {}
+  }, []);
 
   useEffect(
     () => () => {
@@ -231,7 +260,7 @@ function useVoiceInputRuntime() {
       }
 
       const nextElapsedSeconds = Math.min(
-        VOICE_RECORDING_LIMIT_SECONDS,
+        RECORDING_LIMIT_SECONDS,
         Math.max(0, Math.floor(status.durationMillis / 1_000)),
       );
       if (nextElapsedSeconds !== elapsedSecondsRef.current) {

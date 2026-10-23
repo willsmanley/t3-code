@@ -4,7 +4,7 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/reactivity";
 import { getRecordingPermissionsAsync, requestRecordingPermissionsAsync } from "expo-audio";
 import { useCallback, useEffect, useState } from "react";
-import { AppState, Linking, Pressable, View } from "react-native";
+import { AppState, Linking, Platform, Pressable, View } from "react-native";
 import Reanimated, { ReduceMotion, useAnimatedStyle, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -22,6 +22,7 @@ import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/
 import { SettingsActionRow } from "./components/SettingsActionRow";
 import { SettingsDragHandle } from "./components/SettingsDragHandle";
 import { SettingsSection } from "./components/SettingsSection";
+import { VoiceTranscriptionSettings } from "./VoiceTranscriptionSettings";
 
 const REMOVE_SIZE = 20;
 
@@ -145,6 +146,7 @@ export function SettingsMicrophoneRouteScreen() {
         contentContainerClassName="gap-3 px-5 pt-4"
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
       >
+        {Platform.OS === "android" ? <VoiceTranscriptionSettings /> : null}
         {permission === "ask" || permission === "denied" ? (
           <>
             <SettingsSection title="Microphone access">
