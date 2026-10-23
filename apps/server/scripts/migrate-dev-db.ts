@@ -207,6 +207,9 @@ const RECOVERY_KINDS: ReadonlyArray<ProjectionStore.ProjectionRecoveryKind> = [
 
 const CLEARED_TABLES: ReadonlyArray<string> = [
   "scheduled_tasks",
+  // Webhook rows reference scheduled_tasks, so they go with it.
+  "scheduled_task_webhook_pending",
+  "scheduled_task_webhook_replay_keys",
   "orchestration_v2_effect_outbox",
   "orchestration_v2_thread_launch_workflows",
   "orchestration_command_receipts",
