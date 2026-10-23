@@ -171,6 +171,19 @@ describe("timed schedule settings", () => {
     expect(scheduleFromDraft({ ...draft, timeZone: "Chicago" })).toBeNull();
   });
 
+  it("keeps a stored zone this client's time zone data lacks when other fields change", () => {
+    const draft = taskToDraft({
+      ...legacyTask,
+      schedule: { type: "fixed_time", timeOfDay: "09:00", timeZone: "Mars/Olympus_Mons" },
+    });
+    expect(scheduleFromDraft({ ...draft, timeOfDay: "10:00" })).toEqual({
+      type: "fixed_time",
+      timeOfDay: "10:00",
+      ...noEnds,
+    });
+    expect(scheduleFromDraft({ ...draft, timeZone: "Mars/Tharsis" })).toBeNull();
+  });
+
   it("round-trips an interval's active hours and clears them when turned off", () => {
     const activeHours = { start: "22:00", end: "06:00", timeZone: "America/Chicago" };
     const draft = taskToDraft({

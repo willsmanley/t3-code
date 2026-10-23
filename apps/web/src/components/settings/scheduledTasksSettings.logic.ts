@@ -22,7 +22,7 @@ import {
   activeHoursDraft,
   parseActiveHoursDraft,
   parseRunLimitDraft,
-  parseTimeZoneDraft,
+  timeZoneForSave,
   type ActiveHoursDraft,
 } from "@t3tools/client-runtime/scheduled-task-schedule";
 
@@ -80,6 +80,8 @@ export interface DraftState {
   readonly endAfterRuns: string;
   /** A datetime-local value, or blank for no end time. */
   readonly endAt: string;
+  /** The zone the form opened with. */
+  readonly savedTimeZone: string;
   readonly projectId: string;
   readonly threadId: string;
   readonly workspaceMode: WorkspaceMode;
@@ -123,7 +125,10 @@ export function scheduleDraftErrors(draft: DraftState) {
   }
   const errors: Array<{ title: string; description: string }> =
     draft.scheduleMode === "webhook" ? webhookDraftErrors(draft) : [];
-  if (draft.scheduleMode === "fixed" && parseTimeZoneDraft(draft.timeZone) === undefined)
+  if (
+    draft.scheduleMode === "fixed" &&
+    timeZoneForSave(draft.timeZone, draft.savedTimeZone) === undefined
+  )
     errors.push({
       title: "Unknown time zone",
       description: "Pick a time zone such as America/Chicago, or leave it blank.",
@@ -269,7 +274,7 @@ export function scheduleFromDraft(draft: DraftState): ScheduledTaskUpsertSchedul
     type: "fixed_time",
     timeOfDay: draft.timeOfDay || "09:00",
     ...(selectedEveryDay ? {} : { weekdays: [...draft.weekdays].toSorted() }),
-    timeZone: parseTimeZoneDraft(draft.timeZone) ?? null,
+    ...timeZoneForSave(draft.timeZone, draft.savedTimeZone),
     ...endsFromDraft(draft),
   };
 }
@@ -296,6 +301,7 @@ export function taskToDraft(task: ScheduledTask): DraftState {
     timeOfDay: schedule.type === "fixed_time" ? schedule.timeOfDay : "09:00",
     weekdays,
     timeZone: schedule.type === "fixed_time" ? (schedule.timeZone ?? "") : "",
+    savedTimeZone: schedule.type === "fixed_time" ? (schedule.timeZone ?? "") : "",
     onceAt: schedule.type === "once" ? localDateTimeInputValue(schedule.at) : "",
     endAfterRuns:
       schedule.type !== "once" && schedule.endAfterRuns !== undefined

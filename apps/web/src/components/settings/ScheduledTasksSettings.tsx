@@ -153,6 +153,7 @@ const EMPTY_DRAFT: DraftState = {
   onceAt: "",
   endAfterRuns: "",
   endAt: "",
+  savedTimeZone: "",
   projectId: "",
   threadId: "",
   workspaceMode: "worktree",

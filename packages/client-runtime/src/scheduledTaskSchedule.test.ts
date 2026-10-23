@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  activeHoursDraft,
   defaultOneOffTime,
   parseActiveHoursDraft,
   parseRunLimitDraft,
@@ -18,7 +19,7 @@ describe("parseTimeZoneDraft", () => {
 });
 
 describe("parseActiveHoursDraft", () => {
-  const draft = { enabled: true, start: "22:00", end: "06:00", timeZone: "" };
+  const draft = { enabled: true, start: "22:00", end: "06:00", timeZone: "", savedTimeZone: "" };
 
   it("accepts a window that crosses midnight and leaves the zone out when blank", () => {
     expect(parseActiveHoursDraft(draft)).toEqual({ start: "22:00", end: "06:00" });
@@ -30,6 +31,20 @@ describe("parseActiveHoursDraft", () => {
     expect(parseActiveHoursDraft({ ...draft, start: "9:00", end: "09:00" })).toBeUndefined();
     expect(parseActiveHoursDraft({ ...draft, start: "24:00" })).toBeUndefined();
     expect(parseActiveHoursDraft({ ...draft, timeZone: "Chicago" })).toBeUndefined();
+  });
+
+  it("keeps a stored zone this client's time zone data lacks when other fields change", () => {
+    const stored = activeHoursDraft({
+      start: "22:00",
+      end: "06:00",
+      timeZone: "Mars/Olympus_Mons",
+    });
+    expect(parseActiveHoursDraft({ ...stored, start: "21:00" })).toEqual({
+      start: "21:00",
+      end: "06:00",
+      timeZone: "Mars/Olympus_Mons",
+    });
+    expect(parseActiveHoursDraft({ ...stored, timeZone: "Mars/Tharsis" })).toBeUndefined();
   });
 });
 

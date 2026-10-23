@@ -56,8 +56,8 @@ import {
   localTimeZone,
   parseActiveHoursDraft,
   parseRunLimitDraft,
-  parseTimeZoneDraft,
   scheduledTaskEnding,
+  timeZoneForSave,
 } from "@t3tools/client-runtime/scheduled-task-schedule";
 import { tryCopyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { usePreparedConnection } from "../../state/session";
@@ -858,7 +858,7 @@ function TaskForm({
     }
     if (
       draft.schedule.mode === "fixed_time" &&
-      parseTimeZoneDraft(draft.schedule.timeZone) === undefined
+      timeZoneForSave(draft.schedule.timeZone, draft.schedule.savedTimeZone) === undefined
     ) {
       Dialog.alert(
         "Unknown time zone",

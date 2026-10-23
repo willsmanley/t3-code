@@ -5,7 +5,7 @@ import {
   type ScheduledTaskActiveHours,
 } from "@t3tools/contracts";
 
-/** Blank means the environment's local time; undefined means the text is not a known zone, which blocks saving. */
+/** Blank means the environment's local time; undefined means the text is not a zone this client knows. */
 export function parseTimeZoneDraft(value: string): string | null | undefined {
   const zone = value.trim();
   if (zone === "") return null;
@@ -13,6 +13,20 @@ export function parseTimeZoneDraft(value: string): string | null | undefined {
   return isValidTimeZone(zone)
     ? Intl.DateTimeFormat("en-US", { timeZone: zone }).resolvedOptions().timeZone
     : undefined;
+}
+
+/**
+ * The `timeZone` part of a fixed-time save, or undefined when the entry blocks saving.
+ * A zone left as it was loaded is omitted when this client's time zone data lacks it;
+ * the server keeps the stored zone, so other edits to the task still save.
+ */
+export function timeZoneForSave(
+  value: string,
+  saved: string,
+): { readonly timeZone?: string | null } | undefined {
+  const timeZone = parseTimeZoneDraft(value);
+  if (timeZone !== undefined) return { timeZone };
+  return value === saved ? {} : undefined;
 }
 
 export function localTimeZone(): string {
@@ -32,14 +46,21 @@ export interface ActiveHoursDraft {
   readonly start: string;
   readonly end: string;
   readonly timeZone: string;
+  /** The zone the form opened with. */
+  readonly savedTimeZone: string;
 }
 
 export function activeHoursDraft(
   activeHours: ScheduledTaskActiveHours | undefined,
 ): ActiveHoursDraft {
   return activeHours === undefined
-    ? { enabled: false, start: "09:00", end: "17:00", timeZone: "" }
-    : { enabled: true, ...activeHours, timeZone: activeHours.timeZone ?? "" };
+    ? { enabled: false, start: "09:00", end: "17:00", timeZone: "", savedTimeZone: "" }
+    : {
+        enabled: true,
+        ...activeHours,
+        timeZone: activeHours.timeZone ?? "",
+        savedTimeZone: activeHours.timeZone ?? "",
+      };
 }
 
 const TIME_OF_DAY = /^([01]?\d|2[0-3]):([0-5]\d)$/;
@@ -56,7 +77,11 @@ export function parseActiveHoursDraft(
   if (!draft.enabled) return null;
   const start = draft.start.trim();
   const end = draft.end.trim();
-  const timeZone = parseTimeZoneDraft(draft.timeZone);
+  const parsed = parseTimeZoneDraft(draft.timeZone);
+  // The server accepted the stored zone, so it goes back as stored even when
+  // this client's time zone data lacks it.
+  const timeZone =
+    parsed === undefined && draft.timeZone === draft.savedTimeZone ? draft.savedTimeZone : parsed;
   if (
     timeZone === undefined ||
     !TIME_OF_DAY.test(start) ||
