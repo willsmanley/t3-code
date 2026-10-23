@@ -67,13 +67,10 @@ export const ProjectThreadTreeHeader = memo(function ProjectThreadTreeHeader(pro
     >
       <View className="w-3 items-center">
         <SymbolView
-          name="chevron.right"
-          size={10}
-          tintColorClassName={
-            sidebarPane ? "accent-drawer-foreground-muted" : "accent-foreground-muted"
-          }
+          name={props.collapsed ? "chevron.right" : "chevron.down"}
+          size={12}
+          tintColorClassName={sidebarPane ? "accent-drawer-foreground-muted" : "accent-icon-muted"}
           type="monochrome"
-          style={{ transform: [{ rotate: props.collapsed ? "0deg" : "90deg" }] }}
         />
       </View>
       <Text
