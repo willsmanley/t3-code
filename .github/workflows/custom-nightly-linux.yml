@@ -304,20 +304,6 @@ jobs:
           cp android/app/build/outputs/apk/release/app-release.apk \
             "$GITHUB_WORKSPACE/android-assets/T3-Code-Fork-$T3CODE_MOBILE_VERSION-arm64.apk"
 
-      - name: Check APK signature and identity
-        shell: bash
-        run: |
-          set -euo pipefail
-          apk="$(ls android-assets/*.apk)"
-          build_tools="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)"
-          digest="$("$build_tools/apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
-          expected="$(printf '%s' "$ANDROID_SIGNING_CERT_SHA256" | tr 'A-F' 'a-f')"
-          if [ "$digest" != "$expected" ]; then
-            echo "APK is signed with $digest, expected $expected" >&2
-            exit 1
-          fi
-          "$build_tools/aapt2" dump badging "$apk" | head -n 1
-
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -325,6 +311,23 @@ jobs:
           path: android-assets/*.apk
           if-no-files-found: error
           retention-days: 7
+
+      - name: Check APK signature and identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$(ls android-assets/*.apk)"
+          build_tools="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)"
+          certs="$("$build_tools/apksigner" verify --print-certs "$apk")"
+          # Newer apksigner labels signers by SDK range instead of "#1".
+          digests="$(printf '%s\n' "$certs" | sed -n 's/^Signer.* certificate SHA-256 digest: //p' | sort -u)"
+          expected="$(printf '%s' "$ANDROID_SIGNING_CERT_SHA256" | tr 'A-F' 'a-f')"
+          if [ "$digests" != "$expected" ]; then
+            printf '%s\n' "$certs" >&2
+            echo "APK signer does not match $expected" >&2
+            exit 1
+          fi
+          "$build_tools/aapt2" dump badging "$apk" | head -n 1
 
   publish-android:
     name: Add Android to the nightly release
