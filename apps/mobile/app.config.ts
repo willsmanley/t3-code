@@ -404,7 +404,9 @@ const config: ExpoConfig = {
         recordAudioAndroid: false,
       },
     ],
-    ["expo-image-picker", { photosPermission: false, microphonePermission: false }],
+    // `microphonePermission: false` would also block Android's RECORD_AUDIO,
+    // which the fork's voice input needs. iOS keeps expo-audio's description.
+    ["expo-image-picker", { photosPermission: false }],
     [
       "expo-splash-screen",
       {
