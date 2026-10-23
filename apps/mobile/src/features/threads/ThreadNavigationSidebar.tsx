@@ -68,6 +68,13 @@ import {
   ThreadListV2WorkingShelfHeader,
 } from "./thread-list-v2-items";
 import { useThreadRowProviderInstanceResolver } from "./thread-provider-instance";
+import {
+  PROJECT_THREAD_TREE_ENABLED,
+  ProjectThreadTreeHeader,
+  ProjectThreadTreeMoreRow,
+} from "./project-thread-tree-items";
+import { buildProjectThreadTreeListItems } from "./projectThreadTree";
+import { useProjectThreadTreeState } from "./use-project-thread-tree-state";
 import type { ThreadPrPresentation } from "../../state/thread-pr-presentation";
 import {
   buildThreadListV2Items,
@@ -275,6 +282,7 @@ function ThreadNavigationSidebarPane(
     toggleSnoozedShelf,
     toggleWorkingShelf,
   } = useThreadListV2ShelfPreferences();
+  const projectTree = useProjectThreadTreeState();
   // The list's clock is state: the compiler caches anything computed from it on
   // its other inputs, so a render-time `new Date()` would stop moving. The minute
   // interval and the snooze-wake timer below both advance it.
@@ -338,13 +346,15 @@ function ThreadNavigationSidebarPane(
       settlementEnvironmentIds,
       snoozeEnvironmentIds,
       queuedThreadKeys,
-      settledLimit: settledVisibleCount,
+      // The project tree keeps settled and snoozed threads in their project,
+      // so it reads the list with every shelf open and caps each project instead.
+      settledLimit: PROJECT_THREAD_TREE_ENABLED ? undefined : settledVisibleCount,
       now,
-      workingShelfEnabled,
+      workingShelfEnabled: workingShelfEnabled && !PROJECT_THREAD_TREE_ENABLED,
       workingShelfExpanded,
       inboxReturnAt: threadListInboxReturns.returnedAt,
-      snoozedShelfExpanded,
-      settledShelfExpanded,
+      snoozedShelfExpanded: snoozedShelfExpanded || PROJECT_THREAD_TREE_ENABLED,
+      settledShelfExpanded: settledShelfExpanded || PROJECT_THREAD_TREE_ENABLED,
       selectedThreadKey: props.selectedThreadKey ?? null,
     });
   })();
@@ -376,7 +386,7 @@ function ThreadNavigationSidebarPane(
         (v2SearchQuery.length === 0 ||
           pendingTask.title.toLocaleLowerCase().includes(v2SearchQuery)),
     );
-    const items: SidebarListItem[] = buildThreadListV2ListItems({
+    const flatItems = buildThreadListV2ListItems({
       items: threadListV2Layout.items,
       pendingTasks: v2PendingTasks,
       workingCount: threadListV2Layout.workingCount,
@@ -394,6 +404,26 @@ function ThreadNavigationSidebarPane(
       moveAvailability: threadMoveAvailability,
       shelfPreferencesLoading: !shelfPreferencesLoaded,
     });
+    const items: SidebarListItem[] = PROJECT_THREAD_TREE_ENABLED
+      ? buildProjectThreadTreeListItems({
+          listItems: flatItems,
+          projectGroups: new Map(
+            projectScopes.flatMap((scope) =>
+              scope.projectRefs.map(
+                (projectRef) =>
+                  [
+                    scopedProjectKey(projectRef.environmentId, projectRef.projectId),
+                    { key: scope.key, title: scope.title },
+                  ] as const,
+              ),
+            ),
+          ),
+          collapsedProjectKeys: projectTree.collapsedProjectKeys,
+          expandedProjectKeys: projectTree.expandedProjectKeys,
+          selectedThreadKey: props.selectedThreadKey ?? null,
+          preferencesLoading: !projectTree.loaded,
+        })
+      : flatItems;
     if (settledShelfExpanded && threadListV2Layout.hiddenSettledCount > 0) {
       items.push({
         type: "v2-show-more",
@@ -609,6 +639,7 @@ function ThreadNavigationSidebarPane(
         const scopeKey = scopedProjectKey(thread.environmentId, thread.projectId);
         return (
           <ThreadListV2Row
+            layout={PROJECT_THREAD_TREE_ENABLED ? "tree" : "flat"}
             onNewThreadOnBranch={props.onNewThreadOnBranch}
             thread={thread}
             variant={item.item.variant}
@@ -710,6 +741,27 @@ function ThreadNavigationSidebarPane(
             pane="sidebar"
             hiddenCount={item.hiddenCount}
             onPress={showMoreSettled}
+          />
+        );
+      case "v2-project":
+        return (
+          <ProjectThreadTreeHeader
+            title={item.title}
+            threadCount={item.threadCount}
+            collapsed={item.collapsed}
+            status={item.status}
+            disabled={item.disabled}
+            pane="sidebar"
+            onToggle={() => projectTree.toggleProjectCollapsed(item.projectKey)}
+          />
+        );
+      case "v2-project-more":
+        return (
+          <ProjectThreadTreeMoreRow
+            hiddenCount={item.hiddenCount}
+            expanded={item.expanded}
+            pane="sidebar"
+            onToggle={() => projectTree.toggleProjectExpanded(item.projectKey)}
           />
         );
     }

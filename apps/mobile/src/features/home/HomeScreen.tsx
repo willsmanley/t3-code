@@ -80,6 +80,13 @@ import {
   type ThreadListV2ListItem,
 } from "../threads/threadListV2";
 import { useThreadListV2ShelfPreferences } from "../threads/use-thread-list-v2-shelf-preferences";
+import {
+  PROJECT_THREAD_TREE_ENABLED,
+  ProjectThreadTreeHeader,
+  ProjectThreadTreeMoreRow,
+} from "../threads/project-thread-tree-items";
+import { buildProjectThreadTreeListItems } from "../threads/projectThreadTree";
+import { useProjectThreadTreeState } from "../threads/use-project-thread-tree-state";
 import type { HomeListFilterMenuEnvironment } from "./home-list-filter-menu";
 import {
   buildHomeProjectScopes,
@@ -452,6 +459,7 @@ export function HomeScreen(props: HomeScreenProps) {
     toggleSnoozedShelf,
     toggleWorkingShelf,
   } = useThreadListV2ShelfPreferences();
+  const projectTree = useProjectThreadTreeState();
   // The list's clock is state: the compiler caches anything computed from it on
   // its other inputs, so a render-time `new Date()` would stop moving. The minute
   // interval and the snooze-wake timer below both advance it.
@@ -515,13 +523,15 @@ export function HomeScreen(props: HomeScreenProps) {
       settlementEnvironmentIds,
       snoozeEnvironmentIds,
       queuedThreadKeys,
-      settledLimit: settledVisibleCount,
+      // The project tree keeps settled and snoozed threads in their project,
+      // so it reads the list with every shelf open and caps each project instead.
+      settledLimit: PROJECT_THREAD_TREE_ENABLED ? undefined : settledVisibleCount,
       now,
-      workingShelfEnabled,
+      workingShelfEnabled: workingShelfEnabled && !PROJECT_THREAD_TREE_ENABLED,
       workingShelfExpanded,
       inboxReturnAt: threadListInboxReturns.returnedAt,
-      snoozedShelfExpanded,
-      settledShelfExpanded,
+      snoozedShelfExpanded: snoozedShelfExpanded || PROJECT_THREAD_TREE_ENABLED,
+      settledShelfExpanded: settledShelfExpanded || PROJECT_THREAD_TREE_ENABLED,
       selectedThreadKey,
     });
   })();
@@ -551,7 +561,7 @@ export function HomeScreen(props: HomeScreenProps) {
         )) &&
       (v2SearchQuery.length === 0 || pendingTask.title.toLocaleLowerCase().includes(v2SearchQuery)),
   );
-  const threadListV2Items = buildThreadListV2ListItems({
+  const flatThreadListV2Items = buildThreadListV2ListItems({
     items: threadListV2Layout.items,
     pendingTasks: v2PendingTasks,
     workingCount: threadListV2Layout.workingCount,
@@ -569,6 +579,26 @@ export function HomeScreen(props: HomeScreenProps) {
     moveAvailability: threadMoveAvailability,
     shelfPreferencesLoading: !shelfPreferencesLoaded,
   });
+  const threadListV2Items = PROJECT_THREAD_TREE_ENABLED
+    ? buildProjectThreadTreeListItems({
+        listItems: flatThreadListV2Items,
+        projectGroups: new Map(
+          projectScopes.flatMap((scope) =>
+            scope.projectRefs.map(
+              (projectRef) =>
+                [
+                  scopedProjectKey(projectRef.environmentId, projectRef.projectId),
+                  { key: scope.key, title: scope.title },
+                ] as const,
+            ),
+          ),
+        ),
+        collapsedProjectKeys: projectTree.collapsedProjectKeys,
+        expandedProjectKeys: projectTree.expandedProjectKeys,
+        selectedThreadKey,
+        preferencesLoading: !projectTree.loaded,
+      })
+    : flatThreadListV2Items;
 
   useThreadJumpShortcuts(threadListV2Items, props.onSelectThread);
   useEffect(() => {
@@ -642,9 +672,33 @@ export function HomeScreen(props: HomeScreenProps) {
         />
       );
     }
+    if (item.type === "v2-project") {
+      return (
+        <ProjectThreadTreeHeader
+          title={item.title}
+          threadCount={item.threadCount}
+          collapsed={item.collapsed}
+          status={item.status}
+          disabled={item.disabled}
+          pane={primaryColumn ? "sidebar" : "screen"}
+          onToggle={() => projectTree.toggleProjectCollapsed(item.projectKey)}
+        />
+      );
+    }
+    if (item.type === "v2-project-more") {
+      return (
+        <ProjectThreadTreeMoreRow
+          hiddenCount={item.hiddenCount}
+          expanded={item.expanded}
+          pane={primaryColumn ? "sidebar" : "screen"}
+          onToggle={() => projectTree.toggleProjectExpanded(item.projectKey)}
+        />
+      );
+    }
     const thread = item.item.thread;
     return (
       <ThreadListV2Row
+        layout={PROJECT_THREAD_TREE_ENABLED ? "tree" : "flat"}
         pane={primaryColumn ? "sidebar" : "screen"}
         selected={scopedThreadKey(thread.environmentId, thread.id) === selectedThreadKey}
         fullSwipeWidth={fullSwipeWidth}

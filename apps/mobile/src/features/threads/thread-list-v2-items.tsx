@@ -63,6 +63,8 @@ import {
   type ThreadListV2Status,
 } from "./threadListV2";
 import { QueuedMessageIcon } from "./queued-message-icon";
+import { ThreadStatusDot } from "./project-thread-tree-items";
+import { resolveThreadStatusDot } from "./projectThreadTree";
 import { shouldRecedeThreadRow } from "./thread-row-emphasis";
 import { ThreadSearchMatchExcerpt } from "./thread-search-match";
 import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
@@ -525,6 +527,8 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
 export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly thread: EnvironmentThreadShell;
   readonly variant: "card" | "slim";
+  /** "tree" renders one line under a project header: status dot, title, time. */
+  readonly layout?: "flat" | "tree";
   readonly hasQueuedMessages?: boolean;
   readonly snoozed?: boolean;
   readonly pinned?: boolean;
@@ -1237,8 +1241,85 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     cardContent
   );
 
+  const treeDot =
+    props.layout === "tree" ? resolveThreadStatusDot({ thread, wokeAt: props.wokeAt }) : null;
+  const treeContent = (
+    <View
+      className={cn("min-h-[40px] flex-row items-center gap-2 py-2", sidebarPane ? "px-3" : "px-5")}
+    >
+      <View className="w-3 items-center">
+        {treeDot !== null ? <ThreadStatusDot kind={treeDot} /> : null}
+      </View>
+      <View className="min-w-0 flex-1">
+        <Text
+          className={cn(
+            "text-base",
+            selected
+              ? selectedThreadRowColors.foregroundClassName
+              : variant === "slim"
+                ? rowAppearance.mutedForegroundClassName
+                : rowAppearance.foregroundClassName,
+          )}
+          numberOfLines={1}
+        >
+          {thread.title}
+        </Text>
+        {props.searchMatch ? (
+          <ThreadSearchMatchExcerpt
+            sidebar={sidebarPane}
+            match={props.searchMatch}
+            query={props.searchQuery ?? ""}
+            selected={selected}
+          />
+        ) : null}
+      </View>
+      {props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
+      {pinnedRow ? (
+        <SymbolView
+          name="pin"
+          size={11}
+          tintColorClassName={rowAppearance.mutedIconTintClassName}
+          type="monochrome"
+        />
+      ) : null}
+      <Text
+        className={cn(
+          "text-xs tabular-nums",
+          selected
+            ? selectedThreadRowColors.mutedForegroundClassName
+            : rowAppearance.tertiaryForegroundClassName,
+        )}
+        style={{ fontFamily: MONO_FONT }}
+      >
+        {snoozedRow && props.snoozeWakeLabelText !== undefined
+          ? props.snoozeWakeLabelText
+          : timeLabel}
+      </Text>
+    </View>
+  );
+
   const rowContent = (close: () => void) =>
-    variant === "card" ? (
+    props.layout === "tree" ? (
+      <RowPressable
+        key={`${thread.environmentId}:${thread.id}`}
+        interactionClassName={rowAppearance.interactionClassName}
+        interactionOpacity={rowAppearance.interactionOpacity}
+        accessibilityHint={swipeAccessibilityHint}
+        accessibilityLabel={
+          props.hasQueuedMessages ? `${thread.title}, messages queued to send` : thread.title
+        }
+        accessibilityRole="button"
+        accessibilityState={{ selected }}
+        className={rowAppearance.className}
+        onPress={() => {
+          close();
+          onSelectThread(thread);
+        }}
+        style={rowAppearance.style}
+      >
+        {treeContent}
+      </RowPressable>
+    ) : variant === "card" ? (
       <RowPressable
         key={`${thread.environmentId}:${thread.id}`}
         interactionClassName={rowAppearance.interactionClassName}
