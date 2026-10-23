@@ -108,6 +108,12 @@ function resolveAppVariant(value: string | undefined): AppVariant {
 }
 
 const variant = VARIANT_CONFIG[APP_VARIANT];
+// Fork builds install beside the store apps and are signed with a different key, so
+// they need their own package and name. Their version code must keep increasing for
+// Android to accept each build as an update.
+const appName = process.env.T3CODE_MOBILE_APP_NAME?.trim() || variant.appName;
+const androidPackage = process.env.T3CODE_ANDROID_PACKAGE?.trim() || variant.androidPackage;
+const androidVersionCode = Number(process.env.T3CODE_ANDROID_VERSION_CODE);
 const iosBundleIdentifier = isIosPersonalTeamBuild
   ? personalTeamBundleIdentifier!
   : variant.iosBundleIdentifier;
@@ -222,7 +228,7 @@ const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
 // family names without waiting for runtime font loading.
 
 const config: ExpoConfig = {
-  name: variant.appName,
+  name: appName,
   slug: "t3-code",
   platforms: ["ios", "android"],
   scheme: variant.scheme,
@@ -293,7 +299,10 @@ const config: ExpoConfig = {
   },
   android: {
     icon: variant.assets.appIcon,
-    package: variant.androidPackage,
+    package: androidPackage,
+    ...(Number.isSafeInteger(androidVersionCode) && androidVersionCode > 0
+      ? { versionCode: androidVersionCode }
+      : {}),
     ...(repoEnv.T3CODE_ANDROID_GOOGLE_SERVICES_FILE
       ? { googleServicesFile: repoEnv.T3CODE_ANDROID_GOOGLE_SERVICES_FILE }
       : {}),

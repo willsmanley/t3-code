@@ -29,6 +29,8 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       ref: ${{ steps.ref.outputs.ref }}
+      upstream: ${{ steps.ref.outputs.upstream }}
+      date: ${{ steps.ref.outputs.date }}
     steps:
       - name: Checkout fork
         uses: actions/checkout@v4
@@ -38,13 +40,23 @@ jobs:
       - name: Export synced commit
         id: ref
         shell: bash
-        run: echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          # The desktop and Android builds merge this one upstream commit so both
+          # apps in a release ship the same code.
+          upstream="$(git ls-remote https://github.com/pingdotgg/t3code.git refs/heads/main | cut -f1)"
+          test -n "$upstream"
+          echo "upstream=$upstream" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build and publish Linux nightly
     needs: sync
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    outputs:
+      tag: ${{ steps.nightly.outputs.tag }}
     env:
       T3CODE_DESKTOP_UPDATE_REPOSITORY: willsmanley/t3-code
       T3CODE_RELEASE_BASE_URL: https://github.com/willsmanley/t3-code/releases/download
@@ -58,15 +70,17 @@ jobs:
 
       - name: Merge upstream for this build
         shell: bash
+        env:
+          UPSTREAM_SHA: ${{ needs.sync.outputs.upstream }}
         run: |
           set -euo pipefail
           git config user.name "t3code-nightly[bot]"
           git config user.email "t3code-nightly[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/pingdotgg/t3code.git
-          git fetch --no-tags upstream main
+          git fetch --no-tags upstream "$UPSTREAM_SHA"
           # Keep the fork's intentional sidebar surface when upstream changes
           # the same files so a conflict cannot skip the nightly runtime.
-          git merge -X ours --no-edit upstream/main
+          git merge -X ours --no-edit FETCH_HEAD
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -90,14 +104,13 @@ jobs:
         id: nightly
         shell: bash
         env:
-          NIGHTLY_DATE: ${{ github.run_started_at }}
+          NIGHTLY_DATE: ${{ needs.sync.outputs.date }}
           NIGHTLY_RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
-          date_utc="$(date -u -d "$NIGHTLY_DATE" +%Y%m%d)"
           nightly_sha="$(git rev-parse HEAD)"
           node scripts/resolve-nightly-release.ts \
-            --date "$date_utc" \
+            --date "$NIGHTLY_DATE" \
             --run-number "$NIGHTLY_RUN_NUMBER" \
             --sha "$nightly_sha" \
             --github-output
@@ -163,7 +176,9 @@ jobs:
           cd release-assets
           sha256sum -- *.AppImage *.deb "t3-$NIGHTLY_VERSION-linux-x64.tar.gz" > SHA256SUMS
 
+      # Branch runs are test builds; only main publishes.
       - name: Publish GitHub prerelease
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.nightly.outputs.tag }}
@@ -183,3 +198,154 @@ jobs:
               --latest=false \
               --generate-notes
           fi
+
+  android:
+    name: Build Android nightly
+    needs: sync
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      # The preview variant carries the nightly icon and label. The fork build
+      # installs beside the store app under its own package and signing key.
+      APP_VARIANT: preview
+      T3CODE_MOBILE_APP_NAME: T3 Code Fork
+      T3CODE_ANDROID_PACKAGE: com.willsmanley.t3code
+      T3CODE_ANDROID_VERSION_CODE: ${{ github.run_number }}
+      # Each nightly APK carries its own JavaScript; T3's over-the-air updates
+      # target the store builds.
+      T3CODE_MOBILE_UPDATES_ENABLED: "0"
+      EXPO_NO_GIT_STATUS: "1"
+      # Public certificate fingerprint of the fork's signing key. The private key
+      # lives in the repository secrets and in Bitwarden.
+      ANDROID_SIGNING_CERT_SHA256: 6DEBB2EA31768F3634B1FF7B81E234D7D8D8E234EC34615C8D60B5CDC6691D83
+    steps:
+      - name: Checkout synced commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.sync.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Merge upstream for this build
+        shell: bash
+        env:
+          UPSTREAM_SHA: ${{ needs.sync.outputs.upstream }}
+        run: |
+          set -euo pipefail
+          git config user.name "t3code-nightly[bot]"
+          git config user.email "t3code-nightly[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/pingdotgg/t3code.git
+          git fetch --no-tags upstream "$UPSTREAM_SHA"
+          # Keep the fork's intentional sidebar surface when upstream changes
+          # the same files so a conflict cannot skip the nightly runtime.
+          git merge -X ours --no-edit FETCH_HEAD
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: |
+            args:
+              - --filter=@t3tools/mobile...
+              - --filter=@t3tools/scripts...
+
+      - name: Expose pnpm
+        run: |
+          pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
+          vp_pnpm_bin="$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin"
+          echo "$vp_pnpm_bin" >> "$GITHUB_PATH"
+          "$vp_pnpm_bin/pnpm" --version
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle cache
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Resolve nightly version
+        id: nightly
+        shell: bash
+        env:
+          NIGHTLY_DATE: ${{ needs.sync.outputs.date }}
+          NIGHTLY_RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          node scripts/resolve-nightly-release.ts \
+            --date "$NIGHTLY_DATE" \
+            --run-number "$NIGHTLY_RUN_NUMBER" \
+            --sha "$(git rev-parse HEAD)" \
+            --github-output
+
+      - name: Build signed APK
+        shell: bash
+        env:
+          T3CODE_MOBILE_VERSION: ${{ steps.nightly.outputs.version }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          keystore="$RUNNER_TEMP/release.p12"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$keystore"
+          cd apps/mobile
+          pnpm exec expo prebuild --clean --platform android --no-install
+          # Android Gradle Plugin signs every variant with an injected config.
+          {
+            echo "android.injected.signing.store.file=$keystore"
+            echo "android.injected.signing.store.password=$ANDROID_KEYSTORE_PASSWORD"
+            echo "android.injected.signing.key.alias=$ANDROID_KEY_ALIAS"
+            echo "android.injected.signing.key.password=$ANDROID_KEYSTORE_PASSWORD"
+          } >> android/gradle.properties
+          (cd android && ./gradlew app:assembleRelease -PreactNativeArchitectures=arm64-v8a)
+          mkdir -p "$GITHUB_WORKSPACE/android-assets"
+          cp android/app/build/outputs/apk/release/app-release.apk \
+            "$GITHUB_WORKSPACE/android-assets/T3-Code-Fork-$T3CODE_MOBILE_VERSION-arm64.apk"
+
+      - name: Check APK signature and identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$(ls android-assets/*.apk)"
+          build_tools="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)"
+          digest="$("$build_tools/apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
+          expected="$(printf '%s' "$ANDROID_SIGNING_CERT_SHA256" | tr 'A-F' 'a-f')"
+          if [ "$digest" != "$expected" ]; then
+            echo "APK is signed with $digest, expected $expected" >&2
+            exit 1
+          fi
+          "$build_tools/aapt2" dump badging "$apk" | head -n 1
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: android-assets/*.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-android:
+    name: Add Android to the nightly release
+    needs: [build, android]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download APK
+        uses: actions/download-artifact@v4
+        with:
+          name: android-apk
+          path: android-assets
+
+      - name: Upload APK and checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd android-assets
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS
+          sha256sum -- *.apk >> SHA256SUMS
+          gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber -- *.apk SHA256SUMS
