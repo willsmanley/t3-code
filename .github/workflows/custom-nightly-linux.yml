@@ -292,17 +292,19 @@ jobs:
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$keystore"
           cd apps/mobile
           pnpm exec expo prebuild --clean --platform android --no-install
-          # Android Gradle Plugin signs every variant with an injected config.
-          {
-            echo "android.injected.signing.store.file=$keystore"
-            echo "android.injected.signing.store.password=$ANDROID_KEYSTORE_PASSWORD"
-            echo "android.injected.signing.key.alias=$ANDROID_KEY_ALIAS"
-            echo "android.injected.signing.key.password=$ANDROID_KEYSTORE_PASSWORD"
-          } >> android/gradle.properties
           (cd android && ./gradlew app:assembleRelease -PreactNativeArchitectures=arm64-v8a)
+          # Expo's generated release build uses the debug key, so re-sign the
+          # finished APK with the fork's key. apksigner replaces the old signature.
+          build_tools="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)"
           mkdir -p "$GITHUB_WORKSPACE/android-assets"
-          cp android/app/build/outputs/apk/release/app-release.apk \
-            "$GITHUB_WORKSPACE/android-assets/T3-Code-Fork-$T3CODE_MOBILE_VERSION-arm64.apk"
+          "$build_tools/apksigner" sign \
+            --ks "$keystore" \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
+            --key-pass env:ANDROID_KEYSTORE_PASSWORD \
+            --out "$GITHUB_WORKSPACE/android-assets/T3-Code-Fork-$T3CODE_MOBILE_VERSION-arm64.apk" \
+            android/app/build/outputs/apk/release/app-release.apk
+          rm -f "$keystore"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
