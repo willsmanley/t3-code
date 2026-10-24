@@ -12,6 +12,7 @@ import * as Option from "effect/Option";
 import { useCallback, useMemo } from "react";
 
 import { environmentCatalog } from "../../connection/catalog";
+import { forgetAgentAwarenessDirectPushEnvironment } from "../agent-awareness/remoteRegistration";
 import {
   connectPairingUrl as connectPairingUrlAtom,
   updateBearerConnection,
@@ -89,7 +90,10 @@ export function useConnectionController() {
     [registerEnvironment],
   );
   const removeEnvironment = useCallback(
-    (environmentId: EnvironmentId) => removeEnvironmentMutation(environmentId),
+    async (environmentId: EnvironmentId) => {
+      await forgetAgentAwarenessDirectPushEnvironment(environmentId);
+      return removeEnvironmentMutation(environmentId);
+    },
     [removeEnvironmentMutation],
   );
   const retryEnvironment = useCallback(

@@ -21,6 +21,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { supportsAgentAwarenessPush } from "../agent-awareness/capabilities";
+import { usesAndroidDirectPush } from "../agent-awareness/directPush";
 import {
   openAndroidLiveUpdateSettings,
   supportsAndroidLiveUpdateSettings,
@@ -85,7 +86,19 @@ function ConfiguredSettingsNotificationsRouteScreen() {
       : agentAwarenessPlatform.subtitle;
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const { getToken, isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
+  const {
+    getToken,
+    isLoaded: isAuthLoaded,
+    isSignedIn,
+  } = useAuth({
+    treatPendingAsSignedOut: false,
+  });
+  // A direct push build registers with its own servers, not T3 Connect, so
+  // these settings work without signing in.
+  const directPush = usesAndroidDirectPush();
+  const isLoaded = isAuthLoaded || directPush;
+  const needsSignIn = !isSignedIn && !directPush;
+  const registrationTarget = directPush ? "your T3 Code server" : "T3 Connect";
   const { savedConnectionsById } = useSavedRemoteConnections();
   const [notificationStatus, setNotificationStatus] = useState<NotificationStatus>("checking");
   const [liveActivityStatus, setLiveActivityStatus] = useState<LiveActivityStatus>("checking");
@@ -128,7 +141,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
       setLiveActivityStatus("checking");
       return;
     }
-    if (!isSignedIn) {
+    if (needsSignIn) {
       setLiveActivityStatus("signed-out");
       return;
     }
@@ -144,7 +157,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
     setLiveActivityStatus(
       preferencesResult.value.liveActivitiesEnabled === false ? "disabled" : "enabled",
     );
-  }, [isLoaded, isSignedIn, preferencesResult]);
+  }, [isLoaded, needsSignIn, preferencesResult]);
 
   const requestNotifications = async () => {
     const result = await settleAsyncResult(() =>
@@ -173,7 +186,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
       } else {
         Dialog.alert(
           "Couldn't finish enabling notifications",
-          "Notification access was granted, but this device could not be registered with T3 Connect. Notifications will start once registration succeeds.",
+          `Notification access was granted, but this device could not be registered with ${registrationTarget}. Notifications will start once registration succeeds.`,
         );
       }
       return;
@@ -216,7 +229,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
   };
 
   const linkEnvironments = async () => {
-    if (!isSignedIn) {
+    if (needsSignIn) {
       promptSignIn();
       return;
     }
@@ -249,7 +262,9 @@ function ConfiguredSettingsNotificationsRouteScreen() {
       }
       setNotificationStatus("enabled");
     }
-    const tokenResult = await settlePromise(() => getToken(resolveRelayClerkTokenOptions()));
+    const tokenResult = directPush
+      ? AsyncResult.success(null)
+      : await settlePromise(() => getToken(resolveRelayClerkTokenOptions()));
     if (tokenResult._tag === "Failure") {
       setLiveActivityStatus("disabled");
       const error = squashAtomCommandFailure(tokenResult);
@@ -259,7 +274,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
       );
       return;
     }
-    if (!tokenResult.value) {
+    if (!tokenResult.value && !directPush) {
       promptSignIn();
       setLiveActivityStatus("signed-out");
       return;
@@ -292,7 +307,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
     }
 
     savePreferences({ liveActivitiesEnabled: true });
-    refreshManagedRelayEnvironments();
+    if (!directPush) refreshManagedRelayEnvironments();
     setLiveActivityStatus("enabled");
     // The environment link can succeed while this device's own registration
     // (the push-to-start token the relay needs) has not — don't claim Live
@@ -307,14 +322,14 @@ function ConfiguredSettingsNotificationsRouteScreen() {
     } else {
       Dialog.alert(
         "Couldn't finish enabling activity updates",
-        "This device could not be registered with T3 Connect, so activity updates won't appear yet. They'll start once registration succeeds.",
+        `This device could not be registered with ${registrationTarget}, so activity updates won't appear yet. They'll start once registration succeeds.`,
       );
     }
   };
 
   const handleDeviceNotificationsChange = (enabled: boolean) => {
     if (enabled) {
-      if (!isSignedIn) {
+      if (needsSignIn) {
         promptSignIn();
         return;
       }
@@ -334,7 +349,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
 
   async function disableLiveActivities() {
     let token: string | null = null;
-    if (isSignedIn) {
+    if (isSignedIn && !directPush) {
       const tokenResult = await settlePromise(() => getToken(resolveRelayClerkTokenOptions()));
       if (tokenResult._tag === "Failure") {
         setLiveActivityStatus("enabled");
@@ -359,14 +374,14 @@ function ConfiguredSettingsNotificationsRouteScreen() {
       ),
     );
     if (updateResult._tag === "Failure") {
-      setLiveActivityStatus(isSignedIn ? "enabled" : "signed-out");
+      setLiveActivityStatus(needsSignIn ? "signed-out" : "enabled");
       reportAtomCommandResult(updateResult, {
         label: "live activity disable",
       });
       return;
     }
     savePreferences({ liveActivitiesEnabled: false });
-    refreshManagedRelayEnvironments();
+    if (!directPush) refreshManagedRelayEnvironments();
     setLiveActivityStatus("disabled");
   }
 
@@ -381,7 +396,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
       return;
     }
 
-    if (!isSignedIn) {
+    if (needsSignIn) {
       promptSignIn();
       return;
     }

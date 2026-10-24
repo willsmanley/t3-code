@@ -9,7 +9,11 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import { AppState, Platform } from "react-native";
-import type { EnvironmentId } from "@t3tools/contracts";
+import {
+  DIRECT_PUSH_NOTIFICATION_USER_ID,
+  type DirectPushDeviceRegistrationInput,
+  type EnvironmentId,
+} from "@t3tools/contracts";
 import {
   type RelayDeviceRegistrationRequest,
   type RelayAgentActivitySnapshotResponse,
@@ -44,6 +48,7 @@ import {
 } from "./agentLiveActivity";
 import { resolveCloudPublicConfig } from "../cloud/publicConfig";
 import { supportsAgentAwarenessPush } from "./capabilities";
+import { usesAndroidDirectPush } from "./directPush";
 import { makeRelayDeviceRegistrationRequest, resolveApsEnvironment } from "./registrationPayload";
 
 const REMOTE_ACTIVITY_REGISTRATION_RETRY_MS = 15_000;
@@ -136,7 +141,27 @@ let pendingDeviceRegistration: {
 
 interface DeviceRegistrationInput {
   readonly observedPushToken?: string;
+  /** The set of direct push servers changed; an in-flight registration may have missed one. */
+  readonly directPushTargetsChanged?: true;
 }
+
+export interface AgentAwarenessDirectPushTarget {
+  readonly environmentIds: ReadonlyArray<EnvironmentId>;
+  /** Resolves with the environments that accepted the request; never rejects. */
+  readonly send: (request: {
+    readonly environmentIds: ReadonlyArray<EnvironmentId>;
+    readonly deviceId: string;
+    readonly registration: DirectPushDeviceRegistrationInput | null;
+  }) => Promise<ReadonlyArray<EnvironmentId>>;
+}
+
+let directPushTarget: AgentAwarenessDirectPushTarget | null = null;
+// Each accepted registration replays the card, like the relay path, so an
+// unchanged registration repeats at most once a minute.
+const directPushRegistrations = new Map<
+  EnvironmentId,
+  { readonly signature: string; readonly at: number }
+>();
 
 interface RegisterDeviceInput extends DeviceRegistrationInput {
   readonly preferencesOverride?: Partial<Preferences>;
@@ -178,6 +203,9 @@ export function setAgentAwarenessRelayTokenProvider(
   provider: (() => Promise<string | null>) | null,
   identity?: string,
 ): void {
+  // This build's pushes come from its own servers, so signing in or out of
+  // T3 Connect must neither register it with the relay nor clear its cards.
+  if (usesAndroidDirectPush()) return;
   const isExistingIdentity =
     provider !== null &&
     !shouldRegisterAgentAwarenessDeviceForProvider(relayTokenProviderIdentity, identity);
@@ -234,6 +262,7 @@ export function setAgentAwarenessRelayTokenProvider(
 // persisted registration would be wrong — the relay still holds a valid
 // registration and the next mount reuses it.
 export function releaseAgentAwarenessRelayTokenProvider(): void {
+  if (usesAndroidDirectPush()) return;
   relayTokenProvider = null;
   relayTokenProviderIdentity = null;
   deviceRegistrationGeneration++;
@@ -433,6 +462,92 @@ const registerDeviceWithRelay = Effect.fn("remoteRegistration.registerDeviceWith
   });
 });
 
+const registerDeviceWithDirectPush = Effect.fn("remoteRegistration.registerDeviceWithDirectPush")(
+  function* (body: RelayDeviceRegistrationRequest, expectedGeneration: number) {
+    const target = directPushTarget;
+    if (!target || target.environmentIds.length === 0) {
+      setRegistrationStatus("unknown");
+      return;
+    }
+    // Without permission or a token the phone can show nothing, so the
+    // servers stop sending instead of keeping a dead registration.
+    const registration =
+      body.pushToken && body.bundleId && body.preferences.notificationsEnabled
+        ? {
+            deviceId: body.deviceId,
+            pushToken: body.pushToken,
+            packageName: body.bundleId,
+            preferences: body.preferences,
+          }
+        : null;
+    const signature = registration ? registrationSignature(body) : "unregistered";
+    const now = Date.now();
+    const due = target.environmentIds.filter((environmentId) => {
+      const previous = directPushRegistrations.get(environmentId);
+      return (
+        previous?.signature !== signature ||
+        (registration !== null && now - previous.at >= ACTIVITY_TOKEN_REREGISTER_INTERVAL_MS)
+      );
+    });
+    if (due.length > 0) {
+      logRegistrationDebug("direct push device registration request started", {
+        environmentCount: due.length,
+        registered: registration !== null,
+      });
+      const accepted = yield* Effect.promise(() =>
+        target.send({ environmentIds: due, deviceId: body.deviceId, registration }),
+      );
+      if (expectedGeneration !== deviceRegistrationGeneration) return;
+      for (const environmentId of accepted) {
+        directPushRegistrations.set(environmentId, { signature, at: now });
+      }
+    }
+    if (registration === null) {
+      setRegistrationStatus("unknown");
+      return;
+    }
+    const registeredSomewhere = target.environmentIds.some(
+      (environmentId) => directPushRegistrations.get(environmentId)?.signature === signature,
+    );
+    if (registeredSomewhere) {
+      setRegistrationStatus("registered");
+    } else if (registrationStatus !== "registered") {
+      setRegistrationStatus("failed");
+    }
+  },
+);
+
+/**
+ * Removing an environment deletes its credentials, after which this device
+ * could never ask that server to stop sending.
+ */
+export async function forgetAgentAwarenessDirectPushEnvironment(
+  environmentId: EnvironmentId,
+): Promise<void> {
+  const target = directPushTarget;
+  if (!usesAndroidDirectPush() || !target?.environmentIds.includes(environmentId)) return;
+  directPushRegistrations.delete(environmentId);
+  const deviceId = await loadAgentAwarenessDeviceId().catch(() => null);
+  if (!deviceId) return;
+  await target.send({ environmentIds: [environmentId], deviceId, registration: null });
+}
+
+export function setAgentAwarenessDirectPushTarget(
+  target: AgentAwarenessDirectPushTarget | null,
+): void {
+  if (!usesAndroidDirectPush()) return;
+  const previous = directPushTarget;
+  directPushTarget = target;
+  if (!target) return;
+  ensurePushTokenListener();
+  ensureAppStateListener();
+  if (previous?.environmentIds.join("\n") === target.environmentIds.join("\n")) return;
+  enqueueDeviceRegistration(
+    { directPushTargetsChanged: true },
+    "direct push device registration failed",
+  );
+}
+
 const unregisterDeviceWithRelay = Effect.fn("remoteRegistration.unregisterDeviceWithRelay")(
   function* (input: {
     readonly deviceId: string;
@@ -614,7 +729,12 @@ function mergeDeviceRegistrationInput(
   next: DeviceRegistrationInput,
 ): DeviceRegistrationInput {
   const observedPushToken = next.observedPushToken ?? current.observedPushToken;
-  return observedPushToken ? { observedPushToken } : {};
+  const directPushTargetsChanged =
+    next.directPushTargetsChanged ?? current.directPushTargetsChanged;
+  return {
+    ...(observedPushToken ? { observedPushToken } : {}),
+    ...(directPushTargetsChanged ? { directPushTargetsChanged } : {}),
+  };
 }
 
 function registrationAddsInformation(
@@ -622,7 +742,9 @@ function registrationAddsInformation(
   next: DeviceRegistrationInput,
 ): boolean {
   return (
-    next.observedPushToken !== undefined && next.observedPushToken !== current.observedPushToken
+    (next.observedPushToken !== undefined &&
+      next.observedPushToken !== current.observedPushToken) ||
+    next.directPushTargetsChanged === true
   );
 }
 
@@ -726,7 +848,14 @@ const registerDevice = Effect.fn("remoteRegistration.registerDevice")(function* 
     input.preferencesOverride,
   );
   if (expectedGeneration !== deviceRegistrationGeneration) return;
-  if (relayTokenProvider && relayTokenProviderIdentity) {
+  const directPush = usesAndroidDirectPush();
+  if (directPush) {
+    configureAndroidAgentNotifications(
+      deviceId,
+      DIRECT_PUSH_NOTIFICATION_USER_ID,
+      preferences.liveActivitiesEnabled !== false,
+    );
+  } else if (relayTokenProvider && relayTokenProviderIdentity) {
     configureAndroidAgentNotifications(
       deviceId,
       relayTokenProviderIdentity,
@@ -742,26 +871,27 @@ const registerDevice = Effect.fn("remoteRegistration.registerDevice")(function* 
     Platform.OS === "android"
       ? Constants.expoConfig?.android?.package?.trim()
       : Constants.expoConfig?.ios?.bundleIdentifier?.trim();
-  yield* registerDeviceWithRelay(
-    makeRelayDeviceRegistrationRequest({
-      deviceId,
-      label:
-        Constants.deviceName?.trim() ||
-        (Platform.OS === "android" ? "Android device" : "iOS device"),
-      ...(Platform.OS === "android"
-        ? { platform: "android" as const, androidApiLevel: Number(Platform.Version) }
-        : { platform: "ios" as const, iosMajorVersion: iosMajorVersion() }),
-      appVersion: Constants.expoConfig?.version,
-      ...(bundleId ? { bundleId } : {}),
-      ...(Platform.OS === "ios"
-        ? { apsEnvironment: resolveApsEnvironment(Constants.expoConfig?.extra?.appVariant) }
-        : {}),
-      ...(pushTokenRegistration.pushToken ? { pushToken: pushTokenRegistration.pushToken } : {}),
-      notificationsEnabled: pushTokenRegistration.notificationsEnabled,
-      preferences,
-    }),
-    expectedGeneration,
-  );
+  const request = makeRelayDeviceRegistrationRequest({
+    deviceId,
+    label:
+      Constants.deviceName?.trim() || (Platform.OS === "android" ? "Android device" : "iOS device"),
+    ...(Platform.OS === "android"
+      ? { platform: "android" as const, androidApiLevel: Number(Platform.Version) }
+      : { platform: "ios" as const, iosMajorVersion: iosMajorVersion() }),
+    appVersion: Constants.expoConfig?.version,
+    ...(bundleId ? { bundleId } : {}),
+    ...(Platform.OS === "ios"
+      ? { apsEnvironment: resolveApsEnvironment(Constants.expoConfig?.extra?.appVariant) }
+      : {}),
+    ...(pushTokenRegistration.pushToken ? { pushToken: pushTokenRegistration.pushToken } : {}),
+    notificationsEnabled: pushTokenRegistration.notificationsEnabled,
+    preferences,
+  });
+  if (directPush) {
+    yield* registerDeviceWithDirectPush(request, expectedGeneration);
+    return;
+  }
+  yield* registerDeviceWithRelay(request, expectedGeneration);
 });
 
 function registerDeviceForCurrentUser(): Effect.Effect<
@@ -908,6 +1038,8 @@ export function __resetAgentAwarenessRemoteRegistrationForTest(): void {
   registrationStatusListeners.clear();
   registeredActivityPushTokens.clear();
   activityPushTokenLocks.clear();
+  directPushTarget = null;
+  directPushRegistrations.clear();
 }
 
 export const unregisterAgentAwarenessDeviceForCurrentUser: (
@@ -916,6 +1048,7 @@ export const unregisterAgentAwarenessDeviceForCurrentUser: (
   "remoteRegistration.unregisterAgentAwarenessDeviceForCurrentUser",
 )(
   function* (tokenProvider: () => Promise<string | null>) {
+    if (usesAndroidDirectPush()) return;
     const deviceId = yield* Effect.tryPromise({
       try: () => loadAgentAwarenessDeviceId(),
       catch: (cause) =>

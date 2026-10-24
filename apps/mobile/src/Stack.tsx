@@ -40,6 +40,7 @@ import {
   type RenderFailureProps,
 } from "./components/RenderErrorBoundary";
 import { ArchivedThreadsRouteScreen } from "./features/archive/ArchivedThreadsRouteScreen";
+import { useAgentAwarenessDirectPush } from "./features/agent-awareness/directPushRegistration";
 import { useAgentNotificationNavigation } from "./features/agent-awareness/notificationNavigation";
 import { ConnectOnboardingRouteScreen } from "./features/cloud/ConnectOnboardingRouteScreen";
 import { useConnectOnboardingNavigation } from "./features/cloud/connectOnboardingNavigation";
@@ -513,6 +514,12 @@ function ThreadOutboxDrainWorker() {
   return null;
 }
 
+// Server config changes would otherwise re-render RootStackLayout.
+function AgentAwarenessDirectPushWorker() {
+  useAgentAwarenessDirectPush();
+  return null;
+}
+
 function RootStackLayout(props: {
   readonly children: React.ReactNode;
   readonly state: NavigationState;
@@ -558,6 +565,7 @@ function RootStackLayout(props: {
     >
       <HardwareKeyboardCommandProvider pathname={pathname}>
         <ThreadOutboxDrainWorker />
+        <AgentAwarenessDirectPushWorker />
         <ShowcaseCaptureCoordinator pathname={pathname} />
         <ExistingThreadSettingsRouteProvider>
           <WorkspaceConnectionStatusProvider>
