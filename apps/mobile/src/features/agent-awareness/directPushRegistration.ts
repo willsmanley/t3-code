@@ -26,6 +26,7 @@ const sendDirectPushRegistration = createRuntimeCommand(connectionAtomRuntime, {
     readonly environmentIds: ReadonlyArray<EnvironmentId>;
     readonly deviceId: string;
     readonly registration: DirectPushDeviceRegistrationInput | null;
+    readonly pushToken?: string;
   }) {
     const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
     const accepted = yield* Effect.forEach(
@@ -36,7 +37,10 @@ const sendDirectPushRegistration = createRuntimeCommand(connectionAtomRuntime, {
             environmentId,
             input.registration
               ? request(WS_METHODS.serverRegisterPushDevice, input.registration)
-              : request(WS_METHODS.serverUnregisterPushDevice, { deviceId: input.deviceId }),
+              : request(WS_METHODS.serverUnregisterPushDevice, {
+                  deviceId: input.deviceId,
+                  ...(input.pushToken ? { pushToken: input.pushToken } : {}),
+                }),
           )
           .pipe(
             // An unreachable server must not hold up the others or the next

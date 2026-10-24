@@ -67,6 +67,8 @@ const layerTest = Layer.mergeAll(
       loadAgentAwarenessRegistrationRecord: Effect.succeed(null),
       saveAgentAwarenessRegistrationRecord: () => Effect.void,
       clearAgentAwarenessRegistrationRecord: Effect.void,
+      loadDirectPushPendingUnregisters: Effect.succeed({}),
+      saveDirectPushPendingUnregisters: () => Effect.void,
       loadRecentThreadShortcuts: Effect.succeed([]),
       saveRecentThreadShortcuts: () => Effect.void,
     }),

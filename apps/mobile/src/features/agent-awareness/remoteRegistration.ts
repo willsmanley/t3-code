@@ -35,10 +35,13 @@ import type { Preferences } from "../../persistence/mobile-preferences";
 import {
   clearAgentAwarenessRegistrationRecord,
   loadAgentAwarenessDeviceId,
+  loadAgentAwarenessDirectPushPendingUnregisters,
   loadAgentAwarenessRegistrationRecord,
   loadOrCreateAgentAwarenessDeviceId,
   loadPreferences,
+  saveAgentAwarenessDirectPushPendingUnregisters,
   saveAgentAwarenessRegistrationRecord,
+  type DirectPushPendingUnregisters,
 } from "../../persistence/imperative";
 import type { AgentActivityProps } from "../../widgets/AgentActivity";
 import {
@@ -147,11 +150,15 @@ interface DeviceRegistrationInput {
 
 export interface AgentAwarenessDirectPushTarget {
   readonly environmentIds: ReadonlyArray<EnvironmentId>;
-  /** Resolves with the environments that accepted the request; never rejects. */
+  /**
+   * Resolves with the environments that accepted the request; never rejects.
+   * A null registration unregisters, proving ownership with `pushToken`.
+   */
   readonly send: (request: {
     readonly environmentIds: ReadonlyArray<EnvironmentId>;
     readonly deviceId: string;
     readonly registration: DirectPushDeviceRegistrationInput | null;
+    readonly pushToken?: string;
   }) => Promise<ReadonlyArray<EnvironmentId>>;
 }
 
@@ -162,6 +169,29 @@ const directPushRegistrations = new Map<
   EnvironmentId,
   { readonly signature: string; readonly at: number }
 >();
+// Being removed: registrations skip them even while their config lingers.
+const forgottenDirectPushEnvironments = new Set<EnvironmentId>();
+let lastDirectPushToken: string | null = null;
+
+const loadDirectPushPendingUnregisters = (): Promise<DirectPushPendingUnregisters> =>
+  loadAgentAwarenessDirectPushPendingUnregisters().catch(() => ({}));
+
+async function updateDirectPushPendingUnregisters(
+  update: (pending: DirectPushPendingUnregisters) => DirectPushPendingUnregisters,
+): Promise<void> {
+  const pending = await loadDirectPushPendingUnregisters();
+  await saveAgentAwarenessDirectPushPendingUnregisters(update(pending)).catch((error: unknown) => {
+    logRegistrationError("persist direct push pending unregister failed", error);
+  });
+}
+
+function withoutEnvironment<T>(
+  record: Readonly<Record<string, T>>,
+  environmentId: EnvironmentId,
+): Record<string, T> {
+  const { [environmentId]: _removed, ...rest } = record;
+  return rest;
+}
 
 interface RegisterDeviceInput extends DeviceRegistrationInput {
   readonly preferencesOverride?: Partial<Preferences>;
@@ -465,10 +495,42 @@ const registerDeviceWithRelay = Effect.fn("remoteRegistration.registerDeviceWith
 const registerDeviceWithDirectPush = Effect.fn("remoteRegistration.registerDeviceWithDirectPush")(
   function* (body: RelayDeviceRegistrationRequest, expectedGeneration: number) {
     const target = directPushTarget;
-    if (!target || target.environmentIds.length === 0) {
+    const connected =
+      target?.environmentIds.filter(
+        (environmentId) => !forgottenDirectPushEnvironments.has(environmentId),
+      ) ?? [];
+    if (!target || connected.length === 0) {
       setRegistrationStatus("unknown");
       return;
     }
+    if (body.pushToken) lastDirectPushToken = body.pushToken;
+    // A server that was unreachable when its environment was removed still
+    // holds the old registration. Clear it first, so an old pairing's row
+    // cannot outlive a new one; one that still refuses is left alone.
+    const pending = yield* Effect.promise(loadDirectPushPendingUnregisters);
+    const stillOwed = new Set<EnvironmentId>();
+    for (const environmentId of connected) {
+      const owed = pending[environmentId];
+      if (!owed) continue;
+      const accepted = yield* Effect.promise(() =>
+        target.send({
+          environmentIds: [environmentId],
+          deviceId: owed.deviceId,
+          registration: null,
+          ...(owed.pushToken ? { pushToken: owed.pushToken } : {}),
+        }),
+      );
+      if (expectedGeneration !== deviceRegistrationGeneration) return;
+      if (!accepted.includes(environmentId)) {
+        stillOwed.add(environmentId);
+        continue;
+      }
+      directPushRegistrations.delete(environmentId);
+      yield* Effect.promise(() =>
+        updateDirectPushPendingUnregisters((current) => withoutEnvironment(current, environmentId)),
+      );
+    }
+    const environmentIds = connected.filter((environmentId) => !stillOwed.has(environmentId));
     // Without permission or a token the phone can show nothing, so the
     // servers stop sending instead of keeping a dead registration.
     const registration =
@@ -482,7 +544,7 @@ const registerDeviceWithDirectPush = Effect.fn("remoteRegistration.registerDevic
         : null;
     const signature = registration ? registrationSignature(body) : "unregistered";
     const now = Date.now();
-    const due = target.environmentIds.filter((environmentId) => {
+    const due = environmentIds.filter((environmentId) => {
       const previous = directPushRegistrations.get(environmentId);
       return (
         previous?.signature !== signature ||
@@ -495,7 +557,12 @@ const registerDeviceWithDirectPush = Effect.fn("remoteRegistration.registerDevic
         registered: registration !== null,
       });
       const accepted = yield* Effect.promise(() =>
-        target.send({ environmentIds: due, deviceId: body.deviceId, registration }),
+        target.send({
+          environmentIds: due,
+          deviceId: body.deviceId,
+          registration,
+          ...(body.pushToken ? { pushToken: body.pushToken } : {}),
+        }),
       );
       if (expectedGeneration !== deviceRegistrationGeneration) return;
       for (const environmentId of accepted) {
@@ -506,7 +573,7 @@ const registerDeviceWithDirectPush = Effect.fn("remoteRegistration.registerDevic
       setRegistrationStatus("unknown");
       return;
     }
-    const registeredSomewhere = target.environmentIds.some(
+    const registeredSomewhere = environmentIds.some(
       (environmentId) => directPushRegistrations.get(environmentId)?.signature === signature,
     );
     if (registeredSomewhere) {
@@ -519,17 +586,35 @@ const registerDeviceWithDirectPush = Effect.fn("remoteRegistration.registerDevic
 
 /**
  * Removing an environment deletes its credentials, after which this device
- * could never ask that server to stop sending.
+ * could never ask that server to stop sending. If this attempt fails, the
+ * owed unregister is kept and sent before registering when the same
+ * environment connects again.
  */
 export async function forgetAgentAwarenessDirectPushEnvironment(
   environmentId: EnvironmentId,
 ): Promise<void> {
-  const target = directPushTarget;
-  if (!usesAndroidDirectPush() || !target?.environmentIds.includes(environmentId)) return;
-  directPushRegistrations.delete(environmentId);
+  if (!usesAndroidDirectPush()) return;
+  forgottenDirectPushEnvironments.add(environmentId);
   const deviceId = await loadAgentAwarenessDeviceId().catch(() => null);
   if (!deviceId) return;
-  await target.send({ environmentIds: [environmentId], deviceId, registration: null });
+  const owed = { deviceId, ...(lastDirectPushToken ? { pushToken: lastDirectPushToken } : {}) };
+  await updateDirectPushPendingUnregisters((current) => ({ ...current, [environmentId]: owed }));
+  // A registration already sending could land after this unregister and add
+  // the row back; the forgotten mark keeps later ones from including it.
+  await activeDeviceRegistration?.operation;
+  directPushRegistrations.delete(environmentId);
+  const target = directPushTarget;
+  if (!target) return;
+  const accepted = await target.send({
+    environmentIds: [environmentId],
+    registration: null,
+    ...owed,
+  });
+  if (accepted.includes(environmentId)) {
+    await updateDirectPushPendingUnregisters((current) =>
+      withoutEnvironment(current, environmentId),
+    );
+  }
 }
 
 export function setAgentAwarenessDirectPushTarget(
@@ -539,6 +624,13 @@ export function setAgentAwarenessDirectPushTarget(
   const previous = directPushTarget;
   directPushTarget = target;
   if (!target) return;
+  // Gone from the connected set, so the removal finished; if the environment
+  // is paired again later, its owed unregister runs before it registers.
+  for (const environmentId of forgottenDirectPushEnvironments) {
+    if (!target.environmentIds.includes(environmentId)) {
+      forgottenDirectPushEnvironments.delete(environmentId);
+    }
+  }
   ensurePushTokenListener();
   ensureAppStateListener();
   if (previous?.environmentIds.join("\n") === target.environmentIds.join("\n")) return;
@@ -1040,6 +1132,8 @@ export function __resetAgentAwarenessRemoteRegistrationForTest(): void {
   activityPushTokenLocks.clear();
   directPushTarget = null;
   directPushRegistrations.clear();
+  forgottenDirectPushEnvironments.clear();
+  lastDirectPushToken = null;
 }
 
 export const unregisterAgentAwarenessDeviceForCurrentUser: (

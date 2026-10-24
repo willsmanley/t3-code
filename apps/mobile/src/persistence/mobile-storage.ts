@@ -17,6 +17,8 @@ import * as MobileSecureStorage from "./mobile-secure-storage";
 const CONNECTIONS_KEY = "t3code.connections";
 const AGENT_AWARENESS_DEVICE_ID_KEY = "t3code.agent-awareness.device-id";
 const AGENT_AWARENESS_REGISTRATION_KEY = "t3code.agent-awareness.registration";
+const DIRECT_PUSH_PENDING_UNREGISTERS_KEY =
+  "t3code.agent-awareness.direct-push-pending-unregisters";
 const RECENT_THREAD_SHORTCUTS_KEY = "t3code.recent-thread-shortcuts";
 
 export class MobileStorageDecodeError extends Schema.TaggedError<MobileStorageDecodeError>()(
@@ -57,6 +59,11 @@ export interface AgentAwarenessRegistrationRecord {
   readonly signature: string;
   readonly pushToStartToken?: string;
 }
+
+/** Servers that still owe this device an unregister, by environment id. */
+export type DirectPushPendingUnregisters = Readonly<
+  Record<string, { readonly deviceId: string; readonly pushToken?: string }>
+>;
 
 export interface RecentThreadShortcut {
   readonly environmentId: string;
@@ -104,6 +111,16 @@ export class MobileStorage extends Context.Service<
     readonly clearAgentAwarenessRegistrationRecord: Effect.Effect<
       void,
       MobileSecureStorage.MobileSecureStorageError
+    >;
+    readonly loadDirectPushPendingUnregisters: Effect.Effect<
+      DirectPushPendingUnregisters,
+      MobileSecureStorage.MobileSecureStorageError
+    >;
+    readonly saveDirectPushPendingUnregisters: (
+      pending: DirectPushPendingUnregisters,
+    ) => Effect.Effect<
+      void,
+      MobileSecureStorage.MobileSecureStorageError | MobileStorageEncodeError
     >;
     readonly loadRecentThreadShortcuts: Effect.Effect<
       ReadonlyArray<RecentThreadShortcut>,
@@ -227,6 +244,28 @@ export const make = Effect.fn("MobileStorage.make")(function* () {
     }),
   );
 
+  const loadDirectPushPendingUnregisters = readJson<Record<string, unknown>>(
+    DIRECT_PUSH_PENDING_UNREGISTERS_KEY,
+  ).pipe(
+    Effect.map((parsed) => {
+      const pending: Record<string, { readonly deviceId: string; readonly pushToken?: string }> =
+        {};
+      for (const [environmentId, entry] of Object.entries(parsed ?? {})) {
+        if (typeof entry !== "object" || entry === null || !("deviceId" in entry)) continue;
+        if (typeof entry.deviceId !== "string" || !entry.deviceId) continue;
+        const pushToken =
+          "pushToken" in entry && typeof entry.pushToken === "string" && entry.pushToken
+            ? entry.pushToken
+            : undefined;
+        pending[environmentId] = {
+          deviceId: entry.deviceId,
+          ...(pushToken ? { pushToken } : {}),
+        };
+      }
+      return pending;
+    }),
+  );
+
   const loadRecentThreadShortcuts = readJson<{
     readonly threads?: ReadonlyArray<RecentThreadShortcut>;
   }>(RECENT_THREAD_SHORTCUTS_KEY).pipe(
@@ -258,6 +297,9 @@ export const make = Effect.fn("MobileStorage.make")(function* () {
       AGENT_AWARENESS_REGISTRATION_KEY,
       "",
     ),
+    loadDirectPushPendingUnregisters,
+    saveDirectPushPendingUnregisters: (pending) =>
+      writeJson(DIRECT_PUSH_PENDING_UNREGISTERS_KEY, pending),
     loadRecentThreadShortcuts,
     saveRecentThreadShortcuts: (threads) => writeJson(RECENT_THREAD_SHORTCUTS_KEY, { threads }),
   });

@@ -2,6 +2,7 @@ import { beforeEach, vi } from "vite-plus/test";
 import { describe, expect, it } from "@effect/vitest";
 import { DIRECT_PUSH_NOTIFICATION_USER_ID, type EnvironmentId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import type * as Exit from "effect/Exit";
 import * as Notifications from "expo-notifications";
 
@@ -22,6 +23,7 @@ const backgroundRuntime = vi.hoisted(() => ({
   }>,
 }));
 const appStateMock = vi.hoisted(() => ({ listeners: [] as Array<(state: string) => void> }));
+const pendingUnregisters = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
 
 vi.mock("./androidNotifications", () => ({
   supportsAndroidAgentNotifications: vi.fn(() => true),
@@ -97,6 +99,13 @@ vi.mock("../../persistence/imperative", () => ({
   loadAgentAwarenessRegistrationRecord: vi.fn(() => Promise.resolve(null)),
   saveAgentAwarenessRegistrationRecord: vi.fn(() => Promise.resolve()),
   clearAgentAwarenessRegistrationRecord: vi.fn(() => Promise.resolve()),
+  loadAgentAwarenessDirectPushPendingUnregisters: vi.fn(() =>
+    Promise.resolve(pendingUnregisters.current),
+  ),
+  saveAgentAwarenessDirectPushPendingUnregisters: vi.fn((pending: Record<string, unknown>) => {
+    pendingUnregisters.current = pending;
+    return Promise.resolve();
+  }),
 }));
 
 const ENVIRONMENT_ID = "env-1" as EnvironmentId;
@@ -139,6 +148,7 @@ describe("direct push registration", () => {
     vi.stubGlobal("fetch", () => Promise.reject(new Error("T3 Connect must not be contacted")));
     vi.mocked(Notifications.getPermissionsAsync).mockResolvedValue(permissions(true));
     vi.mocked(configureAndroidAgentNotifications).mockClear();
+    pendingUnregisters.current = {};
   });
 
   it.effect("registers the FCM token with direct push servers, not T3 Connect", () =>
@@ -163,6 +173,7 @@ describe("direct push registration", () => {
             liveActivitiesEnabled: true,
           }),
         },
+        pushToken: "fcm-token",
       });
       expect(configureAndroidAgentNotifications).toHaveBeenCalledWith(
         "device-1",
@@ -221,7 +232,71 @@ describe("direct push registration", () => {
         environmentIds: [second],
         deviceId: "device-1",
         registration: null,
+        pushToken: "fcm-token",
       });
+    }),
+  );
+
+  it.effect("retries an unregister a removed environment still owes before registering again", () =>
+    Effect.gen(function* () {
+      const calls: Array<string> = [];
+      const server = { reachable: false };
+      const send = vi.fn<AgentAwarenessDirectPushTarget["send"]>((request) => {
+        calls.push(request.registration ? "register" : "unregister");
+        return Promise.resolve(
+          request.registration || server.reachable ? request.environmentIds : [],
+        );
+      });
+      setAgentAwarenessDirectPushTarget({ environmentIds: [ENVIRONMENT_ID], send });
+      yield* runQueuedRegistrations();
+      yield* Effect.promise(() => forgetAgentAwarenessDirectPushEnvironment(ENVIRONMENT_ID));
+
+      // Removed while its server was down, then paired again once it is back.
+      setAgentAwarenessDirectPushTarget({ environmentIds: [], send });
+      yield* runQueuedRegistrations();
+      server.reachable = true;
+      setAgentAwarenessDirectPushTarget({ environmentIds: [ENVIRONMENT_ID], send });
+      yield* runQueuedRegistrations();
+
+      expect(calls).toEqual(["register", "unregister", "unregister", "register"]);
+      expect(pendingUnregisters.current).toEqual({});
+    }),
+  );
+
+  it.effect("a registration in flight cannot re-add a forgotten environment", () =>
+    Effect.gen(function* () {
+      const serverRows = new Set<EnvironmentId>();
+      const control = { release: () => {}, started: () => {} };
+      const started = new Promise<void>((resolve) => {
+        control.started = resolve;
+      });
+      const send = vi.fn<AgentAwarenessDirectPushTarget["send"]>((request) => {
+        if (!request.registration) {
+          for (const environmentId of request.environmentIds) serverRows.delete(environmentId);
+          return Promise.resolve(request.environmentIds);
+        }
+        control.started();
+        return new Promise((resolve) => {
+          control.release = () => {
+            for (const environmentId of request.environmentIds) serverRows.add(environmentId);
+            resolve(request.environmentIds);
+          };
+        });
+      });
+      setAgentAwarenessDirectPushTarget({ environmentIds: [ENVIRONMENT_ID], send });
+      const registering = yield* runQueuedRegistrations().pipe(Effect.forkChild);
+      yield* Effect.promise(() => started);
+
+      const forgetting = forgetAgentAwarenessDirectPushEnvironment(ENVIRONMENT_ID);
+      // Nothing else is queued, so this only lets the removal run as far as it can.
+      yield* runQueuedRegistrations();
+      control.release();
+      yield* Fiber.join(registering);
+      yield* Effect.promise(() => forgetting);
+      yield* runQueuedRegistrations();
+
+      expect(serverRows.size).toBe(0);
+      expect(send.mock.calls.filter(([request]) => request.registration !== null)).toHaveLength(1);
     }),
   );
 });
