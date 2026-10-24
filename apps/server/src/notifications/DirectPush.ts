@@ -91,7 +91,8 @@ export function resolveDirectPushDelivery(input: {
   readonly replay: boolean;
   readonly nowMs: number;
 }): {
-  readonly data: Record<string, string>;
+  /** Null when the phone needs no message, though its thread phases may still change. */
+  readonly data: Record<string, string> | null;
   readonly alertIdentity: string | null;
   readonly acknowledge: boolean;
   readonly deliveredAggregate: RelayAgentActivityAggregateState | null;
@@ -145,7 +146,15 @@ export function resolveDirectPushDelivery(input: {
   if (jobState !== null && stateIsCurrent) threadPhases[jobState.threadId] = jobState.phase;
   const displayedAggregate =
     preferences.notificationsEnabled && preferences.liveActivitiesEnabled ? aggregate : null;
-  if (!displayedAggregate && !alert && !previousAggregate && jobState !== null) return null;
+  if (!displayedAggregate && !alert && !previousAggregate && jobState !== null) {
+    return {
+      data: null,
+      alertIdentity: null,
+      acknowledge: false,
+      deliveredAggregate: null,
+      threadPhases,
+    };
+  }
   return {
     data: {
       t3_kind: "agent_activity",
@@ -161,6 +170,17 @@ export function resolveDirectPushDelivery(input: {
     deliveredAggregate: preferences.liveActivitiesEnabled ? aggregate : null,
     threadPhases,
   };
+}
+
+function sameThreadPhases(
+  left: Readonly<Record<string, RelayAgentAwarenessPhase>>,
+  right: Readonly<Record<string, RelayAgentAwarenessPhase>>,
+): boolean {
+  const leftEntries = Object.entries(left);
+  return (
+    leftEntries.length === Object.keys(right).length &&
+    leftEntries.every(([threadId, phase]) => right[threadId] === phase)
+  );
 }
 
 /** Rows that can no longer appear on any card. */
@@ -287,6 +307,17 @@ const make = Effect.gen(function* () {
         nowMs,
       });
       if (delivery === null) return;
+      if (delivery.data === null) {
+        if (!sameThreadPhases(device.threadPhases, delivery.threadPhases)) {
+          yield* devices.markDelivered({
+            deviceId: device.deviceId,
+            pushToken: device.pushToken,
+            aggregate: null,
+            threadPhases: delivery.threadPhases,
+          });
+        }
+        return;
+      }
       const data = { ...delivery.data };
       if (delivery.alertIdentity !== null) {
         // A grouped alert's identity lists every thread in it; hash it rather

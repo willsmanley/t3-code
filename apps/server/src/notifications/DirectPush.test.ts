@@ -173,8 +173,8 @@ describe("resolveDirectPushDelivery", () => {
       nowMs,
     });
     assert.equal(replay?.alertIdentity, null);
-    assert.equal(replay?.data.active, "true");
-    assert.equal(replay?.data.user_id, DIRECT_PUSH_NOTIFICATION_USER_ID);
+    assert.equal(replay?.data?.active, "true");
+    assert.equal(replay?.data?.user_id, DIRECT_PUSH_NOTIFICATION_USER_ID);
 
     const waiting = state({ phase: "waiting_for_input" });
     const transition = DirectPush.resolveDirectPushDelivery({
@@ -187,9 +187,9 @@ describe("resolveDirectPushDelivery", () => {
       replay: false,
       nowMs,
     });
-    assert.equal(transition?.data.alert_title, "Thread");
-    assert.equal(transition?.data.alert_body, "Input: Project");
-    assert.equal(transition?.data.alert_path, waiting.deepLink);
+    assert.equal(transition?.data?.alert_title, "Thread");
+    assert.equal(transition?.data?.alert_body, "Input: Project");
+    assert.equal(transition?.data?.alert_path, waiting.deepLink);
 
     const repeat = DirectPush.resolveDirectPushDelivery({
       deviceId: "device-1",
@@ -216,8 +216,8 @@ describe("resolveDirectPushDelivery", () => {
       replay: false,
       nowMs,
     });
-    assert.equal(delivery?.data.alert_body, "Done: Project");
-    assert.equal(delivery?.data.active, "false");
+    assert.equal(delivery?.data?.alert_body, "Done: Project");
+    assert.equal(delivery?.data?.active, "false");
     assert.equal(delivery?.deliveredAggregate, null);
   });
 
@@ -448,6 +448,27 @@ describe("DirectPush", () => {
       assert.deepEqual(
         sends.map((send) => send.alert),
         [false, true],
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("alerts again when a thread returns to a phase after leaving it", () =>
+    Effect.gen(function* () {
+      const { push, sends } = yield* makeHarness();
+      yield* push.registerDevice({
+        ...registration,
+        preferences: { ...preferences, liveActivitiesEnabled: false },
+      });
+      yield* push.drain;
+      for (const phase of ["waiting_for_approval", "running", "waiting_for_approval"] as const) {
+        yield* TestClock.adjust("10 seconds");
+        const updatedAt = DateTime.formatIso(yield* DateTime.now);
+        yield* push.publish({ threadId: THREAD_ID, state: state({ phase, updatedAt }) });
+        yield* push.drain;
+      }
+      assert.lengthOf(
+        sends.filter((send) => send.alert),
+        2,
       );
     }).pipe(Effect.scoped),
   );
