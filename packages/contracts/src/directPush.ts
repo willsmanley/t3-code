@@ -21,6 +21,11 @@ export type DirectPushDeviceRegistrationInput = typeof DirectPushDeviceRegistrat
 
 export const DirectPushDeviceUnregistrationInput = Schema.Struct({
   deviceId: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
+  /**
+   * Only the phone holds its FCM token, so presenting it lets a new pairing of
+   * the same phone remove a registration an older pairing made.
+   */
+  pushToken: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(4_096))),
 });
 export type DirectPushDeviceUnregistrationInput = typeof DirectPushDeviceUnregistrationInput.Type;
 
@@ -30,6 +35,15 @@ export class DirectPushUnavailableError extends Schema.TaggedError<DirectPushUna
 ) {
   override get message(): string {
     return "This server is not configured to send push notifications.";
+  }
+}
+
+export class DirectPushDeviceNotOwnedError extends Schema.TaggedError<DirectPushDeviceNotOwnedError>()(
+  "DirectPushDeviceNotOwnedError",
+  {},
+) {
+  override get message(): string {
+    return "Another client on this server registered this device.";
   }
 }
 

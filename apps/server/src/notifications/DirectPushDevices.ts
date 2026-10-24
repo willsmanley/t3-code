@@ -1,13 +1,14 @@
 import {
   RelayAgentActivityAggregateState,
+  RelayAgentAwarenessPhase,
   RelayAgentAwarenessPreferences,
 } from "@t3tools/contracts/relay";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
-import * as SqlSchema from "effect/sql/SqlSchema";
 
 export class DirectPushDevicePersistenceError extends Schema.TaggedError<DirectPushDevicePersistenceError>()(
   "DirectPushDevicePersistenceError",
@@ -16,6 +17,7 @@ export class DirectPushDevicePersistenceError extends Schema.TaggedError<DirectP
       "create-table",
       "upsert",
       "list",
+      "remove-undecodable",
       "remove",
       "remove-token",
       "remove-session",
@@ -37,13 +39,29 @@ export const DirectPushDevice = Schema.Struct({
   preferences: Schema.fromJsonString(RelayAgentAwarenessPreferences),
   /** The card this device last showed: the baseline that decides whether a change alerts. */
   lastAggregate: Schema.NullOr(Schema.fromJsonString(RelayAgentActivityAggregateState)),
+  /** The phase each thread had when this device last heard about it; alerts need a change. */
+  threadPhases: Schema.fromJsonString(Schema.Record(Schema.String, RelayAgentAwarenessPhase)),
 });
 export type DirectPushDevice = typeof DirectPushDevice.Type;
 
+const decodeDevice = Schema.decodeUnknownOption(DirectPushDevice);
 const encodePreferences = Schema.encodeSync(Schema.fromJsonString(RelayAgentAwarenessPreferences));
 const encodeAggregate = Schema.encodeSync(
   Schema.NullOr(Schema.fromJsonString(RelayAgentActivityAggregateState)),
 );
+const encodeThreadPhases = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Record(Schema.String, RelayAgentAwarenessPhase)),
+);
+
+interface DeviceRow {
+  readonly deviceId: string;
+  readonly pushToken: string;
+  readonly packageName: string;
+  readonly sessionId: string;
+  readonly preferences: string;
+  readonly lastAggregate: string | null;
+  readonly threadPhases: string;
+}
 
 export class DirectPushDevices extends Context.Service<
   DirectPushDevices,
@@ -56,7 +74,11 @@ export class DirectPushDevices extends Context.Service<
       readonly preferences: RelayAgentAwarenessPreferences;
       readonly updatedAt: string;
     }) => Effect.Effect<void, DirectPushDevicePersistenceError>;
+    /** Rows that no longer decode are dropped; the app re-registers on its next foreground. */
     readonly list: Effect.Effect<ReadonlyArray<DirectPushDevice>, DirectPushDevicePersistenceError>;
+    readonly get: (
+      deviceId: string,
+    ) => Effect.Effect<Option.Option<DirectPushDevice>, DirectPushDevicePersistenceError>;
     readonly remove: (deviceId: string) => Effect.Effect<void, DirectPushDevicePersistenceError>;
     /** Leaves the row when the device registered a newer token in the meantime. */
     readonly removeToken: (input: {
@@ -69,7 +91,9 @@ export class DirectPushDevices extends Context.Service<
     readonly markDelivered: (input: {
       readonly deviceId: string;
       readonly pushToken: string;
-      readonly aggregate: RelayAgentActivityAggregateState | null;
+      /** Null keeps the saved card: the delivery repainted it without settling a transition. */
+      readonly aggregate: { readonly value: RelayAgentActivityAggregateState | null } | null;
+      readonly threadPhases: Readonly<Record<string, RelayAgentAwarenessPhase>>;
     }) => Effect.Effect<void, DirectPushDevicePersistenceError>;
   }
 >()("t3/notifications/DirectPushDevices") {}
@@ -88,6 +112,7 @@ const make = Effect.gen(function* () {
       session_id TEXT NOT NULL,
       preferences_json TEXT NOT NULL,
       last_aggregate_json TEXT,
+      thread_phases_json TEXT NOT NULL DEFAULT '{}',
       updated_at TEXT NOT NULL
     ) WITHOUT ROWID
   `.pipe(
@@ -100,20 +125,40 @@ const make = Effect.gen(function* () {
     ),
   );
 
-  const listRows = SqlSchema.findAll({
-    Request: Schema.Void,
-    Result: DirectPushDevice,
-    execute: () => sql`
-      SELECT
-        device_id AS "deviceId",
-        push_token AS "pushToken",
-        package_name AS "packageName",
-        session_id AS "sessionId",
-        preferences_json AS "preferences",
-        last_aggregate_json AS "lastAggregate"
-      FROM direct_push_devices
-      ORDER BY device_id
-    `,
+  const selectRows = (deviceId: string | null) => sql<DeviceRow>`
+    SELECT
+      device_id AS "deviceId",
+      push_token AS "pushToken",
+      package_name AS "packageName",
+      session_id AS "sessionId",
+      preferences_json AS "preferences",
+      last_aggregate_json AS "lastAggregate",
+      thread_phases_json AS "threadPhases"
+    FROM direct_push_devices
+    WHERE (${deviceId} IS NULL OR device_id = ${deviceId})
+    ORDER BY device_id
+  `;
+
+  // One bad row must not stop delivery to every other device.
+  const decodeRows = Effect.fnUntraced(function* (rows: ReadonlyArray<DeviceRow>) {
+    const devices: DirectPushDevice[] = [];
+    for (const row of rows) {
+      const device = decodeDevice(row);
+      if (Option.isSome(device)) {
+        devices.push(device.value);
+        continue;
+      }
+      yield* Effect.logWarning("dropping an undecodable direct push registration", {
+        deviceId: row.deviceId,
+      });
+      yield* sql`DELETE FROM direct_push_devices WHERE device_id = ${row.deviceId}`.pipe(
+        Effect.mapError(
+          (cause) =>
+            new DirectPushDevicePersistenceError({ operation: "remove-undecodable", cause }),
+        ),
+      );
+    }
+    return devices;
   });
 
   return DirectPushDevices.of({
@@ -151,6 +196,9 @@ const make = Effect.gen(function* () {
                 package_name = excluded.package_name,
                 session_id = excluded.session_id,
                 preferences_json = excluded.preferences_json,
+                -- The registration replay repaints the card from scratch.
+                -- Thread phases stay, so it cannot alert for work already seen.
+                last_aggregate_json = NULL,
                 updated_at = excluded.updated_at
             `;
           }),
@@ -161,12 +209,21 @@ const make = Effect.gen(function* () {
           ),
         );
     }),
-    list: listRows(undefined).pipe(
+    list: selectRows(null).pipe(
       Effect.mapError(
         (cause) => new DirectPushDevicePersistenceError({ operation: "list", cause }),
       ),
+      Effect.flatMap(decodeRows),
       Effect.withSpan("DirectPushDevices.list"),
     ),
+    get: Effect.fn("DirectPushDevices.get")(function* (deviceId) {
+      const rows = yield* selectRows(deviceId).pipe(
+        Effect.mapError(
+          (cause) => new DirectPushDevicePersistenceError({ operation: "list", cause }),
+        ),
+      );
+      return Option.fromUndefinedOr((yield* decodeRows(rows))[0]);
+    }),
     remove: Effect.fn("DirectPushDevices.remove")(function* (deviceId) {
       yield* sql`DELETE FROM direct_push_devices WHERE device_id = ${deviceId}`.pipe(
         Effect.mapError(
@@ -194,7 +251,13 @@ const make = Effect.gen(function* () {
     markDelivered: Effect.fn("DirectPushDevices.markDelivered")(function* (input) {
       yield* sql`
         UPDATE direct_push_devices
-        SET last_aggregate_json = ${encodeAggregate(input.aggregate)}
+        SET
+          last_aggregate_json = ${
+            input.aggregate === null
+              ? sql`last_aggregate_json`
+              : encodeAggregate(input.aggregate.value)
+          },
+          thread_phases_json = ${encodeThreadPhases(input.threadPhases)}
         WHERE device_id = ${input.deviceId} AND push_token = ${input.pushToken}
       `.pipe(
         Effect.mapError(

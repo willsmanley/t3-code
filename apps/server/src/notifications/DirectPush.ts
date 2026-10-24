@@ -1,13 +1,16 @@
 import {
   type AuthSessionId,
   DIRECT_PUSH_NOTIFICATION_USER_ID,
+  DirectPushDeviceNotOwnedError,
   type DirectPushDeviceRegistrationInput,
+  type DirectPushDeviceUnregistrationInput,
   DirectPushUnavailableError,
   type ThreadId,
 } from "@t3tools/contracts";
 import {
   RelayAgentActivityState,
   type RelayAgentActivityAggregateState,
+  type RelayAgentAwarenessPhase,
   type RelayAgentAwarenessPreferences,
 } from "@t3tools/contracts/relay";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
@@ -47,9 +50,20 @@ const DELIVERY_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60
 
 const encodeState = Schema.encodeSync(Schema.fromJsonString(RelayAgentActivityState));
 
+export class DirectPushSessionCheckError extends Schema.TaggedError<DirectPushSessionCheckError>()(
+  "DirectPushSessionCheckError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Failed to check which clients may receive direct push notifications.";
+  }
+}
+
 interface DeliveryJob {
   readonly deviceId: string;
   readonly pushToken: string;
+  /** Null for registration replays. */
+  readonly threadId: ThreadId | null;
   /** The thread change that queued this delivery; null for removals and replays. */
   readonly state: RelayAgentActivityState | null;
   readonly replay: boolean;
@@ -62,11 +76,16 @@ interface DeliveryJob {
  * environment. The card is rebuilt from current rows when the delivery runs,
  * so a late retry still shows the newest state, and alerts compare against the
  * card the device last received.
+ *
+ * Unlike the relay, an alert also needs the thread's phase to differ from the
+ * one the device last heard about. A republished state carries a new
+ * `updatedAt`, so the phone's own alert-id dedupe cannot catch it.
  */
 export function resolveDirectPushDelivery(input: {
   readonly deviceId: string;
   readonly preferences: RelayAgentAwarenessPreferences;
   readonly previousAggregate: RelayAgentActivityAggregateState | null;
+  readonly previousThreadPhases: Readonly<Record<string, RelayAgentAwarenessPhase>>;
   readonly states: ReadonlyArray<RelayAgentActivityState>;
   readonly jobState: RelayAgentActivityState | null;
   readonly replay: boolean;
@@ -76,8 +95,18 @@ export function resolveDirectPushDelivery(input: {
   readonly alertIdentity: string | null;
   readonly acknowledge: boolean;
   readonly deliveredAggregate: RelayAgentActivityAggregateState | null;
+  readonly threadPhases: Record<string, RelayAgentAwarenessPhase>;
 } | null {
-  const { preferences, previousAggregate, jobState, nowMs } = input;
+  const { preferences, previousAggregate, previousThreadPhases, jobState, nowMs } = input;
+  const unseen = (row: { readonly threadId: string; readonly phase: RelayAgentAwarenessPhase }) =>
+    previousThreadPhases[row.threadId] !== row.phase;
+  const state =
+    jobState === null ? undefined : input.states.find((row) => row.threadId === jobState.threadId);
+  const stateIsCurrent =
+    jobState !== null &&
+    state !== undefined &&
+    state.phase === jobState.phase &&
+    state.updatedAt === jobState.updatedAt;
   const aggregate = makeAggregateState({
     activeStates: preferences.liveActivitiesEnabled ? input.states : [],
     terminalState: null,
@@ -88,27 +117,32 @@ export function resolveDirectPushDelivery(input: {
   // the card but leaves that transition for the finished thread's own delivery.
   const acknowledge = jobState !== null || input.replay || aggregate === null;
   if (jobState !== null && preferences.notificationsEnabled) {
-    const state = input.states.find((row) => row.threadId === jobState.threadId);
-    const stateIsCurrent =
-      state !== undefined &&
-      state.phase === jobState.phase &&
-      state.updatedAt === jobState.updatedAt;
     if (previousAggregate === null && !stateIsCurrent) return null;
     if (preferences.liveActivitiesEnabled && previousAggregate !== null && aggregate !== null) {
       alert = androidAlertForAggregate({
         previousAggregate,
-        nextAggregate: aggregate,
+        nextAggregate: { ...aggregate, activities: aggregate.activities.filter(unseen) },
         preferences,
         nowMs,
       });
     } else if (
       state !== undefined &&
       stateIsCurrent &&
+      unseen(state) &&
       !isExpiredAgentActivityState(state, nowMs)
     ) {
       alert = androidAlertForState(state, preferences, nowMs);
     }
   }
+  // A thread's phase is recorded by its own delivery, so another thread's
+  // delivery that happens to show it cannot swallow its alert. A replay shows
+  // the whole card, so it records every thread.
+  const threadPhases: Record<string, RelayAgentAwarenessPhase> = {};
+  for (const row of input.states) {
+    const seen = input.replay ? row.phase : previousThreadPhases[row.threadId];
+    if (seen !== undefined) threadPhases[row.threadId] = seen;
+  }
+  if (jobState !== null && stateIsCurrent) threadPhases[jobState.threadId] = jobState.phase;
   const displayedAggregate =
     preferences.notificationsEnabled && preferences.liveActivitiesEnabled ? aggregate : null;
   if (!displayedAggregate && !alert && !previousAggregate && jobState !== null) return null;
@@ -125,6 +159,7 @@ export function resolveDirectPushDelivery(input: {
     acknowledge,
     // Finished rows stay in the baseline so replaying the finished card cannot alert again.
     deliveredAggregate: preferences.liveActivitiesEnabled ? aggregate : null,
+    threadPhases,
   };
 }
 
@@ -141,20 +176,38 @@ export class DirectPush extends Context.Service<
   {
     /** True while a usable Firebase service account is in the secret store. */
     readonly enabled: Effect.Effect<boolean>;
+    /**
+     * A session may replace a registration it made, one whose session has
+     * ended, or one holding the same push token: only that phone has it.
+     */
     readonly registerDevice: (
       input: DirectPushDeviceRegistrationInput & { readonly sessionId: AuthSessionId },
     ) => Effect.Effect<
       void,
-      DirectPushUnavailableError | DirectPushDevices.DirectPushDevicePersistenceError
+      | DirectPushUnavailableError
+      | DirectPushDeviceNotOwnedError
+      | DirectPushSessionCheckError
+      | DirectPushDevices.DirectPushDevicePersistenceError
     >;
     readonly unregisterDevice: (
-      deviceId: string,
-    ) => Effect.Effect<void, DirectPushDevices.DirectPushDevicePersistenceError>;
+      input: DirectPushDeviceUnregistrationInput & { readonly sessionId: AuthSessionId },
+    ) => Effect.Effect<
+      void,
+      | DirectPushDeviceNotOwnedError
+      | DirectPushSessionCheckError
+      | DirectPushDevices.DirectPushDevicePersistenceError
+    >;
     /** Records a thread's activity and queues deliveries; never waits on Firebase. */
     readonly publish: (input: {
       readonly threadId: ThreadId;
       readonly state: RelayAgentActivityState | null;
     }) => Effect.Effect<void>;
+    /**
+     * Deliveries wait for this: until every active thread is back after a
+     * restart, a card built from the rows seen so far would shrink and the
+     * missing threads would alert again when they reappear.
+     */
+    readonly markSnapshotLoaded: Effect.Effect<void>;
     readonly drain: Effect.Effect<void>;
     readonly start: () => Effect.Effect<void, never, Scope.Scope>;
   }
@@ -173,6 +226,12 @@ const make = Effect.gen(function* () {
 
   const readAccount = FcmClient.readFcmServiceAccount(secrets);
   const enabled = readAccount.pipe(Effect.map(Option.isSome));
+  // Read from the database on every check, so a revocation by `t3 auth`
+  // in another process or a session that expired counts too.
+  const activeSessionIds = sessions.listActive().pipe(
+    Effect.map((active) => new Set<string>(active.map((session) => session.sessionId))),
+    Effect.mapError((cause) => new DirectPushSessionCheckError({ cause })),
+  );
 
   let enqueue: (job: DeliveryJob) => Effect.Effect<unknown> = () => Effect.void;
 
@@ -207,14 +266,21 @@ const make = Effect.gen(function* () {
       if (nowMs - job.queuedAt > DELIVERY_MAX_AGE_MS) return;
       const account = yield* readAccount;
       if (Option.isNone(account)) return;
-      const device = (yield* devices.list).find(
-        (row) => row.deviceId === job.deviceId && row.pushToken === job.pushToken,
-      );
-      if (device === undefined) return;
+      const found = yield* devices.get(job.deviceId);
+      if (Option.isNone(found) || found.value.pushToken !== job.pushToken) return;
+      const device = found.value;
+      if (!(yield* activeSessionIds).has(device.sessionId)) {
+        yield* Effect.logInfo("direct push client session ended; removing its devices", {
+          deviceId: device.deviceId,
+        });
+        yield* devices.removeForSession(device.sessionId);
+        return;
+      }
       const delivery = resolveDirectPushDelivery({
         deviceId: device.deviceId,
         preferences: device.preferences,
         previousAggregate: device.lastAggregate,
+        previousThreadPhases: device.threadPhases,
         states: [...rows.values()],
         jobState: job.state,
         replay: job.replay,
@@ -259,16 +325,17 @@ const make = Effect.gen(function* () {
         yield* devices.removeToken({ deviceId: device.deviceId, pushToken: device.pushToken });
         return;
       }
-      if (delivery.acknowledge) {
-        yield* devices.markDelivered({
-          deviceId: device.deviceId,
-          pushToken: device.pushToken,
-          aggregate: delivery.deliveredAggregate,
-        });
-      }
+      yield* devices.markDelivered({
+        deviceId: device.deviceId,
+        pushToken: device.pushToken,
+        aggregate: delivery.acknowledge ? { value: delivery.deliveredAggregate } : null,
+        threadPhases: delivery.threadPhases,
+      });
     },
     Effect.catchTags({
       DirectPushDevicePersistenceError: (error) =>
+        Effect.logWarning("direct push delivery skipped", { error: error.message }),
+      DirectPushSessionCheckError: (error) =>
         Effect.logWarning("direct push delivery skipped", { error: error.message }),
       PlatformError: (error) =>
         Effect.logWarning("direct push delivery skipped", { error: error.message }),
@@ -278,15 +345,43 @@ const make = Effect.gen(function* () {
   const worker = yield* makeDrainableWorker(deliver);
   enqueue = worker.enqueue;
 
+  let snapshotLoaded = false;
+  // Only the newest delivery per device and thread matters: each one rebuilds
+  // the card from current rows when it runs.
+  const held = new Map<string, Map<ThreadId | null, DeliveryJob>>();
+  const enqueueDelivery = (job: DeliveryJob) =>
+    Effect.suspend(() => {
+      if (snapshotLoaded) return worker.enqueue(job);
+      const forDevice = held.get(job.deviceId) ?? new Map<ThreadId | null, DeliveryJob>();
+      forDevice.set(job.threadId, job);
+      held.set(job.deviceId, forDevice);
+      return Effect.void;
+    });
+
+  const assertMayChange = Effect.fn("DirectPush.assertMayChange")(function* (input: {
+    readonly deviceId: string;
+    readonly sessionId: AuthSessionId;
+    readonly pushToken?: string | undefined;
+  }) {
+    const existing = yield* devices.get(input.deviceId);
+    if (Option.isNone(existing)) return;
+    const row = existing.value;
+    if (row.sessionId === input.sessionId || row.pushToken === input.pushToken) return;
+    if ((yield* activeSessionIds).has(row.sessionId)) {
+      return yield* new DirectPushDeviceNotOwnedError();
+    }
+  });
+
   const enqueueForDevices = Effect.fn("DirectPush.enqueueForDevices")(
-    function* (state: RelayAgentActivityState | null, queuedAt: number) {
+    function* (threadId: ThreadId, state: RelayAgentActivityState | null, queuedAt: number) {
       const registered = yield* devices.list;
       yield* Effect.forEach(
         registered,
         (device) =>
-          worker.enqueue({
+          enqueueDelivery({
             deviceId: device.deviceId,
             pushToken: device.pushToken,
+            threadId,
             state,
             replay: false,
             queuedAt,
@@ -305,6 +400,7 @@ const make = Effect.gen(function* () {
     enabled,
     registerDevice: Effect.fn("DirectPush.registerDevice")(function* (input) {
       if (!(yield* enabled)) return yield* new DirectPushUnavailableError();
+      yield* assertMayChange(input);
       const now = yield* DateTime.now;
       yield* devices.upsert({
         deviceId: input.deviceId,
@@ -316,17 +412,19 @@ const make = Effect.gen(function* () {
       });
       // Like the relay, every registration replays the current card: the app
       // registers on launch and foreground to repair pushes it missed.
-      yield* worker.enqueue({
+      yield* enqueueDelivery({
         deviceId: input.deviceId,
         pushToken: input.pushToken,
+        threadId: null,
         state: null,
         replay: true,
         queuedAt: now.epochMilliseconds,
         attempt: 0,
       });
     }),
-    unregisterDevice: Effect.fn("DirectPush.unregisterDevice")(function* (deviceId) {
-      yield* devices.remove(deviceId);
+    unregisterDevice: Effect.fn("DirectPush.unregisterDevice")(function* (input) {
+      yield* assertMayChange(input);
+      yield* devices.remove(input.deviceId);
     }),
     publish: Effect.fn("DirectPush.publish")(function* (input) {
       const previous = rows.get(input.threadId);
@@ -343,7 +441,19 @@ const make = Effect.gen(function* () {
       for (const [threadId, state] of rows) {
         if (isRetiredState(state, nowMs)) rows.delete(threadId);
       }
-      yield* enqueueForDevices(input.state, nowMs);
+      yield* enqueueForDevices(input.threadId, input.state, nowMs);
+    }),
+    markSnapshotLoaded: Effect.suspend(() => {
+      if (snapshotLoaded) return Effect.void;
+      snapshotLoaded = true;
+      // Thread deliveries go first: one for a transition made while the
+      // server was down must compare against the phases saved before it, not
+      // the ones a replay records from the current card.
+      const jobs = [...held.values()]
+        .flatMap((forDevice) => [...forDevice.values()])
+        .sort((a, b) => Number(a.replay) - Number(b.replay));
+      held.clear();
+      return Effect.forEach(jobs, worker.enqueue, { discard: true });
     }),
     drain: worker.drain,
     start: Effect.fn("DirectPush.start")(function* () {

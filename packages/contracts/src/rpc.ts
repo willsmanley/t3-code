@@ -208,6 +208,7 @@ import {
   RelayClientStatusSchema,
 } from "./relayClient.ts";
 import {
+  DirectPushDeviceNotOwnedError,
   DirectPushDeviceRegistrationInput,
   DirectPushDeviceUnregistrationInput,
   DirectPushRegistrationError,
@@ -952,6 +953,7 @@ const WsServerRegisterPushDeviceRpc = Rpc.make(WS_METHODS.serverRegisterPushDevi
   payload: DirectPushDeviceRegistrationInput,
   error: Schema.Union([
     DirectPushUnavailableError,
+    DirectPushDeviceNotOwnedError,
     DirectPushRegistrationError,
     EnvironmentAuthorizationError,
   ]),
@@ -959,7 +961,11 @@ const WsServerRegisterPushDeviceRpc = Rpc.make(WS_METHODS.serverRegisterPushDevi
 
 const WsServerUnregisterPushDeviceRpc = Rpc.make(WS_METHODS.serverUnregisterPushDevice, {
   payload: DirectPushDeviceUnregistrationInput,
-  error: Schema.Union([DirectPushRegistrationError, EnvironmentAuthorizationError]),
+  error: Schema.Union([
+    DirectPushDeviceNotOwnedError,
+    DirectPushRegistrationError,
+    EnvironmentAuthorizationError,
+  ]),
 });
 
 const PullRequestRpcError = Schema.Union([

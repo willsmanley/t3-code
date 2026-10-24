@@ -144,6 +144,8 @@ const makeTestRelay = Effect.fnUntraced(function* (
     readonly readShell?: (threadId: ThreadId) => Effect.Effect<OrchestrationV2ThreadShell | null>;
     readonly domainEvents?: Stream.Stream<OrchestrationV2DomainEvent>;
     readonly directPush?: boolean;
+    readonly onSnapshotLoaded?: Effect.Effect<void>;
+    readonly startupThreads?: ReadonlyArray<OrchestrationV2ThreadShell>;
   } = {},
 ) {
   const values = new Map<string, Uint8Array>(
@@ -187,7 +189,12 @@ const makeTestRelay = Effect.fnUntraced(function* (
     getShellSnapshot: () =>
       Effect.sync(() => {
         catchUp.shellSnapshotReads += 1;
-        return { schemaVersion: 2, snapshotSequence: 1, threads: [], archivedThreads: [] };
+        return {
+          schemaVersion: 2,
+          snapshotSequence: 1,
+          threads: options.startupThreads ?? [],
+          archivedThreads: [],
+        };
       }),
     readShellSnapshot: unused,
     ensureLegacyTranscript: unused,
@@ -258,6 +265,7 @@ const makeTestRelay = Effect.fnUntraced(function* (
     registerDevice: unused,
     unregisterDevice: unused,
     publish: (input) => Effect.sync(() => void directPublications.push(input.state)),
+    markSnapshotLoaded: options.onSnapshotLoaded ?? Effect.void,
     drain: Effect.void,
     start: () => Effect.void,
   });
@@ -275,7 +283,9 @@ const makeTestRelay = Effect.fnUntraced(function* (
       update: unused,
       delete: unused,
       getByWorkspaceRoot: unused,
-      snapshot: Effect.succeed({ projects: [] } as never),
+      snapshot: Effect.succeed({
+        projects: options.startupThreads ? [{ id: PROJECT_ID, title: "Project" }] : [],
+      } as never),
       getShell: unused,
       listShells: unused,
       getById: () =>
@@ -388,6 +398,27 @@ describe("AgentAwarenessRelay", () => {
         ["Thread", "Renamed thread"],
       );
     }),
+  );
+
+  it.effect("tells direct push the startup snapshot is complete after publishing it", () =>
+    Effect.gen(function* () {
+      const second = shell({ id: SECOND_THREAD_ID, title: "Second" });
+      const loaded = yield* Deferred.make<ReadonlyArray<string | undefined>>();
+      const published = { titles: (): ReadonlyArray<string | undefined> => [] };
+      const { relay, directPublications } = yield* makeTestRelay({
+        linked: false,
+        directPush: true,
+        startupThreads: [shell(), second],
+        readShell: (threadId) => Effect.succeed(threadId === SECOND_THREAD_ID ? second : shell()),
+        onSnapshotLoaded: Effect.suspend(() =>
+          Deferred.succeed(loaded, published.titles()).pipe(Effect.asVoid),
+        ),
+      });
+      published.titles = () => directPublications.map((state) => state?.threadTitle);
+      yield* relay.start();
+      yield* TestClock.adjust("1 second");
+      assert.deepEqual(yield* Deferred.await(loaded), ["Thread", "Second"]);
+    }).pipe(Effect.scoped),
   );
 
   it.effect("publishes each state to both direct push and a linked relay", () =>

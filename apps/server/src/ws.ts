@@ -2459,12 +2459,16 @@ export const layerWsRpc = (
             Effect.catchTags({
               DirectPushDevicePersistenceError: (cause) =>
                 Effect.fail(new DirectPushRegistrationError({ cause })),
+              DirectPushSessionCheckError: (cause) =>
+                Effect.fail(new DirectPushRegistrationError({ cause })),
             }),
           ),
         [WS_METHODS.serverUnregisterPushDevice]: (input) =>
-          directPush.unregisterDevice(input.deviceId).pipe(
+          directPush.unregisterDevice({ ...input, sessionId: currentSessionId }).pipe(
             Effect.catchTags({
               DirectPushDevicePersistenceError: (cause) =>
+                Effect.fail(new DirectPushRegistrationError({ cause })),
+              DirectPushSessionCheckError: (cause) =>
                 Effect.fail(new DirectPushRegistrationError({ cause })),
             }),
           ),

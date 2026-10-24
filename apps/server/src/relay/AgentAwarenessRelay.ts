@@ -762,6 +762,10 @@ export const make = Effect.gen(function* () {
       );
       if (result === "published") {
         yield* Ref.set(activeSnapshotPublishedRef, true);
+        // The worker has drained, so every active thread has reached direct
+        // push. A server that enables direct push later has no registered
+        // devices yet, so there is no saved card for a partial one to shrink.
+        yield* directPush.markSnapshotLoaded;
         if (logEnabledWhenReady) {
           const relayConfig = yield* readRelayConfig.pipe(Effect.orElseSucceed(() => null));
           yield* Effect.logInfo("agent activity publishing enabled after link reconciliation", {
