@@ -87,6 +87,7 @@ import {
   ChatAttachmentId,
   PersistChatAttachmentsError,
   RpcClientId,
+  DirectPushRegistrationError,
   EnvironmentAuthorizationError,
   type ProjectId,
   type ProviderDriverKind,
@@ -218,6 +219,7 @@ import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import * as DefectReporter from "./observability/DefectReporter.ts";
 import * as EventLoopMonitor from "./observability/EventLoopMonitor.ts";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
+import * as DirectPush from "./notifications/DirectPush.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import { requiredScopeForDeviceList, rpcAuthorizationError } from "./auth/RpcAuthorization.ts";
 import * as RpcAuthorization from "./auth/RpcAuthorization.ts";
@@ -1310,6 +1312,7 @@ export const layerWsRpc = (
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
       const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
+      const directPush = yield* DirectPush.DirectPush;
       const rpcClientIds = yield* Ref.make(new Set<RpcClientId>());
       yield* Effect.addFinalizer(() =>
         Ref.get(rpcClientIds).pipe(
@@ -2451,6 +2454,20 @@ export const layerWsRpc = (
         [WS_METHODS.serverReportHostPowerState]: (input) =>
           backgroundPolicy.reportHostPowerState(input),
         [WS_METHODS.serverGetBackgroundPolicy]: (_input) => backgroundPolicy.snapshot,
+        [WS_METHODS.serverRegisterPushDevice]: (input) =>
+          directPush.registerDevice({ ...input, sessionId: currentSessionId }).pipe(
+            Effect.catchTags({
+              DirectPushDevicePersistenceError: (cause) =>
+                Effect.fail(new DirectPushRegistrationError({ cause })),
+            }),
+          ),
+        [WS_METHODS.serverUnregisterPushDevice]: (input) =>
+          directPush.unregisterDevice(input.deviceId).pipe(
+            Effect.catchTags({
+              DirectPushDevicePersistenceError: (cause) =>
+                Effect.fail(new DirectPushRegistrationError({ cause })),
+            }),
+          ),
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) => relayClient.resolve,
         [WS_METHODS.cloudInstallRelayClient]: (_input) =>
           Stream.callback<RelayClientInstallProgressEvent, RelayClientInstallFailedError>((queue) =>

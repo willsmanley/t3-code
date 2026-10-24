@@ -47,6 +47,7 @@ import {
 } from "../cloud/config.ts";
 import { getOrCreateEnvironmentKeyPairFromSecretStore } from "../cloud/environmentKeys.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as DirectPush from "../notifications/DirectPush.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import { forkParked } from "../serverActivation.ts";
@@ -365,6 +366,7 @@ export const make = Effect.gen(function* () {
   const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
   const threads = yield* ThreadManagement.ThreadManagementService;
   const projects = yield* ProjectService.ProjectService;
+  const directPush = yield* DirectPush.DirectPush;
   const crypto = yield* Crypto.Crypto;
   const scope = yield* Effect.scope;
   const cloudLinkKeyPair = yield* getOrCreateEnvironmentKeyPairFromSecretStore(secrets);
@@ -407,7 +409,8 @@ export const make = Effect.gen(function* () {
     }).pipe(Effect.provide(FetchHttpClient.layer));
 
   let cachedRelayClient: Effect.Success<ReturnType<typeof makeRelayClient>> | undefined;
-  let publishedRelayConfig: NonNullable<Effect.Success<typeof readRelayConfig>> | undefined;
+  // Null once states are going only to direct push; undefined before any publish.
+  let publishedRelayConfig: Effect.Success<typeof readRelayConfig> | undefined;
 
   // The confirming publish is re-enqueued through the same drainable worker as
   // every other publish, so a confirmed tombstone can never race an in-flight
@@ -435,8 +438,11 @@ export const make = Effect.gen(function* () {
   });
 
   const publishThreadUnsafe = Effect.fn("publishThreadUnsafe")(function* (threadId: ThreadId) {
+    // Direct push needs no T3 Connect link, so the relay gates below only
+    // decide whether the relay also receives the state.
+    const directPushEnabled = yield* directPush.enabled;
     const publishAgentActivity = yield* readPublishAgentActivityEnabled;
-    if (!publishAgentActivity) {
+    if (!publishAgentActivity && !directPushEnabled) {
       yield* cancelPublishRetries;
       yield* resetPublishedConnection;
       yield* Effect.logDebug("agent activity publish skipped; publication disabled", {
@@ -444,8 +450,8 @@ export const make = Effect.gen(function* () {
       });
       return;
     }
-    const relayConfig = yield* readRelayConfig;
-    if (!relayConfig) {
+    const relayConfig = publishAgentActivity ? yield* readRelayConfig : null;
+    if (!relayConfig && !directPushEnabled) {
       yield* cancelPublishRetries;
       yield* resetPublishedConnection;
       yield* Effect.logDebug("agent activity publish skipped; relay link credentials unavailable", {
@@ -454,9 +460,10 @@ export const make = Effect.gen(function* () {
       return;
     }
     if (
-      publishedRelayConfig?.url !== relayConfig.url ||
-      publishedRelayConfig.issuer !== relayConfig.issuer ||
-      publishedRelayConfig.environmentCredential !== relayConfig.environmentCredential
+      publishedRelayConfig === undefined ||
+      publishedRelayConfig?.url !== relayConfig?.url ||
+      publishedRelayConfig?.issuer !== relayConfig?.issuer ||
+      publishedRelayConfig?.environmentCredential !== relayConfig?.environmentCredential
     ) {
       yield* resetPublishedConnection;
       publishedRelayConfig = relayConfig;
@@ -464,10 +471,12 @@ export const make = Effect.gen(function* () {
     const environmentId = yield* serverEnvironment.getEnvironmentId;
 
     const publishState = Effect.fn("relay.agent_activity.publish")(function* (input: {
+      readonly relayConfig: NonNullable<typeof relayConfig>;
       readonly projectId: string | null;
       readonly state: RelayAgentActivityState | null;
       readonly reason: string;
     }) {
+      const relayConfig = input.relayConfig;
       if (cachedRelayClient === undefined) {
         cachedRelayClient = yield* makeRelayClient(relayConfig);
       }
@@ -610,11 +619,17 @@ export const make = Effect.gen(function* () {
       });
     }
 
-    yield* publishState({
-      projectId: snapshot.projectId,
-      state: snapshot.state,
-      reason: snapshot.reason,
-    }).pipe(withRelayClientTracing);
+    if (directPushEnabled) {
+      yield* directPush.publish({ threadId, state: snapshot.state });
+    }
+    if (relayConfig) {
+      yield* publishState({
+        relayConfig,
+        projectId: snapshot.projectId,
+        state: snapshot.state,
+        reason: snapshot.reason,
+      }).pipe(withRelayClientTracing);
+    }
     publishConfirmDeadlines.delete(threadId);
     yield* Ref.update(publishedStateByThreadRef, (publishedStates) => {
       const nextPublishedStates = new Map(publishedStates);
@@ -685,24 +700,30 @@ export const make = Effect.gen(function* () {
   });
 
   const publishActiveThreadsUnsafe = Effect.gen(function* () {
-    const relayUrl = yield* readSecretString(RELAY_URL_SECRET).pipe(
-      Effect.orElseSucceed(() => null),
-    );
-    if (!relayUrl) {
-      yield* Effect.logDebug("agent activity snapshot skipped; relay link credentials unavailable");
-      return "unlinked" as const;
-    }
-    const publishAgentActivity = yield* readPublishAgentActivityEnabled.pipe(
-      Effect.orElseSucceed(() => false),
-    );
-    if (!publishAgentActivity) {
-      yield* Effect.logDebug("agent activity snapshot skipped; publication disabled");
-      return "disabled" as const;
-    }
-    const relayConfig = yield* readRelayConfig.pipe(Effect.orElseSucceed(() => null));
-    if (!relayConfig) {
-      yield* Effect.logDebug("agent activity snapshot skipped; relay link credentials unavailable");
-      return "unlinked" as const;
+    if (!(yield* directPush.enabled)) {
+      const relayUrl = yield* readSecretString(RELAY_URL_SECRET).pipe(
+        Effect.orElseSucceed(() => null),
+      );
+      if (!relayUrl) {
+        yield* Effect.logDebug(
+          "agent activity snapshot skipped; relay link credentials unavailable",
+        );
+        return "unlinked" as const;
+      }
+      const publishAgentActivity = yield* readPublishAgentActivityEnabled.pipe(
+        Effect.orElseSucceed(() => false),
+      );
+      if (!publishAgentActivity) {
+        yield* Effect.logDebug("agent activity snapshot skipped; publication disabled");
+        return "disabled" as const;
+      }
+      const relayConfig = yield* readRelayConfig.pipe(Effect.orElseSucceed(() => null));
+      if (!relayConfig) {
+        yield* Effect.logDebug(
+          "agent activity snapshot skipped; relay link credentials unavailable",
+        );
+        return "unlinked" as const;
+      }
     }
     const environmentId = yield* serverEnvironment.getEnvironmentId;
     const [projectSnapshot, shellSnapshot] = yield* Effect.all([
@@ -773,14 +794,19 @@ export const make = Effect.gen(function* () {
 
   const start: AgentAwarenessRelay["Service"]["start"] = Effect.fn("AgentAwarenessRelay.start")(
     function* () {
-      const [relayConfig, publishEnabled] = yield* Effect.all([
+      const [relayConfig, publishEnabled, directPushEnabled] = yield* Effect.all([
         readRelayConfig.pipe(Effect.orElseSucceed(() => null)),
         readPublishAgentActivityEnabled.pipe(Effect.orElseSucceed(() => false)),
+        directPush.enabled,
       ]);
       const startupState = resolveAgentActivityPublishingStartupState({
         relayConfigured: relayConfig !== null,
         publishEnabled,
       });
+      if (directPushEnabled) {
+        yield* Effect.logInfo("agent activity direct push enabled");
+      }
+      yield* directPush.start();
       switch (startupState) {
         case "waiting-for-link":
           yield* Effect.logInfo(
@@ -798,7 +824,11 @@ export const make = Effect.gen(function* () {
       }
       yield* forkParked(
         Effect.sleep("1 second").pipe(
-          Effect.andThen(publishActiveThreadsOnceWhenConfigured(startupState !== "enabled")),
+          Effect.andThen(
+            publishActiveThreadsOnceWhenConfigured(
+              startupState !== "enabled" && !directPushEnabled,
+            ),
+          ),
         ),
       );
       yield* forkParked(

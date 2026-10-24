@@ -110,6 +110,9 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverReportClientActivity]: AuthOrchestrationReadScope,
   [WS_METHODS.serverReportHostPowerState]: AuthEnvironmentMaintainScope,
   [WS_METHODS.serverGetBackgroundPolicy]: AuthOrchestrationReadScope,
+  // A registered phone receives thread titles and statuses, which is what reading orchestration shows.
+  [WS_METHODS.serverRegisterPushDevice]: AuthOrchestrationReadScope,
+  [WS_METHODS.serverUnregisterPushDevice]: AuthOrchestrationReadScope,
   [WS_METHODS.scheduledTasksList]: AuthOrchestrationReadScope,
   [WS_METHODS.scheduledTasksSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.secretsAnswerRequest]: AuthOrchestrationOperateScope,

@@ -208,6 +208,12 @@ import {
   RelayClientStatusSchema,
 } from "./relayClient.ts";
 import {
+  DirectPushDeviceRegistrationInput,
+  DirectPushDeviceUnregistrationInput,
+  DirectPushRegistrationError,
+  DirectPushUnavailableError,
+} from "./directPush.ts";
+import {
   ORCHESTRATION_V2_WS_METHODS,
   OrchestrationGetWorkflowScriptError,
   OrchestrationV2StopWorkflowError,
@@ -507,6 +513,8 @@ export const WS_METHODS = {
   serverReportClientActivity: "server.reportClientActivity",
   serverReportHostPowerState: "server.reportHostPowerState",
   serverGetBackgroundPolicy: "server.getBackgroundPolicy",
+  serverRegisterPushDevice: "server.registerPushDevice",
+  serverUnregisterPushDevice: "server.unregisterPushDevice",
   serverGetUsageSummary: "server.getUsageSummary",
   serverRefreshUsageRates: "server.refreshUsageRates",
 
@@ -938,6 +946,20 @@ const WsServerGetBackgroundPolicyRpc = Rpc.make(WS_METHODS.serverGetBackgroundPo
   payload: Schema.Struct({}),
   success: BackgroundPolicySnapshot,
   error: EnvironmentAuthorizationError,
+});
+
+const WsServerRegisterPushDeviceRpc = Rpc.make(WS_METHODS.serverRegisterPushDevice, {
+  payload: DirectPushDeviceRegistrationInput,
+  error: Schema.Union([
+    DirectPushUnavailableError,
+    DirectPushRegistrationError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+const WsServerUnregisterPushDeviceRpc = Rpc.make(WS_METHODS.serverUnregisterPushDevice, {
+  payload: DirectPushDeviceUnregistrationInput,
+  error: Schema.Union([DirectPushRegistrationError, EnvironmentAuthorizationError]),
 });
 
 const PullRequestRpcError = Schema.Union([
@@ -1944,6 +1966,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerReportClientActivityRpc,
   WsServerReportHostPowerStateRpc,
   WsServerGetBackgroundPolicyRpc,
+  WsServerRegisterPushDeviceRpc,
+  WsServerUnregisterPushDeviceRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
   WsPullRequestsListRpc,

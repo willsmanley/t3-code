@@ -140,6 +140,14 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       servers, which may still publish, so only an explicit false skips.
    */
   agentActivityPublishing: Schema.optionalKey(Schema.Boolean),
+  /**
+   * The server sends agent activity to Android devices itself through this
+   * Firebase project, so an app built with the same project registers here
+   * instead of with T3 Connect.
+   */
+  androidDirectPush: ForwardCompatibleOptional(
+    Schema.Struct({ firebaseProjectId: TrimmedNonEmptyString }),
+  ),
   projectCloneTracking: Schema.optionalKey(Schema.Boolean),
   /** Server answers projects.listIgnoredFiles. */
   ignoredFileListing: Schema.optionalKey(Schema.Boolean),

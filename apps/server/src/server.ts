@@ -82,6 +82,9 @@ import * as Keybindings from "./keybindings.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerOwnership from "./serverOwnership.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
+import * as DirectPush from "./notifications/DirectPush.ts";
+import * as DirectPushDevices from "./notifications/DirectPushDevices.ts";
+import * as FcmClient from "./notifications/FcmClient.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as ProjectEnrichmentService from "./project/ProjectEnrichmentService.ts";
@@ -569,7 +572,18 @@ const layerProviderInstallationRefresh = Layer.effectDiscard(
 );
 
 const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
-  AgentAwarenessRelay.layer,
+  AgentAwarenessRelay.layer.pipe(
+    Layer.provideMerge(
+      DirectPush.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            DirectPushDevices.layer,
+            FcmClient.layer.pipe(Layer.provide(FetchHttpClient.layer)),
+          ),
+        ),
+      ),
+    ),
+  ),
   HeldHooksWaker.layer,
   layerThreadSettlementWorker,
   layerIdleCompactionWorker,

@@ -35,6 +35,7 @@ import {
   RELAY_URL_SECRET,
 } from "../cloud/config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as DirectPush from "../notifications/DirectPush.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -142,6 +143,7 @@ const makeTestRelay = Effect.fnUntraced(function* (
     readonly linked?: boolean;
     readonly readShell?: (threadId: ThreadId) => Effect.Effect<OrchestrationV2ThreadShell | null>;
     readonly domainEvents?: Stream.Stream<OrchestrationV2DomainEvent>;
+    readonly directPush?: boolean;
   } = {},
 ) {
   const values = new Map<string, Uint8Array>(
@@ -250,8 +252,18 @@ const makeTestRelay = Effect.fnUntraced(function* (
     },
     { preconnect: () => {} },
   );
+  const directPublications: Array<RelayAgentActivityState | null> = [];
+  const directPush = DirectPush.DirectPush.of({
+    enabled: Effect.succeed(options.directPush === true),
+    registerDevice: unused,
+    unregisterDevice: unused,
+    publish: (input) => Effect.sync(() => void directPublications.push(input.state)),
+    drain: Effect.void,
+    start: () => Effect.void,
+  });
   const relay = yield* AgentAwarenessRelay.make.pipe(
     Effect.provideService(ServerSecretStore.ServerSecretStore, secrets),
+    Effect.provideService(DirectPush.DirectPush, directPush),
     Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
     Effect.provideService(ServerEnvironment.ServerEnvironment, {
       getEnvironmentId: Effect.succeed(EnvironmentId.make("relay-environment")),
@@ -283,7 +295,16 @@ const makeTestRelay = Effect.fnUntraced(function* (
     Effect.provideService(FetchHttpClient.Fetch, fetch),
     Effect.provide(NodeCrypto.layer),
   );
-  return { relay, secrets, secretReads, currentShell, shellReads, publications, catchUp };
+  return {
+    relay,
+    secrets,
+    secretReads,
+    currentShell,
+    shellReads,
+    publications,
+    directPublications,
+    catchUp,
+  };
 });
 
 describe("AgentAwarenessRelay", () => {
@@ -348,6 +369,36 @@ describe("AgentAwarenessRelay", () => {
       yield* relay.publishThread(THREAD_ID);
       assert.equal(publications.length, 2);
       assert.equal(publications[1]?.state?.threadTitle, "Renamed thread");
+    }),
+  );
+
+  it.effect("sends states to direct push without a T3 Connect link", () =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications, directPublications } = yield* makeTestRelay({
+        linked: false,
+        directPush: true,
+      });
+      yield* relay.publishThread(THREAD_ID);
+      yield* Ref.set(currentShell, shell({ title: "Renamed thread" }));
+      yield* relay.publishThread(THREAD_ID);
+      yield* relay.publishThread(THREAD_ID);
+      assert.equal(publications.length, 0);
+      assert.deepEqual(
+        directPublications.map((state) => state?.threadTitle),
+        ["Thread", "Renamed thread"],
+      );
+    }),
+  );
+
+  it.effect("publishes each state to both direct push and a linked relay", () =>
+    Effect.gen(function* () {
+      const { relay, publications, directPublications } = yield* makeTestRelay({
+        directPush: true,
+      });
+      yield* relay.publishThread(THREAD_ID);
+      assert.equal(publications.length, 1);
+      assert.equal(directPublications.length, 1);
+      assert.deepEqual(directPublications[0], publications[0]?.state);
     }),
   );
 
