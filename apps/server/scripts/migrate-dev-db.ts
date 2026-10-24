@@ -216,6 +216,8 @@ const CLEARED_TABLES: ReadonlyArray<string> = [
   "provider_session_runtime",
   "auth_sessions",
   "auth_pairing_links",
+  // Real phones' push tokens: a dev server with copied secrets would notify them.
+  "direct_push_devices",
 ];
 
 const PROVIDER_SESSIONS_TABLE = "orchestration_v2_projection_provider_sessions";
@@ -378,8 +380,15 @@ const pruneSnapshot = Effect.fn("pruneDevDbSnapshot")(function* (input: RunMigra
             AND stream_id NOT IN (SELECT thread_id FROM kept_threads))
            OR (aggregate_kind = 'project'
             AND stream_id NOT IN (SELECT project_id FROM kept_projects))`;
+      // direct_push_devices is created by the running server, not a
+      // migration, so an older source database does not have it.
+      const tables = new Set(
+        (yield* sql<{ name: string }>`SELECT name FROM sqlite_master WHERE type = 'table'`).map(
+          (row) => row.name,
+        ),
+      );
       for (const table of CLEARED_TABLES) {
-        yield* sql`DELETE FROM ${sql(table)}`;
+        if (tables.has(table)) yield* sql`DELETE FROM ${sql(table)}`;
       }
     }),
   );

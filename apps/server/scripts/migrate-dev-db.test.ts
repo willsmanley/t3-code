@@ -89,6 +89,9 @@ const createFixtureSource = Effect.fn("createMigrateDevDbFixtureSource")(functio
           'full-access', 'default', 'user', 'user', '2026-08-01', '2026-08-01', 'never', 0)`;
       yield* sql`INSERT INTO auth_sessions (session_id, subject, scopes, method, issued_at, expires_at)
         VALUES ('session-1', 'user', '[]', 'pairing', '2026-08-01', '2027-08-01')`;
+      // The server creates this table itself, outside the migrations.
+      yield* sql`CREATE TABLE direct_push_devices (device_id TEXT PRIMARY KEY, push_token TEXT NOT NULL)`;
+      yield* sql`INSERT INTO direct_push_devices VALUES ('real-phone', 'real-phone-fcm-token')`;
     }),
   );
   return databasePath;
@@ -119,9 +122,15 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
             SELECT stream_id FROM orchestration_events ORDER BY stream_id`;
           const sessions = yield* sql<{ provider_session_id: string }>`
             SELECT provider_session_id FROM orchestration_v2_projection_provider_sessions`;
-          const [leftovers] = yield* sql<{ auth: number; tasks: number; transfers: number }>`
+          const [leftovers] = yield* sql<{
+            auth: number;
+            tasks: number;
+            transfers: number;
+            pushDevices: number;
+          }>`
             SELECT
               (SELECT COUNT(*) FROM auth_sessions) AS auth,
+              (SELECT COUNT(*) FROM direct_push_devices) AS "pushDevices",
               (SELECT COUNT(*) FROM scheduled_tasks) AS tasks,
               (SELECT COUNT(*) FROM orchestration_v2_projection_context_transfers) AS transfers`;
           return { threads, events, sessions, leftovers };
@@ -139,7 +148,12 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
         kept.sessions.map((row) => row.provider_session_id),
         ["session-shared"],
       );
-      assert.deepStrictEqual(kept.leftovers, { auth: 0, tasks: 0, transfers: 0 });
+      assert.deepStrictEqual(kept.leftovers, {
+        auth: 0,
+        tasks: 0,
+        transfers: 0,
+        pushDevices: 0,
+      });
     }),
   );
 
