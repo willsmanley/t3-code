@@ -47,6 +47,7 @@ import { buildHomeListFilterMenu } from "../home/home-list-filter-menu";
 import { buildHomeProjectScopes } from "../home/homeThreadList";
 import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "../home/thread-swipe-actions";
 import { usePendingTaskListActions } from "../home/usePendingTaskListActions";
+import { useThreadForkAction } from "../home/useThreadForkAction";
 import { useThreadListActions } from "../home/useThreadListActions";
 import {
   getConnectionAwareBrandHeaderOptions,
@@ -545,6 +546,7 @@ function ThreadNavigationSidebarPane(
     onSelectThread(thread);
     openSwipeableRef.current?.close();
   };
+  const forkThread = useThreadForkAction(handleSelectThread);
   const handleOpenThreadPullRequests = (
     thread: EnvironmentThreadShell,
     pr: ThreadPrPresentation,
@@ -682,6 +684,7 @@ function ThreadNavigationSidebarPane(
             onSelectThread={handleSelectThread}
             onOpenThreadPullRequests={handleOpenThreadPullRequests}
             onDeleteThread={confirmDeleteThread}
+            onForkThread={forkThread}
             onArchiveThread={archiveThread}
             onRenameThread={renameThread}
             onRegenerateThreadTitle={regenerateThreadTitle}

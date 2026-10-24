@@ -111,7 +111,10 @@ function actionFailureTitle(action: ThreadListAction): string {
   return "Could not delete thread";
 }
 
-function checkThreadOperationPermission(thread: EnvironmentThreadShell, title: string): boolean {
+export function checkThreadOperationPermission(
+  thread: EnvironmentThreadShell,
+  title: string,
+): boolean {
   if (readEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope)) return true;
   Dialog.alert(title, "This connection cannot change threads.");
   return false;

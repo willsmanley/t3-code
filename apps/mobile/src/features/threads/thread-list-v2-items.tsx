@@ -143,6 +143,12 @@ const SNOOZED_MENU_ACTIONS: MenuAction[] = [
   { id: "delete", title: "Delete", image: "trash", attributes: { destructive: true } },
 ];
 
+const FORK_CONVERSATION_MENU_ACTION: MenuAction = {
+  id: "fork-conversation",
+  title: "Fork conversation",
+  image: "arrow.triangle.branch",
+};
+
 const LEGACY_MENU_ACTIONS: MenuAction[] = [
   { id: "archive", title: "Archive", image: "archivebox" },
   { id: "delete", title: "Delete", image: "trash", attributes: { destructive: true } },
@@ -552,6 +558,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     pr: ThreadPrPresentation,
   ) => void;
   readonly onDeleteThread: (thread: EnvironmentThreadShell) => void;
+  readonly onForkThread: (thread: EnvironmentThreadShell) => void;
   readonly onNewThreadOnBranch: (thread: EnvironmentThreadShell) => void;
   readonly onRenameThread: (thread: EnvironmentThreadShell) => void;
   readonly onRegenerateThreadTitle: (thread: EnvironmentThreadShell) => void;
@@ -589,6 +596,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     onSelectThread,
     onOpenThreadPullRequests,
     onDeleteThread,
+    onForkThread,
     onRenameThread,
     onRegenerateThreadTitle,
     onNewThreadOnBranch,
@@ -866,6 +874,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   );
   const handleMenuAction = useCallback(
     ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) => {
+      if (nativeEvent.event === "fork-conversation") onForkThread(thread);
       if (nativeEvent.event === "new-thread-on-branch") onNewThreadOnBranch(thread);
       if (nativeEvent.event === "settle") handleSettle();
       if (nativeEvent.event === "unsettle") handleUnsettle();
@@ -903,6 +912,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       }
     },
     [
+      onForkThread,
       onNewThreadOnBranch,
       thread,
       handleArchive,
@@ -1459,6 +1469,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         {(close) => (
           <Menu
             actions={[
+              FORK_CONVERSATION_MENU_ACTION,
               ...(thread.branch
                 ? [
                     {
