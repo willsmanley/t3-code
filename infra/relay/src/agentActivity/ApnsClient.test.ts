@@ -13,7 +13,7 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse";
 
 import type { ApnsCredentials } from "../Config.ts";
 import * as ApnsClient from "./ApnsClient.ts";
-import { sanitizeApnsNotificationPayload } from "./agentActivityPayloads.ts";
+import { sanitizeApnsNotificationPayload } from "@t3tools/shared/agentActivityPayloads";
 import * as ApnsProviderTokens from "./ApnsProviderTokens.ts";
 
 const layerTest = ApnsClient.layer.pipe(

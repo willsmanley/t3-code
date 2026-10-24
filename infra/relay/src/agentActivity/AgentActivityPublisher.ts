@@ -1,11 +1,11 @@
 import {
   makeAggregateState,
   TERMINAL_AGENT_ACTIVITY_DISPLAY_TTL_MS,
-} from "./agentActivityAggregate.ts";
+} from "@t3tools/shared/agentActivityAggregate";
 export {
   makeAggregateState,
   TERMINAL_AGENT_ACTIVITY_DISPLAY_TTL_MS,
-} from "./agentActivityAggregate.ts";
+} from "@t3tools/shared/agentActivityAggregate";
 import type {
   RelayAgentActivityState,
   RelayDeliveryResult,
@@ -17,9 +17,9 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
-import { isTerminalPhase } from "./agentActivityPayloads.ts";
+import { isTerminalPhase } from "@t3tools/shared/agentActivityPayloads";
 
-export { isExpiredAgentActivityState } from "./agentActivityPayloads.ts";
+export { isExpiredAgentActivityState } from "@t3tools/shared/agentActivityPayloads";
 import * as AgentActivityRows from "./AgentActivityRows.ts";
 import * as EnvironmentLinks from "../environments/EnvironmentLinks.ts";
 import * as LiveActivities from "./LiveActivities.ts";

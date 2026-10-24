@@ -19,8 +19,13 @@ import * as LiveActivities from "./LiveActivities.ts";
 import * as FcmDeliveryQueueSender from "./FcmDeliveryQueueSender.ts";
 import * as FcmClient from "./FcmClient.ts";
 import * as FcmDeliveries from "./FcmDeliveries.ts";
-import { androidActivityData, fitFcmData } from "./fcmPayloads.ts";
-import { makeAggregateState } from "./agentActivityAggregate.ts";
+import {
+  androidActivityData,
+  androidAlertForAggregate,
+  androidAlertForState,
+  fitFcmData,
+} from "@t3tools/shared/agentActivityFcmPayloads";
+import { makeAggregateState } from "@t3tools/shared/agentActivityAggregate";
 
 const aggregateFor = (states: ReadonlyArray<RelayAgentActivityState>) =>
   makeAggregateState({ activeStates: states, terminalState: null, nowMs: 0 })!;
@@ -369,10 +374,10 @@ describe("Android delivery routing", () => {
       preferences,
       nowMs: 0,
     };
-    const alert = FcmDeliveries.androidAlertForAggregate(input);
+    const alert = androidAlertForAggregate(input);
     expect(alert?.alert_title).toBe("2 agents finished");
     expect(
-      FcmDeliveries.androidAlertForAggregate({
+      androidAlertForAggregate({
         ...input,
         nextAggregate: {
           ...input.nextAggregate,
@@ -381,7 +386,7 @@ describe("Android delivery routing", () => {
       })?.alert_id,
     ).toBe(alert?.alert_id);
     expect(
-      FcmDeliveries.androidAlertForAggregate({
+      androidAlertForAggregate({
         ...input,
         nextAggregate: {
           ...input.nextAggregate,
@@ -402,7 +407,7 @@ describe("Android delivery routing", () => {
     };
     const alreadyWaiting = { ...state, phase: "waiting_for_approval" as const };
     expect(
-      FcmDeliveries.androidAlertForAggregate({
+      androidAlertForAggregate({
         previousAggregate: aggregateFor([alreadyWaiting, other]),
         nextAggregate: aggregateFor([alreadyWaiting, { ...other, phase: "waiting_for_input" }]),
         preferences,
@@ -412,7 +417,7 @@ describe("Android delivery routing", () => {
   });
 
   it("keeps notification groups distinct when identifiers contain slashes", () => {
-    const left = FcmDeliveries.androidAlertForState(
+    const left = androidAlertForState(
       {
         ...state,
         environmentId: EnvironmentId.make("a/b"),
@@ -422,7 +427,7 @@ describe("Android delivery routing", () => {
       preferences,
       0,
     );
-    const right = FcmDeliveries.androidAlertForState(
+    const right = androidAlertForState(
       {
         ...state,
         environmentId: EnvironmentId.make("a"),
@@ -597,7 +602,7 @@ describe("delivery policy regressions", () => {
     };
     const next = aggregateFor([...running, waiting]);
     expect(
-      FcmDeliveries.androidAlertForAggregate({
+      androidAlertForAggregate({
         previousAggregate: aggregateFor(running),
         nextAggregate: next,
         preferences,

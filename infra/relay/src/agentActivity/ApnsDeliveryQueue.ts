@@ -15,7 +15,7 @@ import {
 import {
   sanitizeAgentActivityAggregateState,
   sanitizeApnsNotificationPayload,
-} from "./agentActivityPayloads.ts";
+} from "@t3tools/shared/agentActivityPayloads";
 import {
   expiresAtForJob,
   makeApnsDeliveryJobPayload,

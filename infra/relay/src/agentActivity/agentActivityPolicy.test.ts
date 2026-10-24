@@ -1,12 +1,12 @@
 import { describe, expect, it } from "@effect/vitest";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { RelayAgentActivityState } from "@t3tools/contracts/relay";
-import { makeAggregateState } from "./agentActivityAggregate.ts";
+import { makeAggregateState } from "@t3tools/shared/agentActivityAggregate";
 import {
   attentionTransitionRows,
   terminalTransitionRows,
   shouldAlertForActivity,
-} from "./agentActivityAlerts.ts";
+} from "@t3tools/shared/agentActivityAlerts";
 
 const state: RelayAgentActivityState = {
   environmentId: EnvironmentId.make("env"),

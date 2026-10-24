@@ -51,6 +51,22 @@
       "types": "./src/agentAwareness.ts",
       "import": "./src/agentAwareness.ts"
     },
+    "./agentActivityAggregate": {
+      "types": "./src/agentActivityAggregate.ts",
+      "import": "./src/agentActivityAggregate.ts"
+    },
+    "./agentActivityAlerts": {
+      "types": "./src/agentActivityAlerts.ts",
+      "import": "./src/agentActivityAlerts.ts"
+    },
+    "./agentActivityFcmPayloads": {
+      "types": "./src/agentActivityFcmPayloads.ts",
+      "import": "./src/agentActivityFcmPayloads.ts"
+    },
+    "./agentActivityPayloads": {
+      "types": "./src/agentActivityPayloads.ts",
+      "import": "./src/agentActivityPayloads.ts"
+    },
     "./git": {
       "types": "./src/git.ts",
       "import": "./src/git.ts"

@@ -1,9 +1,20 @@
-import type { RelayAgentActivityAggregateState } from "@t3tools/contracts/relay";
+import type {
+  RelayAgentActivityAggregateState,
+  RelayAgentActivityState,
+  RelayAgentAwarenessPreferences,
+} from "@t3tools/contracts/relay";
 import {
   activityPhasePriority,
+  statusForPhase,
   TERMINAL_AGENT_ACTIVITY_DISPLAY_TTL_MS,
 } from "./agentActivityAggregate.ts";
-import { agentActivityExpiresAt } from "./agentActivityPayloads.ts";
+import {
+  alertForActivityRows,
+  attentionTransitionRows,
+  shouldAlertForActivity,
+  terminalTransitionRows,
+} from "./agentActivityAlerts.ts";
+import { agentActivityExpiresAt, notificationForActivity } from "./agentActivityPayloads.ts";
 
 export function androidActivityData(aggregate: RelayAgentActivityAggregateState | null) {
   const rows = [...(aggregate?.activities ?? [])].sort(
@@ -79,4 +90,61 @@ export function fitFcmData(input: Readonly<Record<string, string>>): Record<stri
     data[key] = parts.join("\t");
   }
   return data;
+}
+
+export function androidAlertForState(
+  state: RelayAgentActivityState,
+  preferences: RelayAgentAwarenessPreferences,
+  nowMs: number,
+) {
+  if (!shouldAlertForActivity({ ...state, preferences, nowMs })) return null;
+  const notification = notificationForActivity({ ...state, status: statusForPhase(state.phase) });
+  return {
+    alert_id: JSON.stringify([state.environmentId, state.threadId, state.phase, state.updatedAt]),
+    alert_group: JSON.stringify([state.environmentId, state.threadId]),
+    alert_title: notification.title,
+    alert_body: notification.body,
+    alert_path: notification.deepLink,
+  };
+}
+
+export function androidAlertForAggregate(input: {
+  readonly previousAggregate: RelayAgentActivityAggregateState;
+  readonly nextAggregate: RelayAgentActivityAggregateState;
+  readonly preferences: RelayAgentAwarenessPreferences;
+  readonly nowMs: number;
+}) {
+  if (!input.preferences.notificationsEnabled) return null;
+  const attention = attentionTransitionRows(input);
+  const activities =
+    attention.length > 0
+      ? attention
+      : terminalTransitionRows({ ...input, includeUnobserved: true });
+  const first = activities[0];
+  const alert = alertForActivityRows(activities);
+  if (!first || !alert) return null;
+  if (activities.length === 1) {
+    const notification = notificationForActivity(first);
+    return {
+      alert_id: JSON.stringify([first.environmentId, first.threadId, first.phase, first.updatedAt]),
+      alert_group: JSON.stringify([first.environmentId, first.threadId]),
+      alert_title: notification.title,
+      alert_body: notification.body,
+      alert_path: notification.deepLink,
+    };
+  }
+  return {
+    // Every contributing queue job identifies the same group, including after
+    // retries or a different database row order. The native handler deduplicates it.
+    alert_id: JSON.stringify(
+      activities
+        .map((row) => [row.environmentId, row.threadId, row.phase, row.updatedAt])
+        .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+    ),
+    alert_title: alert.title,
+    alert_body: alert.body,
+    // A multi-thread alert targets the overview so one visible thread cannot
+    // suppress notifications for the other threads in the group.
+    alert_path: "/",
+  };
 }

@@ -25,12 +25,15 @@ import * as RpcSerialization from "effect/rpc/RpcSerialization";
 import * as Socket from "effect/socket/Socket";
 
 import * as RelayConfiguration from "../src/Config.ts";
-import { androidActivityData, fitFcmData } from "../src/agentActivity/fcmPayloads.ts";
+import {
+  androidActivityData,
+  androidAlertForState,
+  fitFcmData,
+} from "@t3tools/shared/agentActivityFcmPayloads";
 import * as WebCrypto from "../src/WebCrypto.ts";
 import * as FcmAssertionSigner from "../src/agentActivity/FcmAssertionSigner.ts";
 import * as FcmClient from "../src/agentActivity/FcmClient.ts";
-import * as FcmDeliveries from "../src/agentActivity/FcmDeliveries.ts";
-import { makeAggregateState } from "../src/agentActivity/agentActivityAggregate.ts";
+import { makeAggregateState } from "@t3tools/shared/agentActivityAggregate";
 
 const Device = Schema.Struct({
   token: Schema.NonEmptyString,
@@ -174,7 +177,7 @@ const main = Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis;
           const alert =
             state && state.phase !== previous?.phase && item.kind !== "snapshot"
-              ? FcmDeliveries.androidAlertForState(state, preferences, now)
+              ? androidAlertForState(state, preferences, now)
               : null;
           const aggregate = makeAggregateState({
             activeStates: [...next.values()],
