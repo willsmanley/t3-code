@@ -286,10 +286,26 @@ jobs:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          # Optional. With the fork's own Firebase config the app receives agent
+          # notifications that the user's T3 servers send through that project;
+          # without it the build still succeeds, with no push.
+          ANDROID_GOOGLE_SERVICES_JSON: ${{ secrets.ANDROID_GOOGLE_SERVICES_JSON }}
         run: |
           set -euo pipefail
           keystore="$RUNNER_TEMP/release.p12"
+          google_services="$RUNNER_TEMP/google-services.json"
+          trap 'rm -f "$keystore" "$google_services"' EXIT
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$keystore"
+          if [ -n "${ANDROID_GOOGLE_SERVICES_JSON:-}" ]; then
+            printf '%s' "$ANDROID_GOOGLE_SERVICES_JSON" > "$google_services"
+            # app.config.ts reads both through loadRepoEnv, which includes the
+            # process environment, for prebuild and the release bundle alike.
+            export T3CODE_ANDROID_GOOGLE_SERVICES_FILE="$google_services"
+            export T3CODE_ANDROID_DIRECT_PUSH=1
+            echo "Building with the fork's Firebase project for direct push."
+          else
+            echo "ANDROID_GOOGLE_SERVICES_JSON is not set; building without push notifications."
+          fi
           cd apps/mobile
           pnpm exec expo prebuild --clean --platform android --no-install
           (cd android && ./gradlew app:assembleRelease -PreactNativeArchitectures=arm64-v8a)
@@ -304,7 +320,6 @@ jobs:
             --key-pass env:ANDROID_KEYSTORE_PASSWORD \
             --out "$GITHUB_WORKSPACE/android-assets/T3-Code-Fork-$T3CODE_MOBILE_VERSION-arm64.apk" \
             android/app/build/outputs/apk/release/app-release.apk
-          rm -f "$keystore"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

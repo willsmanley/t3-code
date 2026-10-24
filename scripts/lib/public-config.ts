@@ -171,3 +171,31 @@ function firstNonEmpty(sources: readonly Environment[], ...names: readonly strin
 function readEnvFile(path: string): Record<string, string | undefined> {
   return NodeFS.existsSync(path) ? NodeUtil.parseEnv(NodeFS.readFileSync(path, "utf8")) : {};
 }
+
+/**
+ * The Firebase project an Android build's `google-services.json` belongs to,
+ * or undefined when the file is absent or unreadable. Relative paths resolve
+ * from the Expo project, as Expo resolves `android.googleServicesFile`.
+ */
+export function readGoogleServicesProjectId(
+  file: string | undefined,
+  { repoRoot = REPO_ROOT }: { readonly repoRoot?: string } = {},
+): string | undefined {
+  if (!file?.trim()) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(
+      NodeFS.readFileSync(NodePath.resolve(repoRoot, "apps/mobile", file.trim()), "utf8"),
+    );
+    const projectInfo =
+      typeof parsed === "object" && parsed !== null && "project_info" in parsed
+        ? parsed.project_info
+        : undefined;
+    const projectId =
+      typeof projectInfo === "object" && projectInfo !== null && "project_id" in projectInfo
+        ? projectInfo.project_id
+        : undefined;
+    return typeof projectId === "string" && projectId.trim() ? projectId.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}

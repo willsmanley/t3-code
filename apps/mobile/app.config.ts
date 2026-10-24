@@ -1,7 +1,7 @@
 import type { ExpoConfig } from "expo/config";
 
 import { BRAND_ASSET_PATHS } from "../../scripts/lib/brand-assets.ts";
-import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
+import { loadRepoEnv, readGoogleServicesProjectId } from "../../scripts/lib/public-config.ts";
 
 type AppVariant = "development" | "preview" | "production";
 
@@ -114,6 +114,12 @@ const variant = VARIANT_CONFIG[APP_VARIANT];
 const appName = process.env.T3CODE_MOBILE_APP_NAME?.trim() || variant.appName;
 const androidPackage = process.env.T3CODE_ANDROID_PACKAGE?.trim() || variant.androidPackage;
 const androidVersionCode = Number(process.env.T3CODE_ANDROID_VERSION_CODE);
+// A build with its own Firebase project cannot receive T3 Connect's pushes, so
+// its Android devices register with servers that send through that project.
+const androidDirectPushProjectId =
+  repoEnv.T3CODE_ANDROID_DIRECT_PUSH === "1"
+    ? readGoogleServicesProjectId(repoEnv.T3CODE_ANDROID_GOOGLE_SERVICES_FILE)
+    : undefined;
 const iosBundleIdentifier = isIosPersonalTeamBuild
   ? personalTeamBundleIdentifier!
   : variant.iosBundleIdentifier;
@@ -481,6 +487,9 @@ const config: ExpoConfig = {
     relay: {
       url: repoEnv.T3CODE_RELAY_URL ?? null,
     },
+    ...(androidDirectPushProjectId
+      ? { androidDirectPush: { firebaseProjectId: androidDirectPushProjectId } }
+      : {}),
     clerk: {
       publishableKey: repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? null,
       jwtTemplate: repoEnv.EXPO_PUBLIC_CLERK_JWT_TEMPLATE ?? null,

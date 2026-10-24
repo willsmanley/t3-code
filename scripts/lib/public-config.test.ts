@@ -4,7 +4,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { loadRepoEnv } from "./public-config.ts";
+import { loadRepoEnv, readGoogleServicesProjectId } from "./public-config.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -50,6 +50,25 @@ describe("loadRepoEnv", () => {
       T3CODE_RELAY_URL: "https://ci.example.test",
       VITE_T3CODE_RELAY_URL: "https://ci.example.test",
     });
+  });
+});
+
+describe("readGoogleServicesProjectId", () => {
+  it("reads the Firebase project from a file relative to the Expo project", () => {
+    const repoRoot = makeTemporaryDirectory();
+    NodeFS.mkdirSync(NodePath.join(repoRoot, "apps/mobile"), { recursive: true });
+    NodeFS.writeFileSync(
+      NodePath.join(repoRoot, "apps/mobile/google-services.json"),
+      JSON.stringify({ project_info: { project_id: "fork-project" }, client: [] }),
+    );
+    NodeFS.writeFileSync(NodePath.join(repoRoot, "broken.json"), "{");
+
+    expect(readGoogleServicesProjectId("google-services.json", { repoRoot })).toBe("fork-project");
+    expect(readGoogleServicesProjectId(undefined, { repoRoot })).toBeUndefined();
+    expect(readGoogleServicesProjectId("missing.json", { repoRoot })).toBeUndefined();
+    expect(
+      readGoogleServicesProjectId(NodePath.join(repoRoot, "broken.json"), { repoRoot }),
+    ).toBeUndefined();
   });
 });
 
