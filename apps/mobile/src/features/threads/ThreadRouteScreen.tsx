@@ -96,7 +96,9 @@ import { ThreadHeader } from "./ThreadHeader";
 import {
   useAndroidWorkspaceBack,
   useWorkspaceBackNavigation,
+  useWorkspaceListNavigation,
 } from "../workspace/useAndroidWorkspaceNavigation";
+import { useOpenThreadArchiveAction } from "../home/useThreadListActions";
 
 interface ThreadInspectorSelection {
   readonly routeThreadIdentity: string | null;
@@ -508,6 +510,10 @@ function ThreadRouteContent(
     }
     toggleAuxiliaryPane();
   };
+  const archiveThread = useOpenThreadArchiveAction(useWorkspaceListNavigation("threads"));
+  const handleArchiveThread = () => {
+    if (selectedThread) void archiveThread(selectedThread);
+  };
   const handleSelectInspectorFile = (path: string) => {
     if (selectedThread === null) {
       return;
@@ -913,6 +919,11 @@ function ThreadRouteContent(
               onToggleInspector={handleToggleInspector}
               onOpenGitInspector={handleOpenGitInspector}
               onOpenFilesInspector={handleOpenFilesInspector}
+              onArchiveThread={
+                canOperateThread && creationState === null && selectedThread.archivedAt === null
+                  ? handleArchiveThread
+                  : undefined
+              }
               onReturnToThread={props.onReturnToThread}
             />
           }

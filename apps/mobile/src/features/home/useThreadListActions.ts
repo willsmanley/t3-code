@@ -788,6 +788,16 @@ export function useThreadListActions(): {
   };
 }
 
+/** Archives the open thread and calls `leave` once the archive is underway, before the
+    server answers, so the closing thread never renders as unavailable. A failure still
+    raises its alert over wherever the user went. */
+export function useOpenThreadArchiveAction(
+  leave: () => void,
+): (thread: EnvironmentThreadShell) => Promise<boolean> {
+  const executeAction = useThreadActionExecutor();
+  return (thread) => executeAction("archive", thread, leave);
+}
+
 export function useArchivedThreadListActions(
   onCompleted: (thread: EnvironmentThreadShell) => void,
 ): {

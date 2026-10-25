@@ -17,6 +17,7 @@ export function ThreadHeader(
     readonly onToggleInspector: () => void;
     readonly onOpenGitInspector: () => void;
     readonly onOpenFilesInspector: () => void;
+    readonly onArchiveThread?: () => void;
   },
 ) {
   const goBack = useWorkspaceBackNavigation("threads");
@@ -61,6 +62,14 @@ export function ThreadHeader(
         onPress: onMergeBack,
       });
     }
+    if (props.onArchiveThread) {
+      actions.push({
+        accessibilityLabel: "Archive thread",
+        icon: "archivebox",
+        overflowOnly: true,
+        onPress: props.onArchiveThread,
+      });
+    }
     return actions;
   }, [
     props.inspectorMode,
@@ -74,6 +83,7 @@ export function ThreadHeader(
     props.hasThreadCwd,
     props.hasWorkspaceRoot,
     props.gitControls.canOpenTerminal,
+    props.onArchiveThread,
   ]);
 
   return (

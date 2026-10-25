@@ -148,7 +148,7 @@ vi.mock("../../state/threads", () => ({
 }));
 
 import { dismissThreadUndoNotice, readThreadUndoNotice } from "./thread-undo-notice";
-import { useThreadListActions } from "./useThreadListActions";
+import { useOpenThreadArchiveAction, useThreadListActions } from "./useThreadListActions";
 
 const primaryEnvironmentId = EnvironmentId.make("primary");
 const otherEnvironmentId = EnvironmentId.make("other");
@@ -476,5 +476,33 @@ describe("thread archive guard", () => {
     expect(state.requests).toEqual([]);
     expect(state.archivedRefreshes).toEqual([]);
     expect(state.alerts.at(-1)?.title).toBe("Could not archive thread");
+  });
+
+  it("leaves an open thread before the archive request is sent", async () => {
+    const events: string[] = [];
+    state.afterRequest = () => events.push("request");
+
+    const archived = await useOpenThreadArchiveAction(() => events.push("leave"))(makeThread());
+
+    expect(archived).toBe(true);
+    expect(events).toEqual(["leave", "request"]);
+  });
+
+  it("keeps an open working thread on screen when it cannot be archived", async () => {
+    const leave = vi.fn();
+    const thread = makeThread({
+      runtime: {
+        status: "running",
+        activeRunId: RunId.make("active-run"),
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        providerName: "codex",
+        lastError: null,
+        updatedAt: "2026-09-02T00:00:00.000Z",
+      },
+    });
+
+    expect(await useOpenThreadArchiveAction(leave)(thread)).toBe(false);
+    expect(leave).not.toHaveBeenCalled();
+    expect(state.requests).toEqual([]);
   });
 });
