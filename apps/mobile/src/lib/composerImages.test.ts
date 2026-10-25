@@ -103,7 +103,18 @@ vi.mock("./uuid", () => ({
   uuidv4: () => "attachment-id",
 }));
 
-import { convertPastedImagesToAttachments, pasteComposerClipboard } from "./composerImages";
+const imagePicker = vi.hoisted(() => ({
+  requestCameraPermissionsAsync: vi.fn(),
+  launchCameraAsync: vi.fn(),
+}));
+
+vi.mock("expo-image-picker", () => imagePicker);
+
+import {
+  convertPastedImagesToAttachments,
+  pasteComposerClipboard,
+  takeComposerPhoto,
+} from "./composerImages";
 
 describe("composer clipboard paste", () => {
   beforeEach(() => {
@@ -131,6 +142,61 @@ describe("composer clipboard paste", () => {
       await pasteComposerClipboard({ existingCount: PROVIDER_SEND_TURN_MAX_ATTACHMENTS }),
     ).toEqual({ images: [], text: null, error: expect.stringContaining("up to") });
     expect(clipboard.getStringAsync).not.toHaveBeenCalled();
+  });
+});
+
+describe("camera photos", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    imagePicker.requestCameraPermissionsAsync.mockResolvedValue({ granted: true });
+  });
+
+  it("does not open the camera without permission", async () => {
+    imagePicker.requestCameraPermissionsAsync.mockResolvedValue({ granted: false });
+
+    const result = await takeComposerPhoto({ existingCount: 0 });
+
+    expect(result).toEqual({ attachments: [], error: expect.stringContaining("camera access") });
+    expect(imagePicker.launchCameraAsync).not.toHaveBeenCalled();
+  });
+
+  it("attaches a captured photo as a rendered JPEG, like a library photo", async () => {
+    manipulator.state.sourceSize = { width: 4032, height: 3024 };
+    imagePicker.launchCameraAsync.mockResolvedValue({
+      canceled: false,
+      assets: [
+        {
+          uri: "file:///cache/ImagePicker/capture.jpg",
+          type: "image",
+          mimeType: "image/jpeg",
+          fileName: "capture.jpg",
+        },
+      ],
+    });
+
+    const result = await takeComposerPhoto({ existingCount: 0 });
+
+    expect(imagePicker.launchCameraAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ mediaTypes: ["images"] }),
+    );
+    expect(result).toEqual({
+      attachments: [
+        expect.objectContaining({
+          type: "image",
+          name: "capture.jpg",
+          mimeType: "image/jpeg",
+          dataUrl: "data:image/jpeg;base64,cmVuZGVyZWQ=",
+        }),
+      ],
+      error: null,
+    });
+  });
+
+  it("refuses before opening the camera when the message is full", async () => {
+    const result = await takeComposerPhoto({ existingCount: PROVIDER_SEND_TURN_MAX_ATTACHMENTS });
+
+    expect(result.error).toContain("up to");
+    expect(imagePicker.requestCameraPermissionsAsync).not.toHaveBeenCalled();
   });
 });
 

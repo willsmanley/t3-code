@@ -12,6 +12,7 @@ import {
   type UploadChatImageAttachment,
 } from "@t3tools/contracts";
 import type { DocumentPickerResult } from "expo-document-picker";
+import type { ImagePickerAsset } from "expo-image-picker";
 import { estimateBase64ByteSize } from "./base64";
 import {
   COMPOSER_ATTACHMENT_DIRECTORY,
@@ -414,10 +415,74 @@ export async function pickComposerMedia(input: {
     };
   }
 
+  return composerAttachmentsFromPickerAssets(result.assets, {
+    remainingSlots,
+    maxVideoBytes: input.maxVideoBytes,
+  });
+}
+
+export async function takeComposerPhoto(input: { readonly existingCount: number }): Promise<{
+  readonly attachments: ReadonlyArray<DraftComposerAttachment>;
+  readonly error: string | null;
+}> {
+  const remainingSlots = PROVIDER_SEND_TURN_MAX_ATTACHMENTS - input.existingCount;
+  if (remainingSlots <= 0) {
+    return {
+      attachments: [],
+      error: `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} attachments per message.`,
+    };
+  }
+
+  let imagePicker: Awaited<ReturnType<typeof loadImagePicker>>;
+  try {
+    imagePicker = await loadImagePicker();
+  } catch {
+    return { attachments: [], error: "The camera is unavailable right now." };
+  }
+
+  // The permission prompt and the camera app both cover the activity, like the library picker.
+  const endHandoff = beginForegroundHandoff();
+  let result: Awaited<ReturnType<typeof imagePicker.launchCameraAsync>>;
+  try {
+    const permission = await imagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      return {
+        attachments: [],
+        error: "Allow camera access for T3 Code in Settings to take photos.",
+      };
+    }
+    result = await imagePicker.launchCameraAsync({
+      mediaTypes: ["images"],
+      base64: false,
+      quality: 1,
+    });
+  } catch (error) {
+    return {
+      attachments: [],
+      error: error instanceof Error ? error.message : "Could not open the camera.",
+    };
+  } finally {
+    endHandoff();
+  }
+
+  if (result.canceled) {
+    return { attachments: [], error: null };
+  }
+  return composerAttachmentsFromPickerAssets(result.assets, { remainingSlots });
+}
+
+async function composerAttachmentsFromPickerAssets(
+  assets: ReadonlyArray<ImagePickerAsset>,
+  input: { readonly remainingSlots: number; readonly maxVideoBytes?: number | undefined },
+): Promise<{
+  readonly attachments: ReadonlyArray<DraftComposerAttachment>;
+  readonly error: string | null;
+}> {
+  const { remainingSlots } = input;
   const attachments: DraftComposerAttachment[] = [];
   let error: string | null = null;
 
-  for (const asset of result.assets) {
+  for (const asset of assets) {
     if (attachments.length >= remainingSlots) {
       error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} attachments per message.`;
       break;

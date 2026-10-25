@@ -259,6 +259,7 @@ export interface ThreadComposerProps {
   readonly editorRef?: RefObject<ComposerEditorHandle | null>;
   readonly onChangeDraftMessage: (value: string) => void;
   readonly onPickDraftMedia: () => Promise<void>;
+  readonly onTakeDraftPhoto: () => Promise<void>;
   readonly onPickDraftFiles: () => Promise<void>;
   readonly onNativePasteImages: (uris: ReadonlyArray<string>) => Promise<void>;
   readonly onNativePasteText: (paste: ComposerTextPaste) => Promise<void>;
@@ -965,6 +966,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                   props.serverConfig?.environment.capabilities.fileAttachments,
                 )}
                 onPickMedia={props.onPickDraftMedia}
+                onTakePhoto={props.onTakeDraftPhoto}
                 onPickFiles={props.onPickDraftFiles}
               />
               <Animated.View
@@ -1228,6 +1230,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                         props.serverConfig?.environment.capabilities.fileAttachments,
                       )}
                       onPickMedia={props.onPickDraftMedia}
+                      onTakePhoto={props.onTakeDraftPhoto}
                       onPickFiles={props.onPickDraftFiles}
                     />
                     {modelControl}

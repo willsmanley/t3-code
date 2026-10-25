@@ -737,11 +737,16 @@ export function useThreadComposerState() {
     setComposerDraftText(threadKey, value);
   };
 
-  const { onPickDraftMedia, onPickDraftFiles, onNativePasteImages, onNativePasteText } =
-    useComposerAttachmentActions({
-      draftKey: selectedThreadShell ? activeComposerDraftKey(selectedThreadShell) : null,
-      serverConfig: selectedEnvironmentRuntime?.serverConfig,
-    });
+  const {
+    onPickDraftMedia,
+    onTakeDraftPhoto,
+    onPickDraftFiles,
+    onNativePasteImages,
+    onNativePasteText,
+  } = useComposerAttachmentActions({
+    draftKey: selectedThreadShell ? activeComposerDraftKey(selectedThreadShell) : null,
+    serverConfig: selectedEnvironmentRuntime?.serverConfig,
+  });
 
   const onPasteIntoDraft = async () => {
     if (!selectedThreadShell) {
@@ -906,6 +911,7 @@ export function useThreadComposerState() {
     interruptibleRunId,
     onChangeDraftMessage,
     onPickDraftMedia,
+    onTakeDraftPhoto,
     onPickDraftFiles,
     onPasteIntoDraft,
     onNativePasteImages,

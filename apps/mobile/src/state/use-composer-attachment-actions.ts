@@ -10,6 +10,7 @@ import {
   pickComposerFiles,
   pickComposerMedia,
   removePersistedComposerAttachmentFile,
+  takeComposerPhoto,
   type DraftComposerAttachment,
 } from "../lib/composerImages";
 import {
@@ -75,6 +76,19 @@ export function useComposerAttachmentActions(props: {
       await append(key, result.attachments, insertion),
     );
   };
+  const onTakeDraftPhoto = async () => {
+    const key = props.draftKey;
+    if (!key || props.locked) return;
+    const insertion = captureComposerDraftInsertion(key);
+    const result = await takeComposerPhoto({
+      existingCount: countComposerDraftAttachmentsAfterSelection(key, insertion),
+    });
+    report(
+      "Could not attach photo",
+      result.error,
+      await append(key, result.attachments, insertion),
+    );
+  };
   const onPickDraftFiles = async () => {
     const key = props.draftKey;
     if (!key || props.locked) return;
@@ -132,5 +146,11 @@ export function useComposerAttachmentActions(props: {
       );
     }
   };
-  return { onPickDraftMedia, onPickDraftFiles, onNativePasteImages, onNativePasteText };
+  return {
+    onPickDraftMedia,
+    onTakeDraftPhoto,
+    onPickDraftFiles,
+    onNativePasteImages,
+    onNativePasteText,
+  };
 }
