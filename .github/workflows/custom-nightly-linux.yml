@@ -2,15 +2,16 @@ name: Custom nightly Linux desktop
 
 on:
   schedule:
-    # Run after upstream's working day so the fork incorporates the latest
-    # default-branch changes before producing the next desktop build.
-    - cron: "23 03 * * *"
+    # The nightly agent (docs/fork/upstream-sync.md) merges and checks upstream
+    # in main, then starts this workflow. This run is the fallback for a night it
+    # misses: it builds main only when no release exists for main's commit.
+    - cron: "23 09 * * *"
   workflow_dispatch:
     inputs:
       merge_upstream:
-        description: Merge upstream main into this build. Turn off to build the fork as it is.
+        description: Also merge upstream main into this build, unchecked. The nightly agent merges upstream into main itself.
         type: boolean
-        default: true
+        default: false
 
 concurrency:
   group: custom-nightly-linux
@@ -36,6 +37,7 @@ jobs:
       ref: ${{ steps.ref.outputs.ref }}
       upstream: ${{ steps.ref.outputs.upstream }}
       date: ${{ steps.ref.outputs.date }}
+      skip: ${{ steps.ref.outputs.skip }}
     steps:
       - name: Checkout fork
         uses: actions/checkout@v4
@@ -45,9 +47,19 @@ jobs:
       - name: Export synced commit
         id: ref
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          ref="$(git rev-parse HEAD)"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          skip=false
+          if [ "$GITHUB_EVENT_NAME" = schedule ] &&
+            gh api "repos/$GITHUB_REPOSITORY/releases?per_page=20" --jq '.[].target_commitish' | grep -qx "$ref"; then
+            echo "A nightly release already exists for $ref."
+            skip=true
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
           # The desktop and Android builds merge this one upstream commit so both
           # apps in a release ship the same code.
           upstream="$(git ls-remote https://github.com/pingdotgg/t3code.git refs/heads/main | cut -f1)"
@@ -58,6 +70,7 @@ jobs:
   build:
     name: Build and publish Linux nightly
     needs: sync
+    if: needs.sync.outputs.skip != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     outputs:
@@ -74,7 +87,7 @@ jobs:
           fetch-depth: 0
 
       - name: Merge upstream for this build
-        if: github.event_name != 'workflow_dispatch' || inputs.merge_upstream
+        if: inputs.merge_upstream
         shell: bash
         env:
           UPSTREAM_SHA: ${{ needs.sync.outputs.upstream }}
@@ -212,6 +225,7 @@ jobs:
   android:
     name: Build Android nightly
     needs: sync
+    if: needs.sync.outputs.skip != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
@@ -236,7 +250,7 @@ jobs:
           fetch-depth: 0
 
       - name: Merge upstream for this build
-        if: github.event_name != 'workflow_dispatch' || inputs.merge_upstream
+        if: inputs.merge_upstream
         shell: bash
         env:
           UPSTREAM_SHA: ${{ needs.sync.outputs.upstream }}
