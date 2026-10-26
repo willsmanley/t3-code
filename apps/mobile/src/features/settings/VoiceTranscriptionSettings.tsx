@@ -79,22 +79,22 @@ export function VoiceTranscriptionSettings() {
       });
       if (transcript.length === 0) {
         Dialog.alert("No speech was detected.", "The recording is still saved.");
-        return;
+      } else {
+        releaseRecording(recording.audioUri);
+        Dialog.alert("Transcribed", transcript, [
+          { text: "Done", style: "cancel" },
+          { text: "Copy", onPress: () => void Clipboard.setStringAsync(transcript) },
+        ]);
       }
-      releaseRecording(recording.audioUri);
-      Dialog.alert("Transcribed", transcript, [
-        { text: "Done", style: "cancel" },
-        { text: "Copy", onPress: () => void Clipboard.setStringAsync(transcript) },
-      ]);
     } catch (error) {
       Dialog.alert(
         "Could not transcribe",
         error instanceof Error ? error.message : "Try again later.",
       );
-    } finally {
-      setTranscribingId(null);
-      refresh();
     }
+    // React Compiler skips components that use `finally`.
+    setTranscribingId(null);
+    refresh();
   };
   const remove = (recording: SavedRecording) =>
     Dialog.confirm({

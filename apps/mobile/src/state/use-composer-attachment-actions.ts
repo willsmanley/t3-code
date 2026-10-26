@@ -81,14 +81,16 @@ export function useComposerAttachmentActions(props: {
     const key = props.draftKey;
     if (!key || props.locked) return;
     const insertion = captureComposerDraftInsertion(key);
-    const result = await takeComposerPhoto({
-      existingCount: countComposerDraftAttachmentsAfterSelection(key, insertion),
+    await withDraftOperation(key, async (signal) => {
+      const result = await takeComposerPhoto({
+        existingCount: countComposerDraftAttachmentsAfterSelection(key, insertion),
+      });
+      report(
+        "Could not attach photo",
+        result.error,
+        await append(key, signal, result.attachments, insertion),
+      );
     });
-    report(
-      "Could not attach photo",
-      result.error,
-      await append(key, result.attachments, insertion),
-    );
   };
   const onPickDraftFiles = async () => {
     const key = props.draftKey;
