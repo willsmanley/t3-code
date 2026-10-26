@@ -6,6 +6,11 @@ on:
     # default-branch changes before producing the next desktop build.
     - cron: "23 03 * * *"
   workflow_dispatch:
+    inputs:
+      merge_upstream:
+        description: Merge upstream main into this build. Turn off to build the fork as it is.
+        type: boolean
+        default: true
 
 concurrency:
   group: custom-nightly-linux
@@ -69,6 +74,7 @@ jobs:
           fetch-depth: 0
 
       - name: Merge upstream for this build
+        if: github.event_name != 'workflow_dispatch' || inputs.merge_upstream
         shell: bash
         env:
           UPSTREAM_SHA: ${{ needs.sync.outputs.upstream }}
@@ -226,6 +232,7 @@ jobs:
           fetch-depth: 0
 
       - name: Merge upstream for this build
+        if: github.event_name != 'workflow_dispatch' || inputs.merge_upstream
         shell: bash
         env:
           UPSTREAM_SHA: ${{ needs.sync.outputs.upstream }}
