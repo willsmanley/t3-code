@@ -202,3 +202,7 @@ Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/
 
 - Don't verify with browsers or computer use unless the user explicitly agrees or requests it.
 - Security is important, but should not be over-indexed on, especially for dev mode/maintainer-only features.
+
+## Fork
+
+This repository is willsmanley/t3-code, a fork of pingdotgg/t3code. Never push to, open pull requests on, or comment on pingdotgg/t3code. Upstream changes hundreds of files a day, so keep fork changes easy to merge: put new behavior in new files, leave only a one-line hook (an import plus a call or prop) in upstream files, and record each fork feature in [docs/fork/features.md](docs/fork/features.md). A nightly agent merges upstream following [docs/fork/upstream-sync.md](docs/fork/upstream-sync.md).
