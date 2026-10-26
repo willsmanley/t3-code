@@ -142,10 +142,8 @@ export function ProjectArrangementSheet(props: {
   const orderVersion = projects.map((project) => project.key).join("\n");
   // oxlint-disable-next-line t3code/react-effect-budget -- a saved move ends the drag and its pending animation frame
   useEffect(() => {
-    if (frame.current !== null) cancelAnimationFrame(frame.current);
-    frame.current = null;
-    drag.current = null;
-    setPreview(null);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies, react/set-state-in-effect -- A saved move cancels the drag and clears its preview; stop only touches refs and state setters.
+    stop();
   }, [orderVersion]);
   // oxlint-disable-next-line t3code/react-effect-budget -- cancels a pending animation frame on unmount
   useEffect(
@@ -193,6 +191,7 @@ export function ProjectArrangementSheet(props: {
     };
     setPreview({ ...drag.current });
     update(0);
+    // oxlint-disable-next-line react/purity -- runs in an event handler (oxc#27309)
     let last = performance.now();
     // Scrolls while a dragged row is held near the top or bottom edge.
     const tick = () => {
