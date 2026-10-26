@@ -35,6 +35,7 @@ export function VoiceTranscriptionSettings() {
   const [recordings, setRecordings] = useState<ReadonlyArray<SavedRecording>>([]);
   const [transcribingId, setTranscribingId] = useState<string | null>(null);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- reads whether a key is saved in secure storage
   useEffect(() => {
     void readElevenLabsApiKey().then(
       (key) => setHasKey(key !== null),

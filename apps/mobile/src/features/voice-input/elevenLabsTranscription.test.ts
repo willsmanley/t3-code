@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   saveTranscript: vi.fn<(uri: string, transcript: string) => Promise<void>>(),
 }));
 
-vi.mock("expo-file-system", () => ({ File: class {}, UploadType: { MULTIPART: 1 } }));
+vi.mock("expo-file-system", () => ({ File: vi.fn(), UploadType: { MULTIPART: 1 } }));
 vi.mock("expo-secure-store", () => ({}));
 vi.mock("./savedRecordings", () => ({ saveTranscript: mocks.saveTranscript }));
 

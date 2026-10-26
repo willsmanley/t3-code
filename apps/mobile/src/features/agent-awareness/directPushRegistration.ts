@@ -67,8 +67,10 @@ export function useAgentAwarenessDirectPush(): void {
     () => resolveDirectPushEnvironmentIds(configs, androidDirectPushProjectId()),
     [configs],
   );
+  // oxlint-disable-next-line t3code/react-effect-budget -- publishes the servers to the registration loop outside React
   useEffect(() => {
     setAgentAwarenessDirectPushTarget({ environmentIds, send });
   }, [environmentIds]);
+  // oxlint-disable-next-line t3code/react-effect-budget -- stops direct push registration when the app shell unmounts
   useEffect(() => () => setAgentAwarenessDirectPushTarget(null), []);
 }

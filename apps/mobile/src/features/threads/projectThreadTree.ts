@@ -18,6 +18,7 @@ export const PROJECT_THREAD_TREE_PREVIEW_COUNT = 6;
 export type ThreadStatusDotKind =
   | "approval"
   | "input"
+  | "request"
   | "failed"
   | "limited"
   | "working"
@@ -28,12 +29,13 @@ export type ThreadStatusDotKind =
 const DOT_PRIORITY: Record<ThreadStatusDotKind, number> = {
   approval: 0,
   input: 1,
-  failed: 2,
-  limited: 3,
-  woke: 4,
-  working: 5,
-  waiting: 6,
-  done: 7,
+  request: 2,
+  failed: 3,
+  limited: 4,
+  woke: 5,
+  working: 6,
+  waiting: 7,
+  done: 8,
 };
 
 export function resolveThreadStatusDot(
@@ -103,13 +105,9 @@ interface ProjectGroup {
 }
 
 /**
- * Regroups the flat thread list under project headers, like the desktop
- * project tree. Pass list items built with every shelf expanded and no settled
- * limit: settled and snoozed threads stay in their project instead of a shelf.
- * `projectGroups` maps each environment project to its logical project, so one
- * repository open in several environments shares a header. Projects follow
- * `projectOrder`; one it does not list yet goes above the listed ones, most
- * recently active first.
+ * Regroups the flat list under project headers, like the desktop tree. Pass items built with every
+ * shelf expanded and no settled limit. `projectGroups` maps environment projects to the logical
+ * project sharing a header. Projects follow `projectOrder`; unlisted ones go first, newest first.
  */
 export function buildProjectThreadTreeListItems(input: {
   readonly listItems: ReadonlyArray<ThreadListV2ListItem>;

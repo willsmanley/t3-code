@@ -117,6 +117,7 @@ let legacySnoozeActions: LegacySnoozeActions | null = null;
 
 export function useProvideLegacySnoozeActions(actions: LegacySnoozeActions) {
   const { snoozeThread, unsnoozeThread } = actions;
+  // oxlint-disable-next-line t3code/react-effect-budget -- Publish the sidebar root's actions to menus opened deep below it, and withdraw them on unmount.
   useEffect(() => {
     const provided = { snoozeThread, unsnoozeThread };
     legacySnoozeActions = provided;
@@ -250,6 +251,7 @@ export function LegacySnoozedSection(props: {
     Schema.Boolean,
   );
   const nextWakeAt = snoozed[0]?.snoozedUntil ?? null;
+  // oxlint-disable-next-line t3code/react-effect-budget -- Own the timer that wakes the next snoozed thread back into its project.
   useEffect(() => scheduleSnoozeWake(nextWakeAt, advanceLegacySnoozeClock), [nextWakeAt]);
   if (snoozed.length === 0) return null;
   const projectNameByKey = new Map(
@@ -269,7 +271,6 @@ export function LegacySnoozedSection(props: {
     <SidebarGroup>
       <CollapsibleSectionHeader
         expanded={expanded}
-        tone="info"
         onClick={() => setExpanded((value) => !value)}
         data-testid="sidebar-snoozed-shelf-toggle"
       >

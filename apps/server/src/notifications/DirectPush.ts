@@ -72,14 +72,10 @@ interface DeliveryJob {
 }
 
 /**
- * The relay's Android delivery decision (FcmDeliveries.process) for a single
- * environment. The card is rebuilt from current rows when the delivery runs,
- * so a late retry still shows the newest state, and alerts compare against the
- * card the device last received.
- *
- * Unlike the relay, an alert also needs the thread's phase to differ from the
- * one the device last heard about. A republished state carries a new
- * `updatedAt`, so the phone's own alert-id dedupe cannot catch it.
+ * The relay's Android delivery decision (FcmDeliveries.process) for one environment,
+ * rebuilt from current rows so late retries show the newest state. Unlike the relay,
+ * an alert also needs a phase change since the device's last one: a republished state
+ * has a new `updatedAt`, so the phone's alert-id dedupe cannot catch it.
  */
 export function resolveDirectPushDelivery(input: {
   readonly deviceId: string;

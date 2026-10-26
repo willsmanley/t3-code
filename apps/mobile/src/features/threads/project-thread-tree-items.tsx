@@ -30,6 +30,11 @@ const STATUS_ICON: Record<
     tint: "accent-adaptive-indigo-600-300",
     label: "Needs input",
   },
+  request: {
+    name: "person.crop.circle",
+    tint: "accent-adaptive-fuchsia-600-300",
+    label: "Guest request",
+  },
   failed: { name: "exclamationmark.circle", tint: "accent-danger-foreground", label: "Failed" },
   limited: {
     name: "exclamationmark.circle",

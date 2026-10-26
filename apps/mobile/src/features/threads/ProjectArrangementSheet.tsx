@@ -88,6 +88,7 @@ function DragHandle(
   },
 ) {
   const [drag] = useState(createDragGesture);
+  // oxlint-disable-next-line t3code/react-effect-budget -- the gesture runs outside React and needs the latest handlers
   useEffect(() => {
     drag.setHandlers(props);
   });
@@ -139,12 +140,14 @@ export function ProjectArrangementSheet(props: {
     setPreview(null);
   }
   const orderVersion = projects.map((project) => project.key).join("\n");
+  // oxlint-disable-next-line t3code/react-effect-budget -- a saved move ends the drag and its pending animation frame
   useEffect(() => {
     if (frame.current !== null) cancelAnimationFrame(frame.current);
     frame.current = null;
     drag.current = null;
     setPreview(null);
   }, [orderVersion]);
+  // oxlint-disable-next-line t3code/react-effect-budget -- cancels a pending animation frame on unmount
   useEffect(
     () => () => {
       if (frame.current !== null) cancelAnimationFrame(frame.current);

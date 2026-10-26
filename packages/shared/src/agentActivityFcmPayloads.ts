@@ -134,8 +134,7 @@ export function androidAlertForAggregate(input: {
     };
   }
   return {
-    // Every contributing queue job identifies the same group, including after
-    // retries or a different database row order. The native handler deduplicates it.
+    // Stable group IDs let the native handler deduplicate across jobs, retries, and row orders.
     alert_id: JSON.stringify(
       activities
         .map((row) => [row.environmentId, row.threadId, row.phase, row.updatedAt])
@@ -143,8 +142,7 @@ export function androidAlertForAggregate(input: {
     ),
     alert_title: alert.title,
     alert_body: alert.body,
-    // A multi-thread alert targets the overview so one visible thread cannot
-    // suppress notifications for the other threads in the group.
+    // Target the overview so one visible thread cannot suppress other threads' alerts.
     alert_path: "/",
   };
 }

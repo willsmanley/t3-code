@@ -83,6 +83,7 @@ export function useRememberProjectOrder(
   const unseen = projectTree.loaded ? visibleProjectKeys.filter((key) => !known.has(key)) : [];
   // A string key, so a rebuilt list with the same projects does not save again.
   const unseenJson = unseen.length === 0 ? null : JSON.stringify(unseen);
+  // oxlint-disable-next-line t3code/react-effect-budget -- saves newly shown projects to the persisted order
   useEffect(() => {
     if (unseenJson === null) return;
     const keys: string[] = JSON.parse(unseenJson);
