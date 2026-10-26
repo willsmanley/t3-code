@@ -84,9 +84,13 @@ jobs:
           git config user.email "t3code-nightly[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/pingdotgg/t3code.git
           git fetch --no-tags upstream "$UPSTREAM_SHA"
-          # Keep the fork's intentional sidebar surface when upstream changes
-          # the same files so a conflict cannot skip the nightly runtime.
-          git merge -X ours --no-edit FETCH_HEAD
+          # Keeping the fork's side of each conflict (-X ours) left code that no
+          # longer compiled. On a conflict, build the fork as it is so the
+          # nightly still ships, and merge upstream into the fork's main by hand.
+          if ! git merge --no-edit FETCH_HEAD; then
+            git merge --abort
+            echo "::warning::Upstream main conflicts with the fork, so this build skips it. Merge upstream into the fork's main to pick it up."
+          fi
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -242,9 +246,13 @@ jobs:
           git config user.email "t3code-nightly[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/pingdotgg/t3code.git
           git fetch --no-tags upstream "$UPSTREAM_SHA"
-          # Keep the fork's intentional sidebar surface when upstream changes
-          # the same files so a conflict cannot skip the nightly runtime.
-          git merge -X ours --no-edit FETCH_HEAD
+          # Keeping the fork's side of each conflict (-X ours) left code that no
+          # longer compiled. On a conflict, build the fork as it is so the
+          # nightly still ships, and merge upstream into the fork's main by hand.
+          if ! git merge --no-edit FETCH_HEAD; then
+            git merge --abort
+            echo "::warning::Upstream main conflicts with the fork, so this build skips it. Merge upstream into the fork's main to pick it up."
+          fi
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
