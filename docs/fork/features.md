@@ -18,6 +18,10 @@ Measurements in the hotspot table are from fork main `ea7c8bf901` and upstream `
 - **Renamed upstream symbols.** `isMissedFixedTimeRun` became `isMissedRun` (Schedule.ts) and
   `webhookDraftErrors` became `scheduleDraftErrors` (web scheduler logic). Renames turn upstream
   edits near those names into conflicts. Prefer keeping the upstream name.
+- **New upstream rules reach fork-owned files.** Upstream adds lint rules and compile checks
+  (React Compiler coverage, effect budgets) often. The merge doesn't touch fork-owned files, so
+  only the check against `origin/main` catches them. Follow upstream's fix or suppression pattern
+  in the matching upstream file.
 - **Rewrites drop fork edits quietly.** When upstream rewrites a file the fork edited, a merge can
   keep upstream's version with no conflict. That is how the scheduler's time-zone and one-off hints
   left `packages/provider-core/src/server/orchestrationInstructions.ts`; the MCP tool descriptions
