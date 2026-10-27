@@ -15,6 +15,10 @@ Measurements in the hotspot table are from fork main `ea7c8bf901` and upstream `
   three upstream services need `ServerSettingsService`. Direct push (F6) makes `ws.ts` and
   `AgentAwarenessRelay` need `DirectPush`. So any new upstream test or harness that builds those
   layers will fail to typecheck until it gets `ServerSettings.layerTest()` or a `DirectPush` mock.
+- **The agent context budget.** `AgentContextBudget.test.ts` compares the measured size of the
+  MCP tool list and agent instructions with `apps/server/src/provider/agentContextBudget.json`
+  exactly. The fork's scheduling fields make the tool list larger, so after each merge set the
+  file to the values the test reports, and keep fork tool text short.
 - **Renamed upstream symbols.** `isMissedFixedTimeRun` became `isMissedRun` (Schedule.ts) and
   `webhookDraftErrors` became `scheduleDraftErrors` (web scheduler logic). Renames turn upstream
   edits near those names into conflicts. Prefer keeping the upstream name.
@@ -46,8 +50,9 @@ Touch points:
 
 - `apps/web/src/env.ts`: adds `forceLegacySidebar` (reads `VITE_T3CODE_LEGACY_SIDEBAR`).
 - `apps/web/vite.config.ts`, `apps/web/src/vite-env.d.ts`: define and type that variable.
-- `apps/web/src/components/AppSidebarLayout.tsx`, `apps/web/src/routes/_chat.tsx`:
-  `useLegacySidebarEnabled() || isElectron || forceLegacySidebar`.
+- `apps/web/src/components/AppSidebarLayout.tsx`: `useLegacySidebarEnabled() || isElectron || forceLegacySidebar`.
+- `apps/web/src/shortcuts/chatRouteCommands.ts`: the `chat.new` shortcut treats desktop as using
+  the project sidebar (`legacySidebarEnabled || isElectron || forceLegacySidebar`).
 - `apps/web/src/components/LegacySidebar.tsx`: removes `ProjectFavicon`, `EnvironmentMachineIcon`
   and the remote-environment label code from thread rows and project headers. Moves
   `ThreadStatusLabel compact` into a left column. Uses `<RelativeTime compact>`. Forces
@@ -57,7 +62,7 @@ Touch points:
 
 Verify (no tests cover this):
 
-- `grep -n "isElectron || forceLegacySidebar" apps/web/src/components/AppSidebarLayout.tsx apps/web/src/routes/_chat.tsx` (one hit each).
+- `grep -n "isElectron || forceLegacySidebar" apps/web/src/components/AppSidebarLayout.tsx apps/web/src/shortcuts/chatRouteCommands.ts` (one hit each).
 - `grep -n 'isElectron ? "manual"' apps/web/src/components/LegacySidebar.tsx` (one hit).
 - `grep -n "ProjectFavicon\|EnvironmentMachineIcon" apps/web/src/components/LegacySidebar.tsx` (no hits).
 - Look at the desktop nightly: project tree, small dots, compact times.
@@ -128,7 +133,7 @@ What it does: a scheduled task can (a) run a fixed-time schedule in a chosen IAN
 (b) limit an interval task to active hours, (c) run once at a set time, and (d) stop after N runs
 or at an end time. A task that ends stays listed but switched off, labeled Done, Missed or Ended.
 All of this works in web settings, mobile settings and the agent MCP tools
-(`schedule_task`, `update_scheduled_task`).
+(`schedule_task`, which also updates a task given `scheduledTaskId`).
 
 Fork-owned files: `packages/client-runtime/src/scheduledTaskSchedule.ts` (+ test), the draft
 helpers shared by web and mobile.
@@ -150,7 +155,10 @@ Touch points:
   (+ `ScheduledTaskService.schedule.test.ts`, `ScheduledTaskService.webhook.test.ts`).
 - `apps/server/src/mcp/OrchestratorMcpService.ts`: `runCount` in the summary; a new `at` turns a
   finished one-off back on (+ test).
-- `apps/server/src/mcp/toolkits/orchestrator/tools.ts`: tool descriptions.
+- `apps/server/src/mcp/toolkits/orchestrator/tools.ts`: the `schedule_task` description's
+  time-zone, kept-on-update and one-off hints.
+- `apps/server/src/provider/agentContextBudget.json`: `mcpToolListJsonBytes` is the fork's
+  measured size (see "Merge hazards").
 - `apps/web/src/components/settings/ScheduledTasksSettings.tsx`: Once mode, time zone field,
   active hours, "Stop after N runs / at" fields, `ScheduledStoppedLabel`, a richer
   `scheduleLabel`.
@@ -201,11 +209,13 @@ Touch points:
   RepositoryIdentityResolver and WorkspaceEntries layers.
 - Wiring only (each adds `ServerSettings.layerTest()`): `CheckpointStore.test.ts` (which also has
   a real test), `CheckpointDiffQuery.test.ts`, `WorkspaceFileSystem.test.ts`,
-  `orchestration-v2/testkit/ProviderReplayHarness.ts`, `apps/server/scripts/evaluate-thread-titles.ts`.
+  `orchestration-v2/testkit/ProviderReplayHarness.ts`, `orchestration-v2/ProviderTurnStartService.testkit.ts`
+  (on its VcsDriverRegistry layer), `apps/server/scripts/evaluate-thread-titles.ts`.
 - `apps/web/src/components/settings/ProjectDefaultsSettings.tsx`: the switch row.
   `settingsSearch.ts`: the `git-integration` search entry.
   `apps/web/src/components/chat/ThreadDetailsPanel.tsx`: hides "Version Control" when off.
-- `apps/mobile/src/features/settings/SettingsServerControlsRouteScreen.tsx`: the switch row.
+- `apps/mobile/src/features/settings/SettingsServerControlsRouteScreen.tsx`: a "Git" section with
+  the switch row, first on the `source-control` page.
 - `docs/user/source-control.md`.
 
 Verify:
@@ -341,9 +351,12 @@ upstream's `voiceTranscription.ts`, so the Android build picks it up without any
 
 Touch points:
 
-- `apps/mobile/src/features/voice-input/VoiceInputProvider.tsx`: Android recording options,
-  `RECORDING_LIMIT_SECONDS`, the background-recording flag, `releaseRecording` instead of delete,
-  no cancel on background while recording, and pruning saved transcripts at launch.
+- `apps/mobile/src/features/voice-input/VoiceInputProvider.tsx`: Android recording options and
+  `RECORDING_LIMIT_SECONDS`; inside `voiceInputAtom`, the session's `recordingLimitSeconds`, the
+  background-recording flag, `releaseRecording` instead of delete, no cancel on background while
+  recording, and pruning saved transcripts once per launch.
+- `apps/mobile/src/features/voice-input/voiceInputSession.ts`: the elapsed-time clamp uses
+  `recordingLimitSeconds`, so the Android timer runs past five minutes.
 - `apps/mobile/src/lib/audioSession.ts`: an `allowsBackgroundRecording` parameter.
 - `packages/client-runtime/src/voice-input/controller.ts`: a `recordingLimitSeconds` dependency;
   passes `VoiceTranscriptionError` messages through (+ `controller.test.ts`).
@@ -362,8 +375,9 @@ Verify:
   (expect `.ts`, `.ios.ts` and `.android.ts`). If upstream adds its own `voiceTranscription.android.ts`
   or renames the function, the override breaks.
 - `grep -n "recordAudioAndroid: true\|enableBackgroundRecording: true" apps/mobile/app.config.ts` (two hits).
-- `grep -n "recordingLimitSeconds\|releaseRecording\|pruneSavedTranscripts" apps/mobile/src/features/voice-input/VoiceInputProvider.tsx`
-  (all three still wired in).
+- `grep -n "recordingLimitSeconds\|releaseRecording(uri)\|pruneSavedTranscripts()" apps/mobile/src/features/voice-input/VoiceInputProvider.tsx`
+  (all three still wired in), and
+  `grep -n "dependencies.recordingLimitSeconds" apps/mobile/src/features/voice-input/voiceInputSession.ts`.
 
 ### F9. Fork a conversation from the mobile thread list
 
