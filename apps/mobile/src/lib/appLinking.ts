@@ -1,5 +1,7 @@
 import type { NavigationState, PartialState } from "@react-navigation/native";
 
+import { isAssistantLaunchUrl } from "../features/assistant/assistantLaunch";
+
 /**
  * The Expo dev client launches the app via
  * <scheme>://expo-development-client/?url=<packager> — that URL addresses
@@ -10,6 +12,7 @@ export function shouldHandleAppLink(url: string, cloudConfigured: boolean): bool
   return (
     !url.includes("expo-development-client") &&
     !url.includes("://expo-sharing") &&
+    !isAssistantLaunchUrl(url) &&
     !/^t3code(-dev|-preview)?:\/*$/.test(url) &&
     (cloudConfigured || !CLOUD_ONLY_LINK_PATH.test(url.split(/[?#]/)[0] ?? ""))
   );

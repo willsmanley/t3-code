@@ -140,6 +140,7 @@ import {
   SettingsLegalDocumentExternalHeaderButton,
 } from "./features/settings/components/SettingsLegalDocumentRouteScreen";
 import { useAppShortcuts } from "./features/shortcuts/useAppShortcuts";
+import { useAssistantLaunch } from "./features/assistant/useAssistantLaunch";
 import { useIncomingShare } from "./features/sharing/IncomingShareProvider";
 import {
   EMPTY_INCOMING_SHARE_PRESENTATION_STATE,
@@ -526,6 +527,7 @@ function RootStackLayout(props: {
   useAgentNotificationNavigation(workspaceLocation.pathname);
   useConnectOnboardingNavigation();
   useAppShortcuts(props.state);
+  useAssistantLaunch();
   useEffect(() => {
     const transition = transitionIncomingSharePresentation(sharePresentationRef.current, {
       isShareSheetPresented: isDraftThreadRoute(props.state.routes[props.state.index]),

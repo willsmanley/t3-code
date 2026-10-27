@@ -465,26 +465,37 @@ If upstream adds its own retry here, drop this one.
 ### F13. T3 Code as Android's digital assistant (mobile, Android only)
 
 What it does: the app shows up in Settings > Apps > Default apps > Digital assistant app. When it
-is chosen there, holding the power button (or swiping up from a bottom corner) opens New task,
-the same screen as the launcher's "New task" shortcut. Android only needs an activity that
+is chosen there, holding the power button (or swiping up from a bottom corner) opens a new thread
+in the build's assistant project, a fresh draft each time. The nightly sets that project's folder
+with `T3CODE_ASSISTANT_PROJECT_ROOT` (Wills's Personal project). With no folder set, or no
+connected project at it, it opens Choose project instead. Android only needs an activity that
 handles `ACTION_ASSIST`; there is no voice interaction service, so there's no overlay on top of
 the current app and no screen context.
 
-Fork-owned files: `apps/mobile/plugins/withAndroidAssistant.cjs`. It adds an `ASSIST` intent
-filter to `MainActivity`, and `MainActivity` code that turns an assist launch into a
-`<scheme>://new` link before React Native reads the launch URL (and in `onNewIntent`).
+Fork-owned files: `apps/mobile/plugins/withAndroidAssistant.cjs` adds an `ASSIST` intent filter to
+`MainActivity`, plus code that turns an assist launch into a `<scheme>://assist` link (in
+`onCreate`, before React Native reads the launch URL, and in `onNewIntent`).
+`apps/mobile/src/features/assistant/` holds `useAssistantLaunch.ts`, which waits for the project
+and opens the draft, and `assistantLaunch.ts` (+ test).
 
-Touch points: `apps/mobile/app.config.ts` (one plugin line).
+Touch points:
+
+- `apps/mobile/app.config.ts`: the plugin line and `extra.assistantProjectRoot`.
+- `apps/mobile/src/Stack.tsx`: `useAssistantLaunch()` next to `useAppShortcuts(props.state)`.
+- `apps/mobile/src/lib/appLinking.ts`: `shouldHandleAppLink` ignores the assist link, so the
+  router doesn't open NotFound for it.
+- `.github/workflows/custom-nightly-linux.yml`: `T3CODE_ASSISTANT_PROJECT_ROOT` in the Android job.
 
 Verify:
 
+- `vp test run apps/mobile/src/features/assistant/assistantLaunch.test.ts`
 - After `expo prebuild --platform android`: `grep -n "intent.action.ASSIST" apps/mobile/android/app/src/main/AndroidManifest.xml`
-  (one hit) and `grep -c "assistIntentAsNewTaskLink" apps/mobile/android/app/src/main/java/com/*/*/MainActivity.kt` (three).
+  (one hit) and `grep -c "assistIntentAsLink" apps/mobile/android/app/src/main/java/com/*/*/MainActivity.kt` (three).
+  The prebuild throws if upstream's MainActivity template loses an anchor.
 - On a device or emulator with the APK installed:
   `adb shell cmd role add-role-holder android.app.role.ASSISTANT com.willsmanley.t3code`, then
-  `adb shell input keyevent KEYCODE_ASSIST` opens Choose project, both when the app is closed and
-  when it is in the background. The prebuild throws if upstream's MainActivity template loses an
-  anchor.
+  `adb shell input keyevent KEYCODE_ASSIST` opens a new thread in the assistant project, both when
+  the app is closed and when it is in the background.
 
 ### C1. Nightly build and release workflow (CI)
 

@@ -458,6 +458,8 @@ const config: ExpoConfig = {
     ...(androidDirectPushProjectId
       ? { androidDirectPush: { firebaseProjectId: androidDirectPushProjectId } }
       : {}),
+    // The fork's Android assistant starts new threads in the project at this folder.
+    assistantProjectRoot: repoEnv.T3CODE_ASSISTANT_PROJECT_ROOT?.trim() || null,
     clerk: {
       publishableKey: repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? null,
       jwtTemplate: repoEnv.EXPO_PUBLIC_CLERK_JWT_TEMPLATE ?? null,

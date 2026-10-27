@@ -2,29 +2,29 @@ const { AndroidConfig, withAndroidManifest, withMainActivity } = require("expo/c
 
 // Android lists any app with an ACTION_ASSIST activity under Settings > Default apps >
 // Digital assistant app. Once chosen there, holding the power button or swiping up from a
-// bottom corner opens it. MainActivity turns that launch into the New task link, so the
-// JS router handles it like the launcher's "New task" shortcut.
+// bottom corner opens it. MainActivity turns that launch into the `<scheme>://assist` link,
+// which useAssistantLaunch answers with a new thread.
 
 const ASSIST_ACTION = "android.intent.action.ASSIST";
 const DEFAULT_CATEGORY = "android.intent.category.DEFAULT";
 
-const assistMethods = (newTaskUrl) => `
-  // Opens New task when Android launches the app as the digital assistant;
+const assistMethods = (assistUrl) => `
+  // Opens a new thread when Android launches the app as the digital assistant;
   // added by withAndroidAssistant.
   override fun onNewIntent(intent: Intent) {
-    super.onNewIntent(assistIntentAsNewTaskLink(intent))
+    super.onNewIntent(assistIntentAsLink(intent))
   }
 
-  private fun assistIntentAsNewTaskLink(intent: Intent): Intent =
+  private fun assistIntentAsLink(intent: Intent): Intent =
     if (intent.action == Intent.ACTION_ASSIST) {
-      Intent(Intent.ACTION_VIEW, Uri.parse("${newTaskUrl}"))
+      Intent(Intent.ACTION_VIEW, Uri.parse("${assistUrl}"))
     } else {
       intent
     }
 `;
 
-// Before super.onCreate, so React Native's initial URL is the New task link.
-const ASSIST_ON_CREATE_CALL = `intent = assistIntentAsNewTaskLink(intent)
+// Before super.onCreate, so React Native's initial URL is the assist link.
+const ASSIST_ON_CREATE_CALL = `intent = assistIntentAsLink(intent)
     `;
 
 function insertAt(contents, index, insertion) {
@@ -65,7 +65,7 @@ function withAssistLaunchLink(config) {
     if (nextConfig.modResults.language !== "kt") {
       throw new Error("withAndroidAssistant: MainActivity must be Kotlin.");
     }
-    if (contents.includes("assistIntentAsNewTaskLink")) {
+    if (contents.includes("assistIntentAsLink")) {
       return nextConfig;
     }
 
@@ -80,7 +80,7 @@ function withAssistLaunchLink(config) {
       contents,
       indexOrThrow(contents, classDeclaration, "the MainActivity class declaration") +
         classDeclaration.length,
-      assistMethods(`${scheme}://new`),
+      assistMethods(`${scheme}://assist`),
     );
     contents = insertAt(
       contents,
