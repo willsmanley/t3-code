@@ -54,7 +54,12 @@ export const layerRealGit = GitWorkflow.layer.pipe(
       ServerSettings.layerTest(),
     ),
   ),
-  Layer.provide(VcsDriverRegistry.layer.pipe(Layer.provide(VcsProjectConfig.layer))),
+  Layer.provide(
+    VcsDriverRegistry.layer.pipe(
+      Layer.provide(VcsProjectConfig.layer),
+      Layer.provide(ServerSettings.layerTest()),
+    ),
+  ),
   Layer.provideMerge(GitVcsDriver.layer),
   Layer.provideMerge(VcsProcess.layer),
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-recreate-" })),
