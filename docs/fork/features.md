@@ -462,6 +462,30 @@ Touch points: `packages/client-runtime/src/state/shell.ts` (+ `shell-sync.test.t
 Verify: `vp test run packages/client-runtime/src/state/shell-sync.test.ts -t "resubscribes after a defect"`.
 If upstream adds its own retry here, drop this one.
 
+### F13. T3 Code as Android's digital assistant (mobile, Android only)
+
+What it does: the app shows up in Settings > Apps > Default apps > Digital assistant app. When it
+is chosen there, holding the power button (or swiping up from a bottom corner) opens New task,
+the same screen as the launcher's "New task" shortcut. Android only needs an activity that
+handles `ACTION_ASSIST`; there is no voice interaction service, so there's no overlay on top of
+the current app and no screen context.
+
+Fork-owned files: `apps/mobile/plugins/withAndroidAssistant.cjs`. It adds an `ASSIST` intent
+filter to `MainActivity`, and `MainActivity` code that turns an assist launch into a
+`<scheme>://new` link before React Native reads the launch URL (and in `onNewIntent`).
+
+Touch points: `apps/mobile/app.config.ts` (one plugin line).
+
+Verify:
+
+- After `expo prebuild --platform android`: `grep -n "intent.action.ASSIST" apps/mobile/android/app/src/main/AndroidManifest.xml`
+  (one hit) and `grep -c "assistIntentAsNewTaskLink" apps/mobile/android/app/src/main/java/com/*/*/MainActivity.kt` (three).
+- On a device or emulator with the APK installed:
+  `adb shell cmd role add-role-holder android.app.role.ASSISTANT com.willsmanley.t3code`, then
+  `adb shell input keyevent KEYCODE_ASSIST` opens Choose project, both when the app is closed and
+  when it is in the background. The prebuild throws if upstream's MainActivity template loses an
+  anchor.
+
 ### C1. Nightly build and release workflow (CI)
 
 Fork-owned: `.github/workflows/custom-nightly-linux.yml` (`5bffb2ec49` through `f9bc6b8b22`,
