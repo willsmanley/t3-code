@@ -86,13 +86,16 @@ function agentName(driver: string): string | undefined {
 export function nativeSession(ref: NativeRef | null | undefined): SessionKey | undefined {
   if (ref?.strength !== "strong" || !ref.nativeId) return undefined;
   const agent = agentName(ref.driver);
-  // Pi stores a file locator here, while its ASR identity is the session header's id.
-  if (!agent || (agent === "pi" && /[/\\]/u.test(ref.nativeId))) return undefined;
+  // Only these adapter contracts establish ASR session identity; Pi refs are file locators.
+  if (!agent || !["codex", "claudeAgent"].includes(ref.driver)) return undefined;
+  if (ref.driver === "claudeAgent" && ref.nativeId.includes(":agent:")) return undefined;
   return { agent, sessionId: ref.nativeId };
 }
 
 const callId = (item: Item) =>
-  item.nativeItemRef?.strength === "strong" && item.nativeItemRef.nativeId
+  item.nativeItemRef?.strength === "strong" &&
+  ["codex", "claudeAgent"].includes(item.nativeItemRef.driver) &&
+  item.nativeItemRef.nativeId
     ? item.nativeItemRef.nativeId
     : item.id;
 const toolTypes = new Set([
@@ -110,12 +113,21 @@ const decision = (value: string) =>
     acceptAlways: "allow_always",
     decline: "reject_once",
     cancel: "cancelled",
-  })[value] ?? vendor(value);
+  })[value];
 const optionKind = (value: string) =>
-  ({ accept: "allow_once", acceptAlways: "allow_always", decline: "reject_once" })[value] ??
-  vendor(decision(value));
-const runState = (status: string): Fields =>
   ({
+    accept: "allow_once",
+    acceptForSession: "allow_session",
+    acceptAlways: "allow_always",
+    decline: "reject_once",
+    cancel: "_codes.t3/cancelled",
+  })[value];
+function runState(status: string): Fields {
+  const state = {
+    preparing: { state: "_codes.t3/preparing" },
+    starting: { state: "_codes.t3/starting" },
+    pending: { state: "_codes.t3/pending" },
+    superseded: { state: "_codes.t3/superseded" },
     queued: { state: "queued" },
     running: { state: "running" },
     waiting: { state: "requires_action" },
@@ -123,7 +135,10 @@ const runState = (status: string): Fields =>
     interrupted: { state: "idle", stopReason: "cancelled" },
     cancelled: { state: "idle", stopReason: "cancelled" },
     failed: { state: "idle", stopReason: "error" },
-  })[status] ?? { state: vendor(status) };
+  }[status];
+  if (!state) throw new Error("Unsupported source execution state.");
+  return state;
+}
 
 function triggerFor(
   message: Message,
@@ -192,6 +207,7 @@ export function createThreadMapper(input: {
   namespace: string;
   producerVersion: string;
   producerInstance: string;
+  observedAt: string;
   schedules: Map<string, Fields>;
   mirror?: SessionKey;
   write: (record: AsrRecord) => void;
@@ -225,6 +241,9 @@ export function createThreadMapper(input: {
   const turnsSeen = new Set<string>();
   const runTriggers = new Map<string, Fields>();
   let seq = 0;
+  let sourceEventId: string | undefined;
+  let sourceItemId: string | undefined;
+  const requestCommands = new Map<string, string>();
   let lastContext: string | null = null;
   const runPredecessors = new Map<string, string | null>();
   const references = new Map<string, SessionKey>();
@@ -242,6 +261,7 @@ export function createThreadMapper(input: {
         nativeId: attempt.nativeThreadId,
         strength: "strong",
       });
+    if (sourceEventId) return undefined;
     const current = nativeSession(provider.nativeThreadRef);
     // Recovery can reuse a provider-thread row for a different native session.
     if (
@@ -295,12 +315,18 @@ export function createThreadMapper(input: {
   }
 
   function emit(record: AsrRecord, key: string, revise = false) {
-    const cleaned = fields(record) as AsrRecord;
+    const cleaned = fields({
+      ...record,
+      ...(sourceEventId ? {} : { assembly: snapshot }),
+    }) as AsrRecord;
     const revisionKey = `${record.type}:${key}`;
     const previous = revisions.get(revisionKey);
     const json = JSON.stringify(cleaned);
     if (revise && previous?.json === json) return previous.id;
-    const id = recordId(record.type, `${key}:${revise ? seq : "snapshot"}`);
+    const id = recordId(
+      record.type,
+      `${key}:${revise ? (sourceEventId ?? sourceItemId ?? "snapshot") : "snapshot"}`,
+    );
     const turnId = typeof record.turnId === "string" ? record.turnId : undefined;
     const trigger =
       turnId && !turnsSeen.has(turnId) && record.type !== "compaction"
@@ -311,7 +337,6 @@ export function createThreadMapper(input: {
       ...cleaned,
       id,
       seq: seq++,
-      idScope: "capture",
       ...(trigger ? { trigger } : {}),
       ...(revise && previous ? { supersedes: previous.id } : {}),
     });
@@ -367,6 +392,7 @@ export function createThreadMapper(input: {
     "inference",
     "cost",
     "revision_history",
+    "order",
     "tool_result.content",
     "tool_result.raw",
     "reasoning.signature",
@@ -379,7 +405,6 @@ export function createThreadMapper(input: {
     "_codes.t3/tool_name",
     "_codes.t3/reasoning_visibility",
     "_codes.t3/approval_resolver",
-    "_codes.t3/display_audit_order",
     "_codes.t3/unmapped_metadata",
     "_codes.t3/continuation_history",
   ];
@@ -393,7 +418,7 @@ export function createThreadMapper(input: {
     type: "session",
     seq: seq++,
     id: "header",
-    idScope: "capture",
+    observedAt: input.observedAt,
     formatVersion: "0.1",
     agent: { name: "t3-code" },
     namespace,
@@ -419,7 +444,7 @@ export function createThreadMapper(input: {
       contextTransfer: source.transfers,
       export: {
         order:
-          "turn-item ordinal; surviving audit events at the observed item frontier; unpositioned messages last",
+          "surviving audit events by sequence; snapshot tail: turn items by ordinal, then other current rows by table and rowid; no timestamp merge",
         snapshot: true,
       },
       nativeThreadRefs: source.providerThreads.map((provider) => ({
@@ -522,11 +547,13 @@ export function createThreadMapper(input: {
         _meta: meta({
           resolutionCommandId: commandId,
           responseCapability: request.responseCapability,
+          permissionOptions: item?.options,
+          permissionDecision: request.decision,
         }),
         options: item?.options?.map((option) => ({
           optionId: option.decision,
           name: option.label,
-          kind: optionKind(option.decision),
+          ...(optionKind(option.decision) ? { kind: optionKind(option.decision) } : {}),
         })),
       },
       request.id,
@@ -583,6 +610,9 @@ export function createThreadMapper(input: {
             ? false
             : undefined,
         ...(answers === undefined ? {} : { answers: normalizedAnswers }),
+        ...(sourceEventId && answers
+          ? { native: { format: "t3code-statev2-sqlite", record: request } }
+          : {}),
         _meta: meta({
           responseCapability: request.responseCapability,
           resolutionCommandId: commandId,
@@ -612,7 +642,8 @@ export function createThreadMapper(input: {
 
   function requestRecord(request: Request, ts?: string, commandId?: string) {
     handled.add(`request:${request.id}`);
-    const item = requestItems.get(request.id);
+    if (commandId) requestCommands.set(request.id, commandId);
+    const item = sourceEventId ? undefined : requestItems.get(request.id);
     if (request.kind === "user_input" || item?.type === "user_input_request")
       question(request, item?.type === "user_input_request" ? item : undefined, ts, commandId);
     else if (
@@ -658,9 +689,11 @@ export function createThreadMapper(input: {
             ? "stopped"
             : ["running", "completed", "failed"].includes(child.status)
               ? child.status
-              : vendor(child.status),
+              : undefined,
         _meta: meta({
+          nativeTaskRef: child.nativeTaskRef,
           subagent: fields({
+            status: child.status,
             origin: child.origin,
             completionWake: child.completionWake,
             completionDelivery: child.completionDelivery,
@@ -677,7 +710,9 @@ export function createThreadMapper(input: {
 
   function checkpointRecord(checkpoint: Checkpoint, ts?: string) {
     handled.add(`checkpoint:${checkpoint.id}`);
-    const scope = source.scopes.find((entry) => entry.id === checkpoint.scopeId);
+    const scope = sourceEventId
+      ? undefined
+      : source.scopes.find((entry) => entry.id === checkpoint.scopeId);
     emit(
       {
         type: "checkpoint",
@@ -688,7 +723,12 @@ export function createThreadMapper(input: {
         ts: ts ?? checkpoint.capturedAt,
         root: "workspace",
         files: checkpoint.files.map((file) => ({ path: file.path })),
-        _meta: meta({ scope, fileStats: checkpoint.files }),
+        _meta: meta({
+          scope,
+          fileStats: checkpoint.files.map((file) =>
+            fields({ path: file.path, additions: file.additions, deletions: file.deletions }),
+          ),
+        }),
       },
       checkpoint.id,
       true,
@@ -705,15 +745,17 @@ export function createThreadMapper(input: {
       executedBy: ref
         ? {
             session: addReference(ref),
-            ...(turn?.nativeTurnRef?.strength === "strong" && turn.nativeTurnRef.nativeId
+            ...(turn?.nativeTurnRef?.driver === "codex" &&
+            turn.nativeTurnRef.strength === "strong" &&
+            turn.nativeTurnRef.nativeId
               ? { turnId: turn.nativeTurnRef.nativeId }
               : {}),
           }
         : undefined,
-      _meta:
-        turn?.nativeTurnRef && turn.nativeTurnRef.strength !== "strong"
-          ? meta({ nativeTurnRef: turn.nativeTurnRef })
-          : undefined,
+      _meta: meta({
+        nativeThreadRef: provider?.nativeThreadRef,
+        nativeTurnRef: turn?.nativeTurnRef,
+      }),
     });
   }
 
@@ -738,6 +780,7 @@ export function createThreadMapper(input: {
           ? `turnId=${run.restartContinuationOfRunId}`
           : undefined,
         _meta: meta({
+          runStatus: run.status,
           run: fields({
             queuePosition: run.queuePosition,
             queueHeld: run.queueHeld,
@@ -755,7 +798,10 @@ export function createThreadMapper(input: {
   function attemptRecord(attempt: Attempt, ts?: string) {
     handled.add(`attempt:${attempt.id}`);
     const provider = providers.get(attempt.providerThreadId);
-    const turn = attempt.providerTurnId ? providerTurns.get(attempt.providerTurnId) : undefined;
+    const turn =
+      !sourceEventId && attempt.providerTurnId
+        ? providerTurns.get(attempt.providerTurnId)
+        : undefined;
     emit(
       {
         type: "state",
@@ -766,8 +812,8 @@ export function createThreadMapper(input: {
         ...execution(provider, turn, attempt),
         _meta: meta({
           attemptStatus: attempt.status,
-          nativeTurnRef:
-            turn?.nativeTurnRef?.strength !== "strong" ? turn?.nativeTurnRef : undefined,
+          nativeThreadRef: sourceEventId ? undefined : provider?.nativeThreadRef,
+          nativeTurnRef: turn?.nativeTurnRef,
         }),
       },
       attempt.id,
@@ -784,7 +830,9 @@ export function createThreadMapper(input: {
       item.type === "command_execution"
         ? { inputText: item.input }
         : isDynamic
-          ? { input: item.input }
+          ? source.inputTexts.has(item.id)
+            ? { inputText: source.inputTexts.get(item.id) }
+            : { input: item.input }
           : item.type === "file_search"
             ? { input: fields({ pattern: item.pattern }) }
             : item.type === "web_search"
@@ -826,8 +874,10 @@ export function createThreadMapper(input: {
         type: "tool_result",
         ...base,
         ts: item.completedAt,
-        callId: id,
-        linkage: (callCounts.get(id) ?? 0) > 1 ? "ambiguous" : "exact",
+        ...((callCounts.get(id) ?? 0) > 1
+          ? { linkage: "ambiguous" }
+          : { callId: id, linkage: "exact" }),
+        _meta: meta({ nativeItemRef: item.nativeItemRef }),
         status: item.status,
         capture: {
           content: absent,
@@ -970,6 +1020,7 @@ export function createThreadMapper(input: {
   }
 
   function itemRecord(item: Item) {
+    sourceItemId = item.id;
     const base = { turnId: item.runId, ts: item.updatedAt, assembly: snapshot };
     if (item.type === "user_message" || item.type === "assistant_message") {
       const message = messages.get(item.messageId);
@@ -999,9 +1050,7 @@ export function createThreadMapper(input: {
               : item.id,
           role: "assistant",
           author: "model",
-          content: [{ type: "reasoning" }],
-          displayContent: text(item.text),
-          displayCorrespondence: "native",
+          content: [{ type: "reasoning", text: item.text }],
           status: item.streaming ? "partial" : "complete",
           ...copy(item),
         },
@@ -1020,7 +1069,10 @@ export function createThreadMapper(input: {
           handlerKind: "command",
           name: item.title,
           command: item.input,
-          status: terminalStatuses.has(item.status) ? item.status : vendor(item.status),
+          status: ["completed", "failed", "cancelled"].includes(item.status)
+            ? item.status
+            : "unknown",
+          _meta: meta({ hookStatus: item.status }),
           exitCode: item.exitCode,
           output: item.output === undefined ? undefined : text(item.output),
         },
@@ -1170,6 +1222,7 @@ export function createThreadMapper(input: {
 
   function eventRecord(stored: StoredEvent) {
     const { event } = stored;
+    sourceEventId = event.id;
     const ts = event.occurredAt;
     switch (event.type) {
       case "run.created":
@@ -1249,26 +1302,34 @@ export function createThreadMapper(input: {
       default:
         break;
     }
+    sourceEventId = undefined;
   }
 
   function finish() {
-    // This is the read model's fallback order for messages without a turn-item ordinal.
-    for (const message of source.messages
-      .filter((entry) => !representedMessages.has(entry.id))
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)))
+    sourceItemId = undefined;
+    for (const message of source.messages.filter((entry) => !representedMessages.has(entry.id)))
       messageRecord(message);
     for (const request of source.requests)
-      if (!handled.has(`request:${request.id}`)) requestRecord(request);
-    for (const child of source.subagents)
-      if (!handled.has(`subagent:${child.id}`)) subagentRecord(child, child.updatedAt);
-    for (const checkpoint of source.checkpoints)
-      if (!handled.has(`checkpoint:${checkpoint.id}`)) checkpointRecord(checkpoint);
-    for (const run of source.runs) if (!handled.has(`run:${run.id}`)) runRecord(run);
-    for (const attempt of source.attempts)
-      if (!handled.has(`attempt:${attempt.id}`)) attemptRecord(attempt);
+      requestRecord(
+        request,
+        request.resolvedAt ?? request.createdAt,
+        requestCommands.get(request.id),
+      );
+    for (const child of source.subagents) subagentRecord(child, child.updatedAt);
+    for (const checkpoint of source.checkpoints) checkpointRecord(checkpoint);
+    for (const run of source.runs) runRecord(run);
+    for (const attempt of source.attempts) attemptRecord(attempt);
     for (const handoff of source.handoffs)
       if (!handled.has(`handoff:${handoff.id}`)) handoffRecord(handoff);
     for (const provider of source.providerThreads) {
+      if (provider.nativeThreadRef)
+        emit(
+          {
+            type: "codes.t3/provider_identity",
+            _meta: meta({ nativeThreadRef: provider.nativeThreadRef }),
+          },
+          provider.id,
+        );
       if (provider.goal)
         emit(
           {
@@ -1375,7 +1436,7 @@ export function createThreadMapper(input: {
           scope: group.runId ? "turn" : vendor("provider_turn"),
           cumulative: false,
           includesChildren: false,
-          coverage: complete ? "complete" : "partial",
+          coverage: "partial",
           assembly: snapshot,
           ...(usages.some(Boolean)
             ? {
@@ -1394,11 +1455,15 @@ export function createThreadMapper(input: {
             ? { contextWindow: fields({ used: context.usedTokens, size: context.maxTokens }) }
             : {}),
           _meta: meta({
+            providerUsage: group.turns.flatMap((turn) =>
+              turn.turnTokenUsage
+                ? [{ providerTurnId: turn.id, turnTokenUsage: turn.turnTokenUsage }]
+                : [],
+            ),
             providerTurns: group.turns.map((turn) =>
               fields({
                 id: turn.id,
                 nativeTurnRef: turn.nativeTurnRef,
-                usage: turn.turnTokenUsage,
                 context: turn.tokenUsage,
               }),
             ),

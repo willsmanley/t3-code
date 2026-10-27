@@ -34,14 +34,52 @@ export type Event = typeof OrchestrationV2DomainEventJson.Encoded;
 
 const decoders = new WeakMap<Schema.Constraint, (value: unknown) => unknown>();
 
-function decode<S extends Schema.Constraint>(schema: S, json: unknown): S["Encoded"] {
+function unsafeNumber(value: unknown): boolean {
+  if (typeof value === "number")
+    return !Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value));
+  return value !== null && typeof value === "object" && Object.values(value).some(unsafeNumber);
+}
+
+function decode<S extends Schema.Constraint>(
+  schema: S,
+  json: unknown,
+  inputTexts?: Map<string, string>,
+): S["Encoded"] {
   let decoder = decoders.get(schema);
   if (!decoder) {
     decoder = Schema.decodeUnknownSync(Schema.toEncoded(schema));
     decoders.set(schema, decoder);
   }
   if (typeof json !== "string") throw new Error("Expected a persisted JSON string.");
-  return decoder(JSON.parse(json)) as S["Encoded"];
+  const parsed: unknown = JSON.parse(json);
+  if (unsafeNumber(parsed)) {
+    if (
+      inputTexts &&
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "type" in parsed &&
+      parsed.type === "dynamic_tool" &&
+      "id" in parsed &&
+      typeof parsed.id === "string" &&
+      "input" in parsed &&
+      unsafeNumber(parsed.input)
+    ) {
+      const rawJSON = (JSON as typeof JSON & { rawJSON: (source: string) => unknown }).rawJSON;
+      const lossless = JSON.parse(json, (_key, value: unknown, context?: { source?: string }) => {
+        if (typeof value === "number" && unsafeNumber(value)) {
+          if (!context?.source || !Number.isFinite(value))
+            throw new Error("Unsupported non-finite source number.");
+          return rawJSON(context.source);
+        }
+        return value;
+      });
+      inputTexts.set(parsed.id, JSON.stringify(lossless.input));
+      parsed.input = null;
+    }
+    if (unsafeNumber(parsed))
+      throw new Error("Unsupported unsafe source number outside tool arguments.");
+  }
+  return decoder(parsed) as S["Encoded"];
 }
 
 export function readThreads(database: NodeSqlite.DatabaseSync, threadId?: string): Thread[] {
@@ -61,13 +99,16 @@ export function readThreads(database: NodeSqlite.DatabaseSync, threadId?: string
 }
 
 export function readThreadSource(database: NodeSqlite.DatabaseSync, thread: Thread) {
+  const inputTexts = new Map<string, string>();
   const read = <S extends Schema.Constraint>(table: string, schema: S): S["Encoded"][] =>
     database
       .prepare(
         `SELECT payload_json FROM orchestration_v2_projection_${table} WHERE thread_id = ? ORDER BY rowid`,
       )
       .all(thread.id)
-      .map((row) => decode(schema, row.payload_json));
+      .map((row) =>
+        decode(schema, row.payload_json, table === "turn_items" ? inputTexts : undefined),
+      );
   return {
     thread,
     created: (() => {
@@ -79,6 +120,7 @@ export function readThreadSource(database: NodeSqlite.DatabaseSync, thread: Thre
       return row ? decode(OrchestrationV2AppThreadJson, row.payload_json) : undefined;
     })(),
     items: read("turn_items", OrchestrationV2TurnItemJson).sort((a, b) => a.ordinal - b.ordinal),
+    inputTexts,
     messages: read("messages", OrchestrationV2ConversationMessageJson),
     runs: read("runs", OrchestrationV2RunJson),
     attempts: read("run_attempts", OrchestrationV2RunAttemptJson),
@@ -107,34 +149,27 @@ export interface StoredEvent {
   event: Event;
 }
 
-// Large message/tool bodies already live in the projections. Only item IDs anchor audit events.
+// Mutable item bodies come from projections in the capture tail, never audit-event positions.
 export function* readEvents(
   database: NodeSqlite.DatabaseSync,
   threadId: string,
-): Generator<StoredEvent | { itemId: string }> {
+): Generator<StoredEvent> {
   const rows = database
     .prepare(`
     SELECT sequence, event_id, event_type, occurred_at, command_id, metadata_json,
-      CASE WHEN event_type = 'turn-item.updated' THEN json_extract(payload_json, '$.id') END AS item_id,
-      CASE WHEN event_type <> 'turn-item.updated' THEN
-        CASE WHEN event_type = 'subagent.updated' AND json_type(payload_json, '$.promptSequence') = 'integer'
+      CASE WHEN event_type = 'subagent.updated' AND json_type(payload_json, '$.promptSequence') = 'integer'
         THEN json_set(json_remove(payload_json, '$.promptSequence'), '$.prompt',
           (SELECT json_extract(anchor.payload_json, '$.prompt') FROM orchestration_events anchor
            WHERE anchor.sequence = json_extract(orchestration_events.payload_json, '$.promptSequence')))
-        ELSE payload_json END
-      END AS payload_json
+        ELSE payload_json END AS payload_json
     FROM orchestration_events
     WHERE aggregate_kind = 'thread' AND stream_id = ? AND application_event_version = 2
-      AND event_type NOT IN ('node.updated', 'message.updated', 'provider-thread.updated', 'provider-turn.updated',
+      AND event_type NOT IN ('turn-item.updated', 'node.updated', 'message.updated', 'provider-thread.updated', 'provider-turn.updated',
         'plan.updated', 'checkpoint-scope.created', 'context-handoff.updated', 'context-transfer.created', 'context-transfer.updated')
     ORDER BY sequence
   `)
     .iterate(threadId);
   for (const row of rows) {
-    if (typeof row.item_id === "string") {
-      yield { itemId: row.item_id };
-      continue;
-    }
     const metadata = typeof row.metadata_json === "string" ? JSON.parse(row.metadata_json) : {};
     const event = decode(
       OrchestrationV2DomainEventJson,

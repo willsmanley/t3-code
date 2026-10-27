@@ -457,13 +457,24 @@ function readBundle(output: string) {
       .map((line) => JSON.parse(line));
     expect(stream.length).toBe(entry.recordCount);
     expect(stream.every((record, index) => record.seq === index)).toBe(true);
+    expect(stream[0]).toHaveProperty("observedAt");
+    expect(stream.every((record) => record.idScope === undefined)).toBe(true);
+    const tail = stream.findIndex(
+      (record) => (record.assembly as Row | undefined)?.mode === "snapshot",
+    );
+    expect(tail).toBeGreaterThan(0);
+    expect(
+      stream
+        .slice(tail)
+        .every((record) => (record.assembly as Row | undefined)?.mode === "snapshot"),
+    ).toBe(true);
     records.set(entry.sessionId, stream);
   }
   const validator = process.env.ASR_VALIDATOR;
   if (validator) {
     const result = NodeChildProcess.spawnSync(
       process.execPath,
-      [validator, output, "--format", "json"],
+      [validator, output, "--streaming", "--format", "json"],
       { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
     );
     expect(result.status, result.stdout + result.stderr).toBe(0);
@@ -511,7 +522,7 @@ describe("native ASR export", () => {
         expect(parent.some((record) => record.type === "state" && record.state === "queued")).toBe(
           true,
         );
-        expect(parent.find((record) => record.attempt)).toMatchObject({
+        expect(parent.findLast((record) => record.attempt)).toMatchObject({
           attempt: { n: 1, reason: "initial" },
           executedBy: { session: "codex:native-parent", turnId: "native-turn" },
         });
@@ -527,17 +538,23 @@ describe("native ASR export", () => {
           capture: { content: { state: "absent" } },
         });
         const approvals = parent.filter((record) => record.type === "permission");
-        expect(approvals).toHaveLength(2);
+        expect(approvals).toHaveLength(3);
         expect(approvals[1]).toMatchObject({
           status: "resolved",
           decision: "allow_session",
           supersedes: approvals[0]!.id,
-          subject: { callId: "exec-1" },
         });
         expect(approvals[1]).not.toHaveProperty("decider");
         expect(approvals[1]).not.toHaveProperty("decidedBy");
+        expect(approvals.at(-1)).toMatchObject({
+          options: [{ optionId: "acceptForSession", kind: "allow_session" }],
+          subject: { callId: "exec-1" },
+          supersedes: approvals[1]!.id,
+        });
+        expect(approvals[0]).not.toHaveProperty("options");
+        expect(approvals[1]).not.toHaveProperty("description");
         expect(
-          parent.find(
+          parent.findLast(
             (record) => record.type === "input_request" && record.requestId === "question-1",
           ),
         ).toMatchObject({ status: "answered", answers: [{ questionId: "q", selected: ["Yes"] }] });
@@ -553,12 +570,17 @@ describe("native ASR export", () => {
           kind: "git_ref",
           status: "missing",
         });
+        expect(
+          (parent.findLast((record) => record.type === "checkpoint")!._meta as Row)[
+            "codes.t3/fileStats"
+          ],
+        ).toEqual([{ path: "src/example.ts", additions: 1, deletions: 1 }]);
         expect(parent.find((record) => record.type === "vcs")).toMatchObject({
           action: "pr_link",
           evidence: "reported",
         });
         const children = parent.filter((record) => record.type === "subagent");
-        expect(children).toHaveLength(2);
+        expect(children).toHaveLength(3);
         expect(children[1]).toMatchObject({
           supersedes: children[0]!.id,
           agent: "claude-code",
@@ -650,9 +672,10 @@ describe("native ASR export", () => {
         });
         const reasoning = parent.find((record) => record.messageId === "reasoning-1");
         expect(reasoning).toMatchObject({
-          content: [{ type: "reasoning" }],
-          displayContent: [{ type: "text", text: "Reasoning representation" }],
+          content: [{ type: "reasoning", text: "Reasoning representation" }],
         });
+        expect((reasoning!.content as Row[])[0]).not.toHaveProperty("visibility");
+        expect(reasoning).not.toHaveProperty("displayContent");
         expect(parent.find((record) => record.type === "config_change")).toMatchObject({
           options: { reasoningEffort: "high" },
         });
@@ -711,6 +734,15 @@ describe("native ASR export", () => {
           turnId: "run-1",
           coverage: "partial",
           usage: { input: { total: 40, includesCache: true }, output: { total: 2 } },
+          _meta: {
+            "codes.t3/providerUsage": [
+              {
+                providerTurnId: "native-turn-row",
+                turnTokenUsage: { inputTokens: 10, outputTokens: 2 },
+              },
+              { providerTurnId: "second-provider-turn", turnTokenUsage: { inputTokens: 30 } },
+            ],
+          },
         });
         expect(
           parent.some(
@@ -741,16 +773,26 @@ describe("native ASR export", () => {
         parent.filter((record) => record.type === "tool_call" && record.callId === "exec-1"),
       ).toHaveLength(2);
       const results = parent.filter(
-        (record) => record.type === "tool_result" && record.callId === "exec-1",
+        (record) =>
+          record.type === "tool_result" &&
+          (record._meta as Row | undefined)?.["codes.t3/nativeItemRef"] !== undefined &&
+          record.linkage === "ambiguous",
       );
       expect(results).toHaveLength(2);
       expect(results.every((record) => record.linkage === "ambiguous")).toBe(true);
+      expect(results.every((record) => record.callId === undefined)).toBe(true);
     }).pipe(Effect.provide(AsrExport.layer)),
   );
 
   it("does not turn weak references or Pi session paths into native session IDs", () => {
     expect(
       nativeSession({ driver: "codex", nativeId: "derived", strength: "weak" }),
+    ).toBeUndefined();
+    expect(
+      nativeSession({ driver: "claudeAgent", nativeId: "workflow:agent:0", strength: "strong" }),
+    ).toBeUndefined();
+    expect(
+      nativeSession({ driver: "cursor", nativeId: "opaque-strong", strength: "strong" }),
     ).toBeUndefined();
     expect(
       nativeSession({
@@ -763,4 +805,115 @@ describe("native ASR export", () => {
       sessionRef({ agent: "t3-code", namespace: "env", sessionId: "thread:delegated%3Atask" }),
     ).toBe("t3-code:env:thread%3Adelegated%253Atask");
   });
+
+  it.effect("keeps opaque provider identities in the registry metadata destinations", () =>
+    Effect.gen(function* () {
+      const paths = fixture();
+      const database = new NodeSqlite.DatabaseSync(NodePath.join(paths.userdata, "statev2.sqlite"));
+      const piRef = { driver: "pi", nativeId: "/synthetic/pi-session.jsonl", strength: "strong" };
+      const workflowRef = {
+        driver: "claudeAgent",
+        nativeId: "workflow:agent:0",
+        strength: "strong",
+      };
+      database
+        .prepare(
+          "UPDATE orchestration_v2_projection_provider_threads SET payload_json = json_set(payload_json, '$.driver', 'pi', '$.nativeThreadRef', json(?)) WHERE thread_id = 'parent'",
+        )
+        .run(JSON.stringify(piRef));
+      database
+        .prepare(
+          "UPDATE orchestration_v2_projection_provider_threads SET payload_json = json_set(payload_json, '$.nativeThreadRef', json(?)) WHERE thread_id <> 'parent'",
+        )
+        .run(JSON.stringify(workflowRef));
+      database
+        .prepare(
+          "UPDATE orchestration_v2_projection_subagents SET payload_json = json_set(payload_json, '$.nativeTaskRef', json(?))",
+        )
+        .run(JSON.stringify(workflowRef));
+      database.close();
+      const exporter = yield* AsrExport.AsrExport;
+      yield* exporter.exportBundle(paths);
+      const { records, manifest } = readBundle(paths.output);
+      const parent = records.get("parent")!;
+      expect(
+        manifest.sessions.every(
+          (entry) => ![piRef.nativeId, workflowRef.nativeId].includes(entry.sessionId),
+        ),
+      ).toBe(true);
+      expect(
+        (parent.find((record) => record.type === "codes.t3/provider_identity")!._meta as Row)[
+          "codes.t3/nativeThreadRef"
+        ],
+      ).toEqual(piRef);
+      expect(
+        (parent.findLast((record) => record.type === "subagent")!._meta as Row)[
+          "codes.t3/nativeTaskRef"
+        ],
+      ).toEqual(workflowRef);
+    }).pipe(Effect.provide(AsrExport.layer)),
+  );
+
+  it.effect("keeps stable IDs across captures after compaction and mutable row growth", () =>
+    Effect.gen(function* () {
+      const paths = fixture();
+      const exporter = yield* AsrExport.AsrExport;
+      yield* exporter.exportBundle(paths);
+      const before = readBundle(paths.output).records.get("parent")!;
+      const database = new NodeSqlite.DatabaseSync(NodePath.join(paths.userdata, "statev2.sqlite"));
+      database.exec(
+        "DELETE FROM orchestration_events WHERE sequence = (SELECT MIN(sequence) FROM orchestration_events WHERE event_type = 'run.updated')",
+      );
+      database.exec(
+        "UPDATE orchestration_v2_projection_messages SET payload_json = json_set(payload_json, '$.text', 'Later content') WHERE json_extract(payload_json, '$.id') = 'peer-message'",
+      );
+      database.close();
+      const output = NodePath.join(paths.directory, "replacement");
+      yield* exporter.exportBundle({ ...paths, output });
+      const after = readBundle(output).records.get("parent")!;
+      const earlier = before.find((record) => record.messageId === "peer-message")!;
+      const later = after.find((record) => record.messageId === "peer-message")!;
+      expect(later.id).toBe(earlier.id);
+      expect(later.seq).not.toBe(earlier.seq);
+      expect(later).not.toHaveProperty("supersedes");
+      expect(later.displayContent).toEqual([{ type: "text", text: "Later content" }]);
+      const retainedEvent = before.find(
+        (record) => record.type === "state" && record.state === "idle" && !record.assembly,
+      )!;
+      expect(after.find((record) => record.id === retainedEvent.id)).toMatchObject({
+        state: "idle",
+      });
+      expect((after[0]!.producer as Row).lossy).toContain("order");
+    }).pipe(Effect.provide(AsrExport.layer)),
+  );
+
+  it.effect(
+    "preserves unsafe integer arguments as JSON text and refuses other unsafe numbers",
+    () =>
+      Effect.gen(function* () {
+        const paths = fixture();
+        const database = new NodeSqlite.DatabaseSync(
+          NodePath.join(paths.userdata, "statev2.sqlite"),
+        );
+        database.exec(
+          `UPDATE orchestration_v2_projection_turn_items SET payload_json = json_set(payload_json, '$.input', json('{"counter":9007199254740993,"safe":100.0}')) WHERE json_extract(payload_json, '$.type') = 'dynamic_tool'`,
+        );
+        const exporter = yield* AsrExport.AsrExport;
+        yield* exporter.exportBundle(paths);
+        const call = readBundle(paths.output)
+          .records.get("parent")!
+          .find((record) => record.callId === "lookup-1")!;
+        expect(call.inputText).toBe('{"counter":9007199254740993,"safe":100}');
+        expect(call).not.toHaveProperty("input");
+        database.exec(
+          "UPDATE orchestration_v2_projection_turn_items SET payload_json = json_set(payload_json, '$.ordinal', 9007199254740993)",
+        );
+        database.close();
+        const output = NodePath.join(paths.directory, "unsupported-number");
+        expect(yield* Effect.result(exporter.exportBundle({ ...paths, output }))).toMatchObject({
+          _tag: "Failure",
+        });
+        expect(NodeFS.existsSync(output)).toBe(false);
+      }).pipe(Effect.provide(AsrExport.layer)),
+  );
 });

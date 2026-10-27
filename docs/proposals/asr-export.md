@@ -6,7 +6,7 @@ only that provider's transcript loses who actually wrote them. T3 also owns queu
 approval routing, cross-provider delegation and git checkpoints.
 
 This proposal adds an offline `AsrExport` service and a thin `t3 export-asr` command. It writes
-[Agent Session Record (ASR) 0.1](https://agentsessionrecord.org), following the draft-v3 T3 registry
+[Agent Session Record (ASR) 0.1](https://agentsessionrecord.org), following the draft-v3.1 T3 registry
 mapping. The implementation is a native snapshot exporter (adoption level L1). It adds no work
 to running turns and no dependency on an ASR library at runtime. It is a proposal for maintainers
 to assess before adding export controls to the clients.
@@ -47,8 +47,9 @@ different installations are never joined without the namespace.
 `lineage.executedBy` references backing harness sessions. Historical destinations retained on
 run attempts are included alongside current provider-thread references: recovery can reuse a
 provider-thread row with a new native session ID. Per-attempt and provider-turn `state` records
-carry the backing session and a native turn ID only when the source marks it strong. A current
-provider-thread reference is not backdated when known historical destinations disagree.
+carry the backing session; only Codex has a qualified native turn correspondence in this source
+version. Historical attempt events use their retained destination, while current provider-turn
+references stay in the snapshot tail. Other strong adapter references remain metadata.
 
 A strong reference is not automatically an ASR identity. Pi stores a session file path rather
 than its header ID, so those paths remain vendor metadata with a declared lineage loss. Claude
@@ -71,7 +72,7 @@ session usage when totaling the same work.
 | Inter-thread message                 | Agent-authored `inter_session`, with `from.session` naming the sender thread                                                             |
 | Runs and attempts                    | `state`, queue details, attempt number/reason, retained restart `continuationOf`; provider links as above                                |
 | Assistant messages and tool items    | Message snapshots; tool call/result pairs, nested parent calls and native IDs; duplicate call IDs preserved and results marked ambiguous |
-| Reasoning                            | A reasoning-only message with display text; no guessed full/summary visibility                                                           |
+| Reasoning                            | A reasoning part with text and absent visibility; no guessed full/summary visibility                                                     |
 | Approvals                            | `permission` revisions with decision, feedback and subject when available; missing resolver identity stays absent                        |
 | Questions and secret requests        | `input_request`, questions, answer selections/text and attachment descriptors; secret cards contain status and prompt metadata only      |
 | Delegated work                       | `subagent` revisions with child T3 session, executor harness, model and delivery metadata                                                |
@@ -89,7 +90,7 @@ versus timer.
 Run usage sums retained provider-turn counters, with `coverage: partial` when components are
 missing or incomplete. Each source component remains in vendor metadata. Missing optional
 counters are never treated as known zero; a sum outside JavaScript's safe integer range is
-omitted. Provider turns without a T3 run use a vendor scope, not a fabricated session total.
+omitted. Coverage stays partial because retained rows cannot prove complete run accounting. Provider turns without a T3 run use a vendor scope, not a fabricated session total.
 
 ## Snapshot consistency and order
 
@@ -99,17 +100,24 @@ projection high-water marks, unsupported schema versions and malformed records. 
 snapshot is released before publishing the final manifest. A failure removes only the newly
 created destination; existing destinations are never overwritten.
 
-T3 compacts whole-entity events, so surviving event sequence is not the original conversation
-order. Content follows persisted turn-item ordinal. A surviving item event advances that
-ordinal frontier; retained lifecycle events are interleaved at the current frontier. Remaining
-items follow. Messages without an item follow the read model's fallback: creation time, then ID.
-Unrepresented current entity snapshots follow without invented event timestamps. Deduplicated
-subagent event prompts are restored through their persisted anchor sequence.
+T3 compacts whole-entity events, so each export creates a new capture. Surviving audit events
+are serialized first in native event sequence. All current projection rows follow with
+`assembly.mode: snapshot`: turn items in persisted ordinal order, messages without items in
+projection row order, then requests, subagents, checkpoints, runs, attempts, handoffs, provider
+state, usage, PR links, session metadata and settings. No stores are merged by timestamp.
+Historical requests omit current UI details; full current request cards follow in the tail.
+A current settings record also has `snapshot: true`. Deduplicated subagent event prompts are
+restored through their persisted anchor sequence.
 
-This is a captured snapshot, not an exact replay of observation order. Headers declare revision
-and ordering losses; latest message/tool snapshots can incorporate changes made after their
-surviving anchor. Record IDs and sequence positions are capture-scoped. Re-export into a new
-directory; do not concatenate exports or append one snapshot to another.
+Headers carry `observedAt` and declare `order` and `revision_history`. Record IDs derive from
+stable T3 entity/item IDs or surviving event IDs, never export sequence positions. These IDs
+survive compaction and content growth; `seq` is local to each capture. No record uses
+`idScope: capture` because none relies solely on a replaceable source position. Record bytes
+and digests can change between captures without establishing a source revision. Re-export
+into a new directory; do not concatenate captures. The manifest selects one capture per session.
+
+Audit-prefix positions are not context chronology. In particular, a rollback event whose
+context predecessor cannot be established remains a vendor rollback fact, not a guessed rewind.
 
 ## What T3 needs to retain for exact export
 
@@ -119,7 +127,7 @@ directory; do not concatenate exports or append one snapshot to another.
    Current text alone cannot distinguish full reasoning from a provider summary.
 3. Persist the resolving actor and calling thread on request-resolution events. Opaque command
    receipts do not establish a human or parent-agent decider. The current MCP responder answers
-   questions, not approvals; the ASR registry's approval example needs qualification.
+   questions, not approvals.
 4. Persist native user-turn/message IDs, native result IDs and transcript identity separately
    from adapter-generated IDs. Retain immutable backing session IDs on every attempt; old rows
    without them cannot always be joined after recovery.
@@ -142,8 +150,23 @@ than producing a silently partial archive.
 Additional keys describe source references, snapshot ordering, usage components and opaque
 resolution command IDs. Vendor records preserve provider-session lifecycle, runtime requests
 without representable schemas, file edits, rollback requests and thread creation. Vendor enum
-values preserve statuses/kinds that ASR does not define. `allow_session` is currently valid as
-a decision but not as an option kind, so the option uses `_codes.t3/allow_session`.
+values are explicit mappings, not a prefix applied to arbitrary native strings. `allow_session`
+is used for both the decision and option kind. The defined `_codes.t3/cancelled` option means
+T3's native `cancel` choice. `_codes.t3/preparing`, `starting`, `pending` and `superseded` execution
+states preserve workspace preparation, provider startup, pending attempts and superseded
+attempts, respectively. Unmapped optional subagent statuses stay in `codes.t3/subagent.status`;
+setup-hook statuses without a core equivalent use `unknown` and `codes.t3/hookStatus`.
+
+`codes.t3/provider_identity` snapshots keep the verbatim `codes.t3/nativeThreadRef` object.
+`codes.t3/nativeTaskRef` stays on subagents; `codes.t3/nativeTurnRef` stays on current execution
+snapshots. Usage components use the registry's `codes.t3/providerUsage` array of
+`{providerTurnId, turnTokenUsage}`. Original permission choices and decisions remain in
+`codes.t3/permissionOptions` and `codes.t3/permissionDecision`. Historical question events whose
+UI schema is no longer retained embed the native request, while current cards normalize answers.
+
+Unsafe integer tool arguments are preserved as whole JSON text in `inputText`, with `input`
+absent. Other unsafe numeric source fields fail the export explicitly instead of being rounded;
+the exporter cannot invent an ASR numeric value or silently discard the source fact.
 
 Synthetic SQLite fixtures exercise the real service and filesystem adapter, source immutability,
 private output, bundle digests, provenance, superseding approvals/subagents, secret exclusion,
@@ -173,8 +196,9 @@ HTTP or MCP action should run an export worker and return a downloadable job res
 A representative local export of roughly 720 threads produced about 2.4 GB in under a minute,
 with roughly 1.3 GB peak RSS. Memory scales with the largest thread; output includes retained
 audit revisions as well as final content. These are observations, not resource limits or a
-performance guarantee. The reference bundle validator retains all parsed streams and therefore
-has a substantially larger working set than the exporter.
+performance guarantee. The reference validator supports `--streaming`, which discards transcript payloads after each
+stream while retaining reference evidence. Its memory still depends on semantic indexes and
+diagnostics; missing backing sessions produce availability warnings under v3.1.
 
 L2 live writing needs a durable export outbox committed with orchestration events, a stable
 per-thread ASR sequence/cursor, and idempotent recovery after a partially written JSONL tail.

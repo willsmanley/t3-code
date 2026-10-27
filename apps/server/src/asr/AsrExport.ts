@@ -119,6 +119,7 @@ function exportSnapshot(options: ExportOptions): ExportSummary {
     created = true;
     NodeFS.mkdirSync(NodePath.join(output, "sessions"), { mode: 0o700 });
     const producerInstance = NodeCrypto.randomUUID();
+    const observedAt = new Date().toISOString();
     const entries: Array<Record<string, unknown>> = [];
     const references = new Map<string, SessionKey>();
     const included = new Set<string>();
@@ -149,6 +150,7 @@ function exportSnapshot(options: ExportOptions): ExportSummary {
           namespace,
           producerVersion: packageJson.version,
           producerInstance,
+          observedAt,
           schedules,
           ...(thread.creationSource === "provider" && mirrorRefs.has(thread.id)
             ? { mirror: mirrorRefs.get(thread.id)! }
@@ -158,16 +160,8 @@ function exportSnapshot(options: ExportOptions): ExportSummary {
             if (pending.length >= 256 * 1024) flush();
           },
         });
-        const positions = new Map(source.items.map((item, index) => [item.id, index]));
-        let nextItem = 0;
-        for (const event of readEvents(database, thread.id)) {
-          if ("itemId" in event) {
-            const through = positions.get(event.itemId);
-            if (through !== undefined)
-              while (nextItem <= through) mapper.item(source.items[nextItem++]!);
-          } else mapper.event(event);
-        }
-        while (nextItem < source.items.length) mapper.item(source.items[nextItem++]!);
+        for (const event of readEvents(database, thread.id)) mapper.event(event);
+        for (const item of source.items) mapper.item(item);
         const result = mapper.finish();
         for (const reference of result.references) references.set(sessionRef(reference), reference);
         flush();
