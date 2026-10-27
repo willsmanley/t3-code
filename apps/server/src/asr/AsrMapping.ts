@@ -2,6 +2,8 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
 
+import { nativeMeta } from "./AsrValues.ts";
+
 import type {
   Attempt,
   Checkpoint,
@@ -45,10 +47,7 @@ const snapshot = { mode: "snapshot" };
 const present = (value: unknown): boolean => value !== undefined && value !== null;
 const fields = (value: Fields): Fields =>
   Object.fromEntries(Object.entries(value).filter(([, entry]) => present(entry)));
-const meta = (value: Fields): Fields =>
-  Object.fromEntries(
-    Object.entries(fields(value)).map(([key, entry]) => [`codes.t3/${key}`, entry]),
-  );
+const meta = nativeMeta;
 const vendor = (value: string) => `_codes.t3/${value}`;
 function modelOptions(value: unknown): Fields | undefined {
   if (value === undefined) return undefined;
@@ -120,7 +119,7 @@ const optionKind = (value: string) =>
     acceptForSession: "allow_session",
     acceptAlways: "allow_always",
     decline: "reject_once",
-    cancel: "_codes.t3/cancelled",
+    cancel: "cancel",
   })[value];
 function runState(status: string): Fields {
   const state = {
@@ -292,11 +291,14 @@ export function createThreadMapper(input: {
   };
   const parentCall = (item: Item | undefined, nodeId?: string) => {
     const parent = item?.parentItemId ? items.get(item.parentItemId) : undefined;
-    if (parent && toolTypes.has(parent.type)) return callId(parent);
+    if (parent && toolTypes.has(parent.type))
+      return callCounts.get(callId(parent)) === 1 ? callId(parent) : undefined;
     const node = nodeId ? nodes.get(nodeId) : item?.nodeId ? nodes.get(item.nodeId) : undefined;
     const parentNode = node?.parentNodeId ? nodes.get(node.parentNodeId) : undefined;
     const parentItem = parentNode ? nodeItems.get(parentNode.id) : undefined;
-    return parentItem && toolTypes.has(parentItem.type) ? callId(parentItem) : undefined;
+    return parentItem && toolTypes.has(parentItem.type) && callCounts.get(callId(parentItem)) === 1
+      ? callId(parentItem)
+      : undefined;
   };
   for (const run of source.runs) {
     const message = messages.get(run.userMessageId);
@@ -722,7 +724,7 @@ export function createThreadMapper(input: {
         turnId: checkpoint.runId,
         ts: ts ?? checkpoint.capturedAt,
         root: "workspace",
-        files: checkpoint.files.map((file) => ({ path: file.path })),
+        files: checkpoint.files.map((file) => pathRef(file.path)),
         _meta: meta({
           scope,
           fileStats: checkpoint.files.map((file) =>
@@ -872,6 +874,7 @@ export function createThreadMapper(input: {
     emit(
       {
         type: "tool_result",
+        nativeCallId: id,
         ...base,
         ts: item.completedAt,
         ...((callCounts.get(id) ?? 0) > 1
@@ -1401,7 +1404,9 @@ export function createThreadMapper(input: {
       usageGroups.set(key, group);
     }
     for (const [key, group] of usageGroups) {
-      const usages = group.turns.map((turn) => turn.turnTokenUsage);
+      const usages = group.turns.map((turn) =>
+        turn.turnTokenUsage?.usageStatus === "unavailable" ? undefined : turn.turnTokenUsage,
+      );
       const context = group.turns
         .flatMap((turn) => (turn.tokenUsage ? [turn.tokenUsage] : []))
         .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))

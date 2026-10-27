@@ -11,6 +11,7 @@ import * as Schema from "effect/Schema";
 
 import packageJson from "../../package.json" with { type: "json" };
 import { createThreadMapper, nativeSession, sessionRef, type SessionKey } from "./AsrMapping.ts";
+import { serializeRecord } from "./AsrValues.ts";
 import { readEvents, readSchedules, readThreadSource, readThreads } from "./AsrSource.ts";
 
 export class AsrExportError extends Schema.TaggedError<AsrExportError>()("AsrExportError", {
@@ -156,7 +157,7 @@ function exportSnapshot(options: ExportOptions): ExportSummary {
             ? { mirror: mirrorRefs.get(thread.id)! }
             : {}),
           write: (record) => {
-            pending += `${JSON.stringify(record)}\n`;
+            pending += `${serializeRecord(record, output)}\n`;
             if (pending.length >= 256 * 1024) flush();
           },
         });
@@ -197,7 +198,7 @@ function exportSnapshot(options: ExportOptions): ExportSummary {
         purpose: "archive",
         sessions: entries,
         _meta: {
-          "codes.t3/export": {
+          "codes.t3.asr/export": {
             sourceSequence,
             snapshot: true,
             attachments: "not_exported",

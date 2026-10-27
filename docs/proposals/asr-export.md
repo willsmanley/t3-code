@@ -6,7 +6,7 @@ only that provider's transcript loses who actually wrote them. T3 also owns queu
 approval routing, cross-provider delegation and git checkpoints.
 
 This proposal adds an offline `AsrExport` service and a thin `t3 export-asr` command. It writes
-[Agent Session Record (ASR) 0.1](https://agentsessionrecord.org), following the draft-v3.1 T3 registry
+[Agent Session Record (ASR) 0.1](https://agentsessionrecord.org), following the v3.2 T3 registry
 mapping. The implementation is a native snapshot exporter (adoption level L1). It adds no work
 to running turns and no dependency on an ASR library at runtime. It is a proposal for maintainers
 to assess before adding export controls to the clients.
@@ -42,7 +42,8 @@ capture or provider process is started.
 
 Each stream has `agent.name: t3-code`, the verbatim thread ID and the environment's persisted ID
 as `namespace`. SessionRef escaping preserves IDs containing colons and percent signs. IDs from
-different installations are never joined without the namespace.
+different installations are never joined without the namespace. The persisted `environment-id`
+keeps custody of this namespace across captures and relocation.
 
 `lineage.executedBy` references backing harness sessions. Historical destinations retained on
 run attempts are included alongside current provider-thread references: recovery can reuse a
@@ -161,12 +162,15 @@ setup-hook statuses without a core equivalent use `unknown` and `codes.t3/hookSt
 `codes.t3/nativeTaskRef` stays on subagents; `codes.t3/nativeTurnRef` stays on current execution
 snapshots. Usage components use the registry's `codes.t3/providerUsage` array of
 `{providerTurnId, turnTokenUsage}`. Original permission choices and decisions remain in
-`codes.t3/permissionOptions` and `codes.t3/permissionDecision`. Historical question events whose
+`codes.t3/remainingFields`. Historical question events whose
 UI schema is no longer retained embed the native request, while current cards normalize answers.
 
 Unsafe integer tool arguments are preserved as whole JSON text in `inputText`, with `input`
-absent. Other unsafe numeric source fields fail the export explicitly instead of being rounded;
-the exporter cannot invent an ASR numeric value or silently discard the source fact.
+absent. Other unsafe native payload values use external JSON blobs or `codes.t3/jsonText` keyed by the
+exact displaced JSON Pointer. Required typed source numbers still fail explicitly when unsafe.
+Tool results retain `nativeCallId` without using it to join ambiguous calls; approval cancel
+options use `cancel`. Unavailable usage reports remain native evidence and their placeholder
+counters are not summed.
 
 Synthetic SQLite fixtures exercise the real service and filesystem adapter, source immutability,
 private output, bundle digests, provenance, superseding approvals/subagents, secret exclusion,
@@ -179,7 +183,7 @@ ASR_VALIDATOR=/path/to/agent-session-record/tools/validator/bin/asr-validate.js 
 ```
 
 With `ASR_VALIDATOR`, every inspected synthetic bundle also runs the reference validator. It
-reports the optional extension as unsupported; this is not a schema or semantic error. Schema
+reports the optional extension as a notice; this is not a schema or semantic error. Schema
 validation does not prove source fidelity, privacy or universal conformance. Source-specific
 assertions provide that additional evidence for the covered cases.
 
@@ -198,7 +202,7 @@ with roughly 1.3 GB peak RSS. Memory scales with the largest thread; output incl
 audit revisions as well as final content. These are observations, not resource limits or a
 performance guarantee. The reference validator supports `--streaming`, which discards transcript payloads after each
 stream while retaining reference evidence. Its memory still depends on semantic indexes and
-diagnostics; missing backing sessions produce availability warnings under v3.1.
+diagnostics; deliberately omitted backing sessions are counted without default diagnostics under v3.2. Optional extensions produce notices; unexplained references into present sessions remain warnings.
 
 L2 live writing needs a durable export outbox committed with orchestration events, a stable
 per-thread ASR sequence/cursor, and idempotent recovery after a partially written JSONL tail.

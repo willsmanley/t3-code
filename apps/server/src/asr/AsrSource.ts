@@ -32,13 +32,9 @@ export type Checkpoint = typeof OrchestrationV2CheckpointJson.Encoded;
 export type Handoff = typeof OrchestrationV2ContextHandoffJson.Encoded;
 export type Event = typeof OrchestrationV2DomainEventJson.Encoded;
 
-const decoders = new WeakMap<Schema.Constraint, (value: unknown) => unknown>();
+import { parseSource, unsafeNumber } from "./AsrValues.ts";
 
-function unsafeNumber(value: unknown): boolean {
-  if (typeof value === "number")
-    return !Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value));
-  return value !== null && typeof value === "object" && Object.values(value).some(unsafeNumber);
-}
+const decoders = new WeakMap<Schema.Constraint, (value: unknown) => unknown>();
 
 function decode<S extends Schema.Constraint>(
   schema: S,
@@ -51,7 +47,7 @@ function decode<S extends Schema.Constraint>(
     decoders.set(schema, decoder);
   }
   if (typeof json !== "string") throw new Error("Expected a persisted JSON string.");
-  const parsed: unknown = JSON.parse(json);
+  const parsed: unknown = parseSource(json);
   if (unsafeNumber(parsed)) {
     if (
       inputTexts &&
@@ -64,20 +60,9 @@ function decode<S extends Schema.Constraint>(
       "input" in parsed &&
       unsafeNumber(parsed.input)
     ) {
-      const rawJSON = (JSON as typeof JSON & { rawJSON: (source: string) => unknown }).rawJSON;
-      const lossless = JSON.parse(json, (_key, value: unknown, context?: { source?: string }) => {
-        if (typeof value === "number" && unsafeNumber(value)) {
-          if (!context?.source || !Number.isFinite(value))
-            throw new Error("Unsupported non-finite source number.");
-          return rawJSON(context.source);
-        }
-        return value;
-      });
-      inputTexts.set(parsed.id, JSON.stringify(lossless.input));
+      inputTexts.set(parsed.id, JSON.stringify(parsed.input));
       parsed.input = null;
     }
-    if (unsafeNumber(parsed))
-      throw new Error("Unsupported unsafe source number outside tool arguments.");
   }
   return decoder(parsed) as S["Encoded"];
 }
@@ -170,7 +155,10 @@ export function* readEvents(
   `)
     .iterate(threadId);
   for (const row of rows) {
-    const metadata = typeof row.metadata_json === "string" ? JSON.parse(row.metadata_json) : {};
+    const metadata =
+      typeof row.metadata_json === "string"
+        ? (parseSource(row.metadata_json) as Record<string, unknown>)
+        : {};
     const event = decode(
       OrchestrationV2DomainEventJson,
       JSON.stringify({
@@ -179,7 +167,7 @@ export function* readEvents(
         type: row.event_type,
         threadId,
         occurredAt: row.occurred_at,
-        payload: JSON.parse(String(row.payload_json)),
+        payload: parseSource(String(row.payload_json)),
       }),
     );
     yield {
@@ -200,7 +188,7 @@ export function readSchedules(database: NodeSqlite.DatabaseSync) {
     return schedules;
   // Never select webhook_token, webhook_secret, delivery headers, or request bodies.
   for (const row of database.prepare("SELECT task_id, schedule_json FROM scheduled_tasks").all()) {
-    const parsed: unknown = JSON.parse(String(row.schedule_json));
+    const parsed: unknown = parseSource(String(row.schedule_json));
     if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
       const schedule = parsed as Record<string, unknown>;
       schedules.set(

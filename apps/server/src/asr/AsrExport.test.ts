@@ -775,7 +775,7 @@ describe("native ASR export", () => {
       const results = parent.filter(
         (record) =>
           record.type === "tool_result" &&
-          (record._meta as Row | undefined)?.["codes.t3/nativeItemRef"] !== undefined &&
+          record.nativeCallId === "exec-1" &&
           record.linkage === "ambiguous",
       );
       expect(results).toHaveLength(2);
@@ -915,5 +915,52 @@ describe("native ASR export", () => {
         });
         expect(NodeFS.existsSync(output)).toBe(false);
       }).pipe(Effect.provide(AsrExport.layer)),
+  );
+  it.effect("keeps unsafe stored output lossless, maps cancel, and reuses native namespace", () =>
+    Effect.gen(function* () {
+      const paths = fixture();
+      const database = new NodeSqlite.DatabaseSync(NodePath.join(paths.userdata, "statev2.sqlite"));
+      database.exec(
+        `UPDATE orchestration_v2_projection_turn_items SET payload_json = json_set(payload_json, '$.output', json('{"counter":18446744073709551617}')) WHERE json_extract(payload_json, '$.type') = 'dynamic_tool'`,
+      );
+      database.exec(
+        `UPDATE orchestration_v2_projection_turn_items SET payload_json = json_set(payload_json, '$.options', json('[{"decision":"cancel","label":"Cancel"}]')) WHERE json_extract(payload_json, '$.type') = 'approval_request'`,
+      );
+      database.exec(
+        "UPDATE orchestration_v2_projection_messages SET payload_json = json_set(payload_json, '$.workflowScript', json('true')) WHERE json_extract(payload_json, '$.id') = 'peer-message'",
+      );
+      database.close();
+      const exporter = yield* AsrExport.AsrExport;
+      yield* exporter.exportBundle(paths);
+      const before = readBundle(paths.output).records.get("parent")!;
+      const workflow = (before.find((record) => record.messageId === "peer-message")!._meta as Row)[
+        "codes.t3/workflowScript"
+      ] as { blob: string };
+      expect(
+        NodeFS.readFileSync(
+          NodePath.join(paths.output, "blobs", "sha256", workflow.blob.slice(7)),
+          "utf8",
+        ),
+      ).toBe("true");
+      const result = before.find(
+        (record) => record.type === "tool_result" && record.nativeCallId === "lookup-1",
+      )!;
+      expect(result).not.toHaveProperty("displayContent");
+      const capture = result.capture as {
+        displayContent: { state: string; blob: { blob: string } };
+      };
+      expect(capture.displayContent.state).toBe("external");
+      const bytes = NodeFS.readFileSync(
+        NodePath.join(paths.output, "blobs", "sha256", capture.displayContent.blob.blob.slice(7)),
+        "utf8",
+      );
+      expect(bytes).toContain("18446744073709551617");
+      expect(before.findLast((record) => record.type === "permission")).toMatchObject({
+        options: [{ kind: "cancel" }],
+      });
+      const output = NodePath.join(paths.directory, "second-capture");
+      yield* exporter.exportBundle({ ...paths, output });
+      expect(readBundle(output).records.get("parent")![0]!.namespace).toBe(before[0]!.namespace);
+    }).pipe(Effect.provide(AsrExport.layer)),
   );
 });
