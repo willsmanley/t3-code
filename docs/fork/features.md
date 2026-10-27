@@ -448,6 +448,20 @@ Touch points: `packages/client-runtime/src/state/shell.ts` (+ `shell-sync.test.t
 Verify: `vp test run packages/client-runtime/src/state/shell-sync.test.ts -t "resubscribes after a defect"`.
 If upstream adds its own retry here, drop this one.
 
+### F13. Native ASR thread export (server CLI)
+
+What it does: `t3 export-asr --all --output <new-directory>` (or `--thread <id>`) exports a
+read-only event-store snapshot as private ASR streams and `bundle.json`. Backing provider
+sessions are referenced; T3 owns orchestration provenance. Design, losses and L2 considerations:
+[ASR export proposal](../proposals/asr-export.md).
+
+Fork-owned: `apps/server/src/asr/` and `apps/server/src/cli/asr.ts`.
+
+Touch point: `apps/server/src/binCli.ts` imports and registers `asrCommand`.
+
+Verify: `vp test run apps/server/src/asr/AsrExport.test.ts`. Set `ASR_VALIDATOR` to the ASR
+reference validator's `bin/asr-validate.js` to validate synthetic bundles as well.
+
 ### C1. Nightly build and release workflow (CI)
 
 Fork-owned: `.github/workflows/custom-nightly-linux.yml` (`5bffb2ec49` through `f9bc6b8b22`,
