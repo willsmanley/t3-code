@@ -354,7 +354,8 @@ Touch points:
 - `apps/mobile/src/features/voice-input/VoiceInputProvider.tsx`: Android recording options and
   `RECORDING_LIMIT_SECONDS`; inside `voiceInputAtom`, the session's `recordingLimitSeconds`, the
   background-recording flag, `releaseRecording` instead of delete, no cancel on background while
-  recording, and pruning saved transcripts once per launch.
+  recording or while the microphone permission dialog is up (it pauses the app, so the first try
+  would otherwise stop), and pruning saved transcripts once per launch.
 - `apps/mobile/src/features/voice-input/voiceInputSession.ts`: the elapsed-time clamp uses
   `recordingLimitSeconds`, so the Android timer runs past five minutes.
 - `apps/mobile/src/lib/audioSession.ts`: an `allowsBackgroundRecording` parameter.
@@ -466,7 +467,8 @@ If upstream adds its own retry here, drop this one.
 
 What it does: the app shows up in Settings > Apps > Default apps > Digital assistant app. When it
 is chosen there, holding the power button (or swiping up from a bottom corner) opens a new thread
-in the build's assistant project, a fresh draft each time. The nightly sets that project's folder
+in the build's assistant project, a fresh draft each time, already recording through the F8 voice
+input (tap ✓ to drop the words into the draft, × to type instead). The nightly sets that project's folder
 with `T3CODE_ASSISTANT_PROJECT_ROOT` (Wills's Personal project). With no folder set, or no
 connected project at it, it opens Choose project instead. Android only needs an activity that
 handles `ACTION_ASSIST`; there is no voice interaction service, so there's no overlay on top of
@@ -476,7 +478,8 @@ Fork-owned files: `apps/mobile/plugins/withAndroidAssistant.cjs` adds an `ASSIST
 `MainActivity`, plus code that turns an assist launch into a `<scheme>://assist` link (in
 `onCreate`, before React Native reads the launch URL, and in `onNewIntent`).
 `apps/mobile/src/features/assistant/` holds `useAssistantLaunch.ts`, which waits for the project
-and opens the draft, and `assistantLaunch.ts` (+ test).
+and opens the draft, `assistantDictation.ts`, which starts recording in that draft's composer, and
+`assistantLaunch.ts` (+ test, which covers both).
 
 Touch points:
 
@@ -484,6 +487,9 @@ Touch points:
 - `apps/mobile/src/Stack.tsx`: `useAssistantLaunch()` next to `useAppShortcuts(props.state)`.
 - `apps/mobile/src/lib/appLinking.ts`: `shouldHandleAppLink` ignores the assist link, so the
   router doesn't open NotFound for it.
+- `apps/mobile/src/features/threads/ThreadComposer.tsx`: `useAssistantDictation(...)` right after
+  `useVoiceInputController(...)`, passing `props.draftKey` only for new drafts (not
+  `composerDraftKey`, which stands in a placeholder key until the draft exists).
 - `.github/workflows/custom-nightly-linux.yml`: `T3CODE_ASSISTANT_PROJECT_ROOT` in the Android job.
 
 Verify:
@@ -495,7 +501,8 @@ Verify:
 - On a device or emulator with the APK installed:
   `adb shell cmd role add-role-holder android.app.role.ASSISTANT com.willsmanley.t3code`, then
   `adb shell input keyevent KEYCODE_ASSIST` opens a new thread in the assistant project, both when
-  the app is closed and when it is in the background.
+  the app is closed and when it is in the background, with the recording timer running (or the
+  "Add an ElevenLabs API key" notice when none is saved).
 
 ### C1. Nightly build and release workflow (CI)
 

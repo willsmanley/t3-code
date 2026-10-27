@@ -81,6 +81,8 @@ const voiceInputAtom = Atom.make((get) => {
     Array<number>(VOICE_WAVEFORM_SAMPLE_COUNT).fill(0),
   );
   let keepAwakeSequence = 0;
+  // Android's permission dialog pauses the app, which AppState reports as the background.
+  let requestingPermission = false;
   let audioToken: ReturnType<typeof acquireAudioSession> | null = null;
   const recorder = createLazyVoiceRecorder({
     create: () => new AudioModule.AudioRecorder(VOICE_RECORDING_OPTIONS),
@@ -113,8 +115,13 @@ const voiceInputAtom = Atom.make((get) => {
     recordingLimitSeconds: RECORDING_LIMIT_SECONDS,
     getTranscriber: getLocalVoiceTranscriber,
     requestPermission: async () => {
-      const permission = await requestRecordingPermissionsAsync();
-      return { granted: permission.granted, canAskAgain: permission.canAskAgain };
+      requestingPermission = true;
+      try {
+        const permission = await requestRecordingPermissionsAsync();
+        return { granted: permission.granted, canAskAgain: permission.canAskAgain };
+      } finally {
+        requestingPermission = false;
+      }
     },
     configureRecording: async () => {
       const token = acquireAudioSession("recording");
@@ -147,8 +154,14 @@ const voiceInputAtom = Atom.make((get) => {
   // route interruptions during capture.
   const appStateSubscription = AppState.addEventListener("change", (nextState) => {
     if (nextState !== "background") return;
-    // Android records in the background, so only preparation is cancelled.
-    if (Platform.OS === "android" && session.controller.currentState.phase === "recording") return;
+    // Android records in the background, so only preparation is cancelled, and not while the
+    // permission dialog is what paused the app.
+    if (
+      Platform.OS === "android" &&
+      (session.controller.currentState.phase === "recording" || requestingPermission)
+    ) {
+      return;
+    }
     void session.controller.appMovedToBackground();
   });
   if (Platform.OS === "android") {

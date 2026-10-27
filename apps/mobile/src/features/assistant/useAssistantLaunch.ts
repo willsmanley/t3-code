@@ -7,6 +7,7 @@ import { uuidv4 } from "../../lib/uuid";
 import { useProjects } from "../../state/entities";
 import { useWorkspaceState } from "../../state/workspace";
 import { selectWorkspaceDetail } from "../workspace/workspace-detail-selection";
+import { requestAssistantDictation } from "./assistantDictation";
 import { assistantDraftParams, isAssistantLaunchUrl } from "./assistantLaunch";
 
 const configuredProjectRoot = Constants.expoConfig?.extra?.assistantProjectRoot;
@@ -17,7 +18,8 @@ const ASSISTANT_PROJECT_ROOT =
 
 /**
  * Each time Android opens the app as its digital assistant, start a new thread in the build's
- * assistant project. Without one, or when no connected environment has it, open Choose project.
+ * assistant project, already listening. Without one, or when no connected environment has it,
+ * open Choose project.
  */
 export function useAssistantLaunch(): void {
   const navigation = useNavigation();
@@ -59,6 +61,7 @@ export function useAssistantLaunch(): void {
       linkTo("/new");
       return;
     }
+    requestAssistantDictation();
     navigation.dispatch(selectWorkspaceDetail({ name: "Thread", params: { draft } }));
   }, [launchId, linkTo, loadingProjects, navigation, projects]);
 }

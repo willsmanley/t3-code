@@ -2,6 +2,7 @@ import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { shouldHandleAppLink } from "../../lib/appLinking";
+import { requestAssistantDictation, takeAssistantDictation } from "./assistantDictation";
 import { assistantDraftParams, isAssistantLaunchUrl } from "./assistantLaunch";
 
 const personal = {
@@ -45,5 +46,18 @@ describe("assistantDraftParams", () => {
   it("returns null without a configured folder or a matching project", () => {
     expect(assistantDraftParams([personal], null, "launch-1")).toBeNull();
     expect(assistantDraftParams([school], "/home/user/personal", "launch-1")).toBeNull();
+  });
+});
+
+describe("takeAssistantDictation", () => {
+  it("starts dictation once per launch", () => {
+    requestAssistantDictation(1_000);
+    expect(takeAssistantDictation(2_000)).toBe(true);
+    expect(takeAssistantDictation(2_000)).toBe(false);
+  });
+
+  it("drops a launch whose draft never opened", () => {
+    requestAssistantDictation(1_000);
+    expect(takeAssistantDictation(60_000)).toBe(false);
   });
 });
