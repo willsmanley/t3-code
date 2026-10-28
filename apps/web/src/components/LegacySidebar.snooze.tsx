@@ -26,11 +26,9 @@ import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
 import type { useThreadActions } from "../hooks/useThreadActions";
 import { readLocalApi } from "../localApi";
-import {
-  readEnvironmentSupportsSnooze,
-  useServerConfigs,
-  useThreadShells,
-} from "../state/entities";
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import { useDelegatedUnderParent, useServerConfigs, useThreadShells } from "../state/entities";
+import { environmentServerConfigsAtom } from "../state/server";
 import { readEnvironmentScope } from "../state/session";
 import type { SidebarProjectSnapshot } from "../sidebarProjectGrouping";
 import { useThreadSelectionStore } from "../threadSelectionStore";
@@ -180,14 +178,22 @@ async function runSnoozeChoice(
   if (preset) await snoozeThreads(threadRefs, preset.snoozedUntil);
 }
 
-function currentSnoozePresets() {
-  return resolveSnoozePresets(new Date(), getClientSettings().timestampFormat);
+function readEnvironmentSupportsSnooze(environmentId: EnvironmentId): boolean {
+  return (
+    appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities
+      .threadSnooze === true
+  );
+}
+
+function currentSnoozePresets(environmentId: EnvironmentId | undefined) {
+  if (environmentId === undefined) return [];
+  return resolveSnoozePresets(new Date(), getClientSettings().timestampFormat, environmentId);
 }
 
 /** Snooze or Wake for one thread's context menu; `handle` returns whether it took the click. */
 export function legacyThreadSnoozeMenu(thread: EnvironmentThreadShell) {
   const now = new Date().toISOString();
-  const snoozePresets = currentSnoozePresets();
+  const snoozePresets = currentSnoozePresets(thread.environmentId);
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const items = buildLegacySnoozeMenuItems({
     canOperate: readEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope),
@@ -208,7 +214,8 @@ export function legacyThreadSnoozeMenu(thread: EnvironmentThreadShell) {
 /** Snooze for the multi-select menu, shown when every selected thread can snooze now. */
 export function legacyBulkSnoozeMenu(threads: readonly EnvironmentThreadShell[]) {
   const now = new Date().toISOString();
-  const snoozePresets = currentSnoozePresets();
+  // Presets sync across environments, so the first selected thread's stand for all.
+  const snoozePresets = currentSnoozePresets(threads[0]?.environmentId);
   const threadRefs = threads.map((thread) => scopeThreadRef(thread.environmentId, thread.id));
   const items = buildLegacyBulkSnoozeMenuItems({
     count: threads.length,
@@ -243,8 +250,9 @@ export function LegacySnoozedSection(props: {
 }) {
   const { projects, routeThreadKey } = props;
   const threads = useThreadShells();
+  const delegatedUnderParent = useDelegatedUnderParent();
   const partition = useLegacySnoozePartition();
-  const { snoozed } = partition(filterSidebarV2VisibleThreads(threads, null));
+  const { snoozed } = partition(filterSidebarV2VisibleThreads(threads, null, delegatedUnderParent));
   const [expanded, setExpanded] = useLocalStorage(
     SNOOZED_SECTION_EXPANDED_KEY,
     false,
