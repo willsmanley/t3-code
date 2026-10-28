@@ -18,7 +18,7 @@ import {
   releaseRecording,
   type SavedRecording,
 } from "../voice-input/savedRecordings";
-import { SettingsActionRow } from "./components/SettingsActionRow";
+import { ListActionRow as SettingsActionRow } from "../../components/ui/ListActionRow";
 import { SettingsSection } from "./components/SettingsSection";
 
 const SAVED_AT_FORMAT = new Intl.DateTimeFormat(undefined, {
@@ -35,7 +35,7 @@ export function VoiceTranscriptionSettings() {
   const [recordings, setRecordings] = useState<ReadonlyArray<SavedRecording>>([]);
   const [transcribingId, setTranscribingId] = useState<string | null>(null);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- reads whether a key is saved in secure storage
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads whether a key is saved in secure storage
   useEffect(() => {
     void readElevenLabsApiKey().then(
       (key) => setHasKey(key !== null),

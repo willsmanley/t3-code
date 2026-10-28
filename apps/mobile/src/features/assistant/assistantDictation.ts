@@ -27,7 +27,7 @@ export function useAssistantDictation(
   available: boolean,
   start: () => void,
 ): void {
-  // oxlint-disable-next-line t3code/react-effect-budget -- starts the microphone once the assistant's draft composer is ready
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- starts the microphone once the assistant's draft composer is ready
   useEffect(() => {
     if (ownerKey !== null && available && takeAssistantDictation()) start();
   }, [ownerKey, available, start]);

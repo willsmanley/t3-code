@@ -2,10 +2,6 @@ import {
   makeAggregateState,
   TERMINAL_AGENT_ACTIVITY_DISPLAY_TTL_MS,
 } from "@t3tools/shared/agentActivityAggregate";
-export {
-  makeAggregateState,
-  TERMINAL_AGENT_ACTIVITY_DISPLAY_TTL_MS,
-} from "@t3tools/shared/agentActivityAggregate";
 import type {
   RelayAgentActivityState,
   RelayDeliveryResult,
@@ -55,7 +51,7 @@ export class AgentActivityPublisher extends Context.Service<
   }
 >()("t3code-relay/agentActivity/AgentActivityPublisher") {}
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const rows = yield* AgentActivityRows.AgentActivityRows;
   const links = yield* EnvironmentLinks.EnvironmentLinks;
   const liveActivities = yield* LiveActivities.LiveActivities;

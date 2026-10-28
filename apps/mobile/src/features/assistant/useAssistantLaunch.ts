@@ -30,7 +30,7 @@ export function useAssistantLaunch(): void {
   const [launchId, setLaunchId] = useState<string | null>(null);
   const handledLaunchIdRef = useRef<string | null>(null);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- subscribes to the launch link; the router ignores it
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to the launch link; the router ignores it
   useEffect(() => {
     let cancelled = false;
     void Linking.getInitialURL().then((url) => {
@@ -51,7 +51,7 @@ export function useAssistantLaunch(): void {
       catalogState.hasConnectingEnvironment &&
       catalogState.connectionError === null);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- navigates once the launch's project has loaded
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- navigates once the launch's project has loaded
   useEffect(() => {
     if (launchId === null || handledLaunchIdRef.current === launchId) return;
     const draft = assistantDraftParams(projects, ASSISTANT_PROJECT_ROOT, launchId);

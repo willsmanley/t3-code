@@ -88,7 +88,7 @@ function DragHandle(
   },
 ) {
   const [drag] = useState(createDragGesture);
-  // oxlint-disable-next-line t3code/react-effect-budget -- the gesture runs outside React and needs the latest handlers
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the gesture runs outside React and needs the latest handlers
   useEffect(() => {
     drag.setHandlers(props);
   });
@@ -140,12 +140,12 @@ export function ProjectArrangementSheet(props: {
     setPreview(null);
   }
   const orderVersion = projects.map((project) => project.key).join("\n");
-  // oxlint-disable-next-line t3code/react-effect-budget -- a saved move ends the drag and its pending animation frame
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a saved move ends the drag and its pending animation frame
   useEffect(() => {
     // oxlint-disable-next-line react/exhaustive-effect-dependencies, react/set-state-in-effect -- A saved move cancels the drag and clears its preview; stop only touches refs and state setters.
     stop();
   }, [orderVersion]);
-  // oxlint-disable-next-line t3code/react-effect-budget -- cancels a pending animation frame on unmount
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- cancels a pending animation frame on unmount
   useEffect(
     () => () => {
       if (frame.current !== null) cancelAnimationFrame(frame.current);
