@@ -510,10 +510,6 @@ const registerDeviceWithDirectPush = Effect.fn("remoteRegistration.registerDevic
       );
     });
     if (due.length > 0) {
-      logRegistrationDebug("direct push device registration request started", {
-        environmentCount: due.length,
-        registered: registration !== null,
-      });
       const accepted = yield* Effect.promise(() =>
         target.send({
           environmentIds: due,
