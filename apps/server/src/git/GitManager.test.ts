@@ -768,6 +768,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
                   VcsDriverRegistry.layer.pipe(
                     Layer.provide(VcsProjectConfig.layer),
                     Layer.provide(VcsProcess.layer),
+                    Layer.provide(ServerSettings.layerTest()),
                   ),
                 ),
               ),
