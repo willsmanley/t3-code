@@ -118,10 +118,12 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
         void scratch.startScratchThread(environmentId);
       },
       "chat.new": (event) => {
-        // Pre-hydration settings are the defaults, where the legacy sidebar is off.
-        const legacySidebar =
-          getClientSettings().legacySidebarEnabled || isElectron || forceLegacySidebar;
-        if (!legacySidebar && readProjectGroupCount() > 1) {
+        // The boring sidebar's folders already show the context, so it starts in
+        // the current project like the legacy sidebar did.
+        const { boringSidebarEnabled, legacySidebarEnabled } = getClientSettings();
+        const boringSidebar =
+          boringSidebarEnabled || legacySidebarEnabled || isElectron || forceLegacySidebar;
+        if (!boringSidebar && readProjectGroupCount() > 1) {
           claim(event);
           openCommandPalette({ open: "new-thread-in" });
           return;
