@@ -40,14 +40,17 @@ Measurements in the hotspot table are from fork main `ea7c8bf901` and upstream `
 
 ## 1. Fork features
 
-### F1. Desktop uses the project-tree sidebar, with a lighter look (web/desktop)
+### F1. Desktop groups sidebar threads by project (web/desktop)
 
-Commits `d3187229ad`, `29237dd70b`, `9a37a396d9`, `8ca12e915d`, `2015876939`.
+Commits `d3187229ad`, `29237dd70b`, `9a37a396d9`, `8ca12e915d`, `2015876939`; moved to upstream's
+boring sidebar on October 29, 2026.
 
 What it does: desktop (Electron), and web preview builds made with `VITE_T3CODE_LEGACY_SIDEBAR=1`,
-always use the project-tree ("legacy") sidebar, with projects in manual order. The sidebar is also
-lighter: no project favicons, no remote-environment icons or labels, a small status dot in a fixed
-column left of the title, and short timestamps like "5m".
+always use upstream's "boring sidebar", which folds active threads into a folder per project with
+Snoozed and Settled below. Elsewhere it stays the Labs setting. Upstream deleted the old project
+sidebar (`LegacySidebar.tsx`, `4e4d4ba395`), and with it the fork's lighter look there (no
+favicons or environment icons, a status dot column, compact times, manual project order) and the
+fork's own snooze menus (F2), which upstream's sidebar now has.
 
 Fork-owned files: none.
 
@@ -55,51 +58,21 @@ Touch points:
 
 - `apps/web/src/env.ts`: adds `forceLegacySidebar` (reads `VITE_T3CODE_LEGACY_SIDEBAR`).
 - `apps/web/vite.config.ts`, `apps/web/src/vite-env.d.ts`: define and type that variable.
-- `apps/web/src/components/AppSidebarLayout.tsx`: `useLegacySidebarEnabled() || isElectron || forceLegacySidebar`.
+- `apps/web/src/hooks/useSettings.ts`: `useBoringSidebarEnabled` also returns true for
+  `isElectron || forceLegacySidebar`.
 - `apps/web/src/shortcuts/chatRouteCommands.ts`: the `chat.new` shortcut treats desktop as using
-  the project sidebar (`legacySidebarEnabled || isElectron || forceLegacySidebar`).
-- `apps/web/src/components/LegacySidebar.tsx`: removes `ProjectFavicon`, `EnvironmentMachineIcon`
-  and the remote-environment label code from thread rows and project headers. Moves
-  `ThreadStatusLabel compact` into a left column. Uses `<RelativeTime compact>`. Forces
-  `sidebarProjectSortOrder` to `"manual"` on Electron.
-- `apps/web/src/components/RelativeTime.tsx`: adds a `compact` prop that drops the suffix.
+  the boring sidebar.
 - `apps/web/src/components/ThreadStatusIndicators.tsx`: dot size `size-[9px]` → `size-1.5`.
 
 Verify (no tests cover this):
 
-- `grep -n "isElectron || forceLegacySidebar" apps/web/src/components/AppSidebarLayout.tsx apps/web/src/shortcuts/chatRouteCommands.ts` (one hit each).
-- `grep -n 'isElectron ? "manual"' apps/web/src/components/LegacySidebar.tsx` (one hit).
-- `grep -n "ProjectFavicon\|EnvironmentMachineIcon" apps/web/src/components/LegacySidebar.tsx` (no hits).
-- Look at the desktop nightly: project tree, small dots, compact times.
+- `grep -n "isElectron || forceLegacySidebar" apps/web/src/hooks/useSettings.ts apps/web/src/shortcuts/chatRouteCommands.ts` (one hit each).
+- Look at the desktop nightly: project folders without turning on the Labs setting.
 
-### F2. Snooze threads from the project sidebar (web/desktop)
+### F2. Snooze from the project sidebar (now upstream)
 
-Commit `83c5b5df96`.
-
-What it does: the project sidebar's thread menu and multi-select menu can snooze and unsnooze.
-Snoozed threads leave their project and appear in a "Snoozed" section at the bottom.
-
-Fork-owned files: `apps/web/src/components/LegacySidebar.snooze.tsx`,
-`LegacySidebar.snooze.logic.ts`, `LegacySidebar.snooze.logic.test.ts`.
-
-Touch points:
-
-- `apps/web/src/components/LegacySidebar.tsx`: one import block; `useWithoutLegacySnoozed()`
-  wraps `filterSidebarV2VisibleThreads` in `useProjectThreads`, `useSortedLegacySidebarProjects`
-  and `useLegacySidebarThreads`; `legacyThreadSnoozeMenu` / `legacyBulkSnoozeMenu` items are spread
-  into the two context menus, followed by `if (snoozeMenu.handle(clicked)) ...`;
-  `<LegacySnoozedSection>` after the projects group; `useProvideLegacySnoozeActions(...)` in the
-  root component.
-- Depends on upstream `useThreadActions()` returning `snoozeThread` and `unsnoozeThread`,
-  `resolveSnoozePresets(now, timestampFormat, environmentId)`, and
-  `filterSidebarV2VisibleThreads(threads, scope, useDelegatedUnderParent())`. The fork file keeps
-  its own `readEnvironmentSupportsSnooze`.
-
-Verify:
-
-- `vp test run apps/web/src/components/LegacySidebar.snooze.logic.test.ts`
-- `grep -c "LegacySnoozedSection\|useWithoutLegacySnoozed\|legacyThreadSnoozeMenu\|legacyBulkSnoozeMenu\|useProvideLegacySnoozeActions" apps/web/src/components/LegacySidebar.tsx`
-  (12 today; fewer means a hook was dropped).
+The fork's snooze menus and Snoozed section for the old project sidebar are gone; upstream's
+boring sidebar has both.
 
 ### F3. "Fork conversation" and "Copy provider session ID" in thread menus (web/desktop)
 
@@ -126,12 +99,11 @@ Touch points:
   `copy-provider-session-id`, plus their items (+ test).
 - `apps/web/src/hooks/useThreadActionMenu.ts`: two switch cases (+ test).
 - `apps/web/src/components/Sidebar.tsx`: hook call and two switch cases.
-- `apps/web/src/components/LegacySidebar.tsx`: hook call, two menu items, two handlers.
 
 Verify:
 
 - `vp test run apps/web/src/hooks/useThreadConversationActions.test.ts apps/web/src/lib/threadProviderIdentity.test.ts apps/web/src/components/threadActionMenu.logic.test.ts apps/web/src/hooks/useThreadActionMenu.test.ts packages/client-runtime/src/operations/commands.test.ts`
-- `grep -ln '"fork-conversation"' apps/web/src/components/Sidebar.tsx apps/web/src/components/LegacySidebar.tsx apps/web/src/hooks/useThreadActionMenu.ts apps/web/src/components/threadActionMenu.logic.ts` (all four files listed).
+- `grep -ln '"fork-conversation"' apps/web/src/components/Sidebar.tsx apps/web/src/hooks/useThreadActionMenu.ts apps/web/src/components/threadActionMenu.logic.ts` (all three files listed).
 
 ### F4. Scheduler: time zones, active hours, one-off tasks, tasks that end themselves
 
@@ -632,7 +604,7 @@ commits that touched it in the 30 days since 2026-09-26 (`git log --since=2026-0
 | 2   | apps/server/src/scheduledTasks/ScheduledTaskService.ts                      | +200/−42 (242) | 23                      | 5,566 | F4         | 0       |
 | 3   | apps/web/src/components/settings/ScheduledTasksSettings.tsx                 | +236/−17 (253) | 21                      | 5,313 | F4         | 0       |
 | 4   | apps/mobile/src/features/threads/ThreadNavigationSidebar.tsx                | +109/−21 (130) | 31                      | 4,030 | F7, F9     | 3       |
-| 5   | apps/web/src/components/LegacySidebar.tsx                                   | +67/−79 (146)  | 27                      | 3,942 | F1, F2, F3 | 2       |
+| 5   | apps/web/src/components/LegacySidebar.tsx (deleted upstream)                | +67/−79 (146)  | 27                      | 3,942 | F1, F2, F3 | 2       |
 | 6   | apps/mobile/src/features/home/HomeScreen.tsx                                | +100/−6 (106)  | 31                      | 3,286 | F7, F9     | 2       |
 | 7   | apps/server/src/relay/AgentAwarenessRelay.test.ts (test)                    | +114/−3 (117)  | 24                      | 2,808 | F6         | 0       |
 | 8   | apps/mobile/src/features/threads/thread-list-v2-items.tsx                   | +93/−1 (94)    | 28                      | 2,632 | F7, F9     | 3       |
@@ -725,15 +697,8 @@ need a quick try before you rely on them.
    Do (a) and (b) now. Do (c) only if this file conflicts. About 40 lines (upsert validation,
    active-hours deferral) will remain whatever you do.
 
-6. **`LegacySidebar.tsx` (#5, 146 lines).**
-   - (a) Give "Fork conversation" and "Copy provider session ID" the same shape as the snooze
-     menu: `legacyConversationMenu({ threadRef, canOperate })`, in a new
-     `apps/web/src/components/LegacySidebar.conversation.tsx`, returning `{ items, handle }`.
-   - (b) Then join it with snooze into one `forkThreadMenu(thread)`. Each context menu keeps one
-     spread and one `if (await menu.handle(clicked)) return;`.
-   - Not worth isolating: the F1 style deletions (favicon, environment icons, status column,
-     compact time). They remove upstream JSX, and there's nothing to move out. They're listed
-     under F1; when upstream reworks the row, re-apply them by intent.
+6. **`LegacySidebar.tsx` (#5).** Done: upstream deleted the file and the fork moved to its boring
+   sidebar (F1).
 
 7. **`AgentAwarenessRelay.test.ts` (#7) and `AgentAwarenessRelay.ts` (#13).**
    - (a) Let `AgentAwarenessRelay` get DirectPush through `Effect.serviceOption(DirectPush.DirectPush)`,
