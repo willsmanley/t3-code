@@ -22,10 +22,12 @@ import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/
 import { getNativeShowcaseScene } from "../showcase/nativeShowcaseScene";
 import {
   VOICE_RECORDING_LIMIT_SECONDS,
+  pruneSavedTranscripts,
+  releaseRecording,
   voiceInputBlocksSubmission,
 } from "@t3tools/client-runtime/voice-input";
 import { createLazyVoiceRecorder } from "./lazyVoiceRecorder";
-import { pruneSavedTranscripts, releaseRecording } from "./savedRecordings";
+import { androidRecordings } from "./savedRecordings";
 import { VOICE_WAVEFORM_SAMPLE_COUNT } from "./voiceInputMetering";
 import { VoiceInputSession } from "./voiceInputSession";
 import {
@@ -139,7 +141,9 @@ const voiceInputAtom = Atom.make((get) => {
       audioToken = null;
     },
     deleteRecording: (uri) =>
-      Platform.OS === "android" ? releaseRecording(uri) : new File(uri).delete(),
+      Platform.OS === "android"
+        ? void releaseRecording(androidRecordings, uri).catch(() => {})
+        : new File(uri).delete(),
     sampleRecording: () => {
       const status = recorder.getStatus();
       return status?.isRecording
@@ -166,9 +170,7 @@ const voiceInputAtom = Atom.make((get) => {
   });
   if (Platform.OS === "android") {
     // Transcribed recordings are cleared from document storage once per launch.
-    try {
-      pruneSavedTranscripts();
-    } catch {}
+    void pruneSavedTranscripts(androidRecordings).catch(() => {});
   }
   get.addFinalizer(() => {
     appStateSubscription.remove();

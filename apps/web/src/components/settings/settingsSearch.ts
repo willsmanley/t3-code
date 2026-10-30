@@ -591,6 +591,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["queue steer running turn send default behavior composer"],
   },
   {
+    id: "voice-recordings",
+    title: "Saved voice recordings",
+    to: "/settings/chat",
+    searchTerms: ["voice input microphone mic dictation transcription transcript elevenlabs"],
+  },
+  {
     id: "provider-update-checks",
     title: "Provider update checks",
     to: "/settings/maintenance",

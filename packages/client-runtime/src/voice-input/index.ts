@@ -20,6 +20,16 @@ export {
 export {
   ELEVENLABS_SPEECH_TO_TEXT_FIELDS,
   ELEVENLABS_SPEECH_TO_TEXT_URL,
-  transcribeWithElevenLabs,
+  createElevenLabsTranscriber,
+  retrySavedRecording,
+  type ElevenLabsRecordings,
   type ElevenLabsUploadResponse,
 } from "./elevenLabs.ts";
+export {
+  deleteSavedRecording,
+  listSavedRecordings,
+  pruneSavedTranscripts,
+  releaseRecording,
+  type SavedRecording,
+  type SavedRecordingStorage,
+} from "./savedRecordings.ts";

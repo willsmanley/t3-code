@@ -7,17 +7,18 @@ import { Button } from "../../components/ui/Button";
 import * as Dialog from "../../components/ui/Dialog";
 import { AppText as Text } from "../../components/ui/AppText";
 import {
+  deleteSavedRecording,
+  listSavedRecordings,
+  retrySavedRecording,
+  type SavedRecording,
+} from "@t3tools/client-runtime/voice-input";
+import {
+  androidElevenLabsRecordings,
   clearElevenLabsApiKey,
   readElevenLabsApiKey,
   saveElevenLabsApiKey,
-  transcribeRecording,
 } from "../voice-input/elevenLabsTranscription";
-import {
-  deleteSavedRecording,
-  listSavedRecordings,
-  releaseRecording,
-  type SavedRecording,
-} from "../voice-input/savedRecordings";
+import { androidRecordings } from "../voice-input/savedRecordings";
 import { ListActionRow as SettingsActionRow } from "../../components/ui/ListActionRow";
 import { SettingsSection } from "./components/SettingsSection";
 
@@ -43,7 +44,7 @@ export function VoiceTranscriptionSettings() {
     );
   }, []);
   const refresh = useCallback(() => {
-    void listSavedRecordings().then(setRecordings, () => setRecordings([]));
+    void listSavedRecordings(androidRecordings).then(setRecordings, () => setRecordings([]));
   }, []);
   useFocusEffect(refresh);
 
@@ -65,22 +66,13 @@ export function VoiceTranscriptionSettings() {
     });
 
   const transcribe = async (recording: SavedRecording) => {
-    const apiKey = await readElevenLabsApiKey();
-    if (!recording.audioUri || !apiKey) {
-      Dialog.alert("Add an ElevenLabs API key first.");
-      return;
-    }
+    if (!recording.audioUri) return;
     setTranscribingId(recording.id);
     try {
-      const transcript = await transcribeRecording(recording.audioUri, {
-        apiKey,
-        signal: new AbortController().signal,
-        retryDelaysMs: [],
-      });
+      const transcript = await retrySavedRecording(androidElevenLabsRecordings, recording.audioUri);
       if (transcript.length === 0) {
         Dialog.alert("No speech was detected.", "The recording is still saved.");
       } else {
-        releaseRecording(recording.audioUri);
         Dialog.alert("Transcribed", transcript, [
           { text: "Done", style: "cancel" },
           { text: "Copy", onPress: () => void Clipboard.setStringAsync(transcript) },
@@ -102,10 +94,8 @@ export function VoiceTranscriptionSettings() {
       message: recording.transcript ? undefined : "It has not been transcribed.",
       confirmText: "Delete",
       destructive: true,
-      onConfirm: () => {
-        deleteSavedRecording(recording);
-        refresh();
-      },
+      onConfirm: () =>
+        void deleteSavedRecording(androidRecordings, recording).then(refresh, refresh),
     });
   const openRecording = (recording: SavedRecording) => {
     const title = SAVED_AT_FORMAT.format(recording.savedAt);

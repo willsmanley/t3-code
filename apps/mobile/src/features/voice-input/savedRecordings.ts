@@ -1,22 +1,15 @@
+import type { SavedRecording, SavedRecordingStorage } from "@t3tools/client-runtime/voice-input";
 import { Directory, File, Paths } from "expo-file-system";
 
 /**
  * Android records into document storage rather than the cache, so a long
- * recording survives a crash, a dead battery or a failed upload. Audio is only
- * deleted once its transcript is written beside it; until then it is listed in
- * Settings > Microphone and can be transcribed again.
+ * recording survives a crash, a dead battery or a failed upload. The rules for
+ * keeping and deleting recordings are shared with web, in
+ * `@t3tools/client-runtime/voice-input`; this is only where the files live.
  */
 // expo-audio writes recordings made with `directory: "document"` here.
 const RECORDINGS_DIRECTORY = "Audio";
 const TRANSCRIPT_EXTENSION = ".txt";
-const TRANSCRIPT_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
-
-export type SavedRecording = {
-  readonly id: string;
-  readonly audioUri: string | null;
-  readonly transcript: string | null;
-  readonly savedAt: number;
-};
 
 function recordingsDirectory(): Directory {
   const directory = new Directory(Paths.document, RECORDINGS_DIRECTORY);
@@ -24,76 +17,46 @@ function recordingsDirectory(): Directory {
   return directory;
 }
 
+function recordingFiles(): File[] {
+  return recordingsDirectory()
+    .list()
+    .filter((entry): entry is File => entry instanceof File);
+}
+
 function recordingId(name: string): string {
   const dot = name.lastIndexOf(".");
   return dot === -1 ? name : name.slice(0, dot);
 }
 
-function transcriptFile(audio: File): File {
-  return new File(audio.parentDirectory, `${recordingId(audio.name)}${TRANSCRIPT_EXTENSION}`);
+const isTranscript = (file: File) => file.name.endsWith(TRANSCRIPT_EXTENSION);
+
+function deleteFiles(id: string, transcript: boolean): void {
+  for (const file of recordingFiles()) {
+    if (recordingId(file.name) === id && isTranscript(file) === transcript) file.delete();
+  }
 }
 
-function modifiedAt(file: File): number {
-  return file.info().modificationTime ?? 0;
-}
-
-export async function saveTranscript(audioUri: string, transcript: string): Promise<void> {
-  const file = transcriptFile(new File(audioUri));
-  if (!file.exists) file.create({ intermediates: true, overwrite: true });
-  await file.write(transcript);
-}
-
-/** Deletes a recording's audio, but only once its transcript has been saved. */
-export function releaseRecording(audioUri: string): void {
-  const audio = new File(audioUri);
-  if (audio.exists && transcriptFile(audio).exists) audio.delete();
-}
-
-export async function listSavedRecordings(): Promise<SavedRecording[]> {
-  const byId = new Map<
-    string,
-    { audioUri: string | null; transcript: string | null; savedAt: number }
-  >();
-  for (const entry of recordingsDirectory().list()) {
-    if (!(entry instanceof File)) continue;
-    const id = recordingId(entry.name);
-    const recording = byId.get(id) ?? { audioUri: null, transcript: null, savedAt: 0 };
-    if (entry.name.endsWith(TRANSCRIPT_EXTENSION)) {
-      recording.transcript = await entry.text();
-    } else {
-      recording.audioUri = entry.uri;
+/** Each recording's audio and its transcript are files with the same name in one folder. */
+export const androidRecordings: SavedRecordingStorage = {
+  list: async () => {
+    const byId = new Map<string, SavedRecording>();
+    for (const file of recordingFiles()) {
+      const id = recordingId(file.name);
+      const recording = byId.get(id) ?? { id, audioUri: null, transcript: null, savedAt: 0 };
+      byId.set(id, {
+        ...recording,
+        ...(isTranscript(file) ? { transcript: await file.text() } : { audioUri: file.uri }),
+        savedAt: Math.max(recording.savedAt, file.info().modificationTime ?? 0),
+      });
     }
-    recording.savedAt = Math.max(recording.savedAt, modifiedAt(entry));
-    byId.set(id, recording);
-  }
-  return [...byId.entries()]
-    .map(([id, recording]) => ({ id, ...recording }))
-    .sort((left, right) => right.savedAt - left.savedAt);
-}
-
-export function deleteSavedRecording(recording: SavedRecording): void {
-  for (const entry of recordingsDirectory().list()) {
-    if (entry instanceof File && recordingId(entry.name) === recording.id) entry.delete();
-  }
-}
-
-/** Transcripts are kept for a week so a transcript that never reached its draft can be copied. */
-export function pruneSavedTranscripts(now = Date.now()): void {
-  const files = recordingsDirectory()
-    .list()
-    .filter((entry): entry is File => entry instanceof File);
-  const withAudio = new Set(
-    files
-      .filter((file) => !file.name.endsWith(TRANSCRIPT_EXTENSION))
-      .map((file) => recordingId(file.name)),
-  );
-  for (const file of files) {
-    if (
-      file.name.endsWith(TRANSCRIPT_EXTENSION) &&
-      !withAudio.has(recordingId(file.name)) &&
-      now - modifiedAt(file) > TRANSCRIPT_RETENTION_MS
-    ) {
-      file.delete();
-    }
-  }
-}
+    return [...byId.values()];
+  },
+  idForUri: (audioUri) => recordingId(new File(audioUri).name),
+  writeTranscript: async (id, transcript) => {
+    const file = new File(recordingsDirectory(), `${id}${TRANSCRIPT_EXTENSION}`);
+    if (!file.exists) file.create({ intermediates: true, overwrite: true });
+    await file.write(transcript);
+  },
+  deleteAudio: async (id) => deleteFiles(id, false),
+  deleteTranscript: async (id) => deleteFiles(id, true),
+};

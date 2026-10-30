@@ -1,5 +1,10 @@
 // @effect-diagnostics globalTimers:off - Retry waits run in client transcription, outside an Effect runtime.
-import { VoiceTranscriptionError, throwIfVoiceTranscriptionAborted } from "./transcription.ts";
+import { releaseRecording, saveTranscript, type SavedRecordingStorage } from "./savedRecordings.ts";
+import {
+  VoiceTranscriptionError,
+  throwIfVoiceTranscriptionAborted,
+  type VoiceTranscriber,
+} from "./transcription.ts";
 
 // The fork's Android and web voice input both transcribe with ElevenLabs Scribe.
 export const ELEVENLABS_SPEECH_TO_TEXT_URL = "https://api.elevenlabs.io/v1/speech-to-text";
@@ -18,7 +23,7 @@ export type ElevenLabsUploadResponse = { readonly status: number; readonly body:
  * server errors. `failureHint` ends every failure message, for example to say
  * where the recording was kept.
  */
-export async function transcribeWithElevenLabs(options: {
+async function transcribeWithElevenLabs(options: {
   readonly upload: (signal: AbortSignal) => Promise<ElevenLabsUploadResponse>;
   readonly signal: AbortSignal;
   readonly failureHint?: string;
@@ -50,6 +55,93 @@ export async function transcribeWithElevenLabs(options: {
     if (delay === undefined) throw fail("Could not reach ElevenLabs.");
     await wait(delay, signal);
   }
+}
+
+/** What a platform supplies to transcribe its kept recordings with ElevenLabs. */
+export type ElevenLabsRecordings = {
+  readonly storage: SavedRecordingStorage;
+  readonly readApiKey: () => Promise<string | null>;
+  /** The error when `readApiKey` finds no key. */
+  readonly missingKeyMessage: string;
+  /** Ends every failure message, to say where the recording is kept. */
+  readonly failureHint: string;
+  readonly upload: (
+    audioUri: string,
+    apiKey: string,
+    signal: AbortSignal,
+  ) => Promise<ElevenLabsUploadResponse>;
+};
+
+/**
+ * Transcribes a kept recording. The transcript is saved beside the audio
+ * before it is returned, which is what allows the audio to be deleted.
+ */
+export async function transcribeSavedRecording(
+  recordings: ElevenLabsRecordings,
+  audioUri: string,
+  options: {
+    readonly apiKey: string;
+    readonly signal: AbortSignal;
+    readonly retryDelaysMs?: ReadonlyArray<number>;
+    readonly wait?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
+  },
+): Promise<string> {
+  const transcript = await transcribeWithElevenLabs({
+    upload: (signal) => recordings.upload(audioUri, options.apiKey, signal),
+    signal: options.signal,
+    failureHint: recordings.failureHint,
+    ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
+    ...(options.wait ? { wait: options.wait } : {}),
+  });
+  // An empty result keeps the audio: a long recording with no words is
+  // more likely a fault than silence.
+  if (transcript.length > 0) await saveTranscript(recordings.storage, audioUri, transcript);
+  return transcript;
+}
+
+/** The composer's transcriber. The key is read once per dictation. */
+export function createElevenLabsTranscriber(
+  recordings: ElevenLabsRecordings,
+  locale: () => string,
+): VoiceTranscriber {
+  return {
+    prepare: async ({ signal }) => {
+      const apiKey = await requireApiKey(recordings, signal);
+      return {
+        locale: locale(),
+        transcribe: (audioUri, { signal: transcribeSignal }) =>
+          transcribeSavedRecording(recordings, audioUri, { apiKey, signal: transcribeSignal }),
+      };
+    },
+  };
+}
+
+/**
+ * Transcribes a kept recording again, from settings, without retries. Its
+ * audio is deleted once words come back.
+ */
+export async function retrySavedRecording(
+  recordings: ElevenLabsRecordings,
+  audioUri: string,
+): Promise<string> {
+  const apiKey = await requireApiKey(recordings);
+  const transcript = await transcribeSavedRecording(recordings, audioUri, {
+    apiKey,
+    signal: new AbortController().signal,
+    retryDelaysMs: [],
+  });
+  if (transcript.length > 0) await releaseRecording(recordings.storage, audioUri);
+  return transcript;
+}
+
+async function requireApiKey(
+  recordings: ElevenLabsRecordings,
+  signal?: AbortSignal,
+): Promise<string> {
+  const apiKey = await recordings.readApiKey();
+  if (signal) throwIfVoiceTranscriptionAborted(signal);
+  if (!apiKey) throw new VoiceTranscriptionError("unavailable", recordings.missingKeyMessage);
+  return apiKey;
 }
 
 function parseTranscript(body: string): string {

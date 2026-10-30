@@ -1,5 +1,6 @@
 import {
   VoiceInputController,
+  releaseRecording,
   type VoiceDraftSnapshot,
   type VoiceInputState,
 } from "@t3tools/client-runtime/voice-input";
@@ -11,8 +12,10 @@ import {
   WebVoiceRecorder,
   canRecordVoiceInput,
   getElevenLabsTranscriber,
+  pruneSavedTranscriptsOnce,
   requestMicrophonePermission,
 } from "../../voiceInput/elevenLabsVoiceInput";
+import { webRecordings } from "../../voiceInput/savedRecordings";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { toastManager } from "../ui/toast";
 
@@ -36,6 +39,7 @@ export function useComposerVoiceInput(input: {
   const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null);
   const getTranscriber = useStableCallback(() => getElevenLabsTranscriber(input.environmentId));
   const [controller] = useState(() => {
+    pruneSavedTranscriptsOnce();
     const recorder = new WebVoiceRecorder((status) => {
       void controller.handleRecorderStatus(status);
     });
@@ -46,7 +50,8 @@ export function useComposerVoiceInput(input: {
       requestPermission: requestMicrophonePermission,
       configureRecording: async () => {},
       releaseRecording: async () => recorder.releaseStream(),
-      deleteRecording: (uri) => URL.revokeObjectURL(uri),
+      // Keeps the audio until its transcript is saved, as on Android.
+      deleteRecording: (uri) => void releaseRecording(webRecordings, uri).catch(() => {}),
       readDraft: input.readDraft,
       commitDraft: input.commitDraft,
       onStateChange: (next) => {

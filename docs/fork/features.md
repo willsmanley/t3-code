@@ -328,12 +328,15 @@ behind a notification. It's transcribed with ElevenLabs speech-to-text, using an
 saves under Settings → Microphone (kept in secure storage). Recordings are kept until
 transcription succeeds, and the settings page lists them.
 
-Fork-owned files: `apps/mobile/src/features/voice-input/elevenLabsTranscription.ts` (+ test),
-`savedRecordings.ts`, `apps/mobile/src/features/settings/VoiceTranscriptionSettings.tsx`, and
+Fork-owned files: `apps/mobile/src/features/voice-input/elevenLabsTranscription.ts` (key and
+upload), `savedRecordings.ts` (where the files live),
+`apps/mobile/src/features/settings/VoiceTranscriptionSettings.tsx`, and
 `apps/mobile/src/native/voiceTranscription.android.ts`. That last file is a platform override of
 upstream's `voiceTranscription.ts`, so the Android build picks it up without any import change.
-The ElevenLabs URL, model, retries and error messages live in
-`packages/client-runtime/src/voice-input/elevenLabs.ts`, shared with web and desktop (F14).
+Everything else is shared with web and desktop (F14) in `packages/client-runtime/src/voice-input/`:
+`elevenLabs.ts` (URL, model, retries, error messages, the transcriber and the retry from settings)
+and `savedRecordings.ts` (keeping audio until its transcript is saved, listing, pruning), each with
+a test.
 
 Touch points:
 
@@ -357,7 +360,7 @@ Touch points:
 
 Verify:
 
-- `vp test run apps/mobile/src/features/voice-input/elevenLabsTranscription.test.ts packages/client-runtime/src/voice-input/controller.test.ts`
+- `vp test run packages/client-runtime/src/voice-input`
 - `grep -n "export function getLocalVoiceTranscriber" apps/mobile/src/native/voiceTranscription*.ts`
   (expect `.ts`, `.ios.ts` and `.android.ts`). If upstream adds its own `voiceTranscription.android.ts`
   or renames the function, the override breaks.
@@ -505,19 +508,28 @@ on the server, in its secret store as `<base-dir>/userdata/secrets/elevenlabs-ap
 600). Each time the mic starts, the client asks the thread's server for it over the
 `server.getElevenLabsApiKey` RPC (operate scope, which can already run commands there) and then
 uploads straight to ElevenLabs, so no audio goes over the WebSocket. Nothing is pasted in a browser
-or the desktop app; Android still keeps its own key (F8). Unlike Android, a recording that still
-fails after the shared retries is not kept. The browser only allows the microphone over HTTPS or
-localhost.
+or the desktop app; Android still keeps its own key (F8). Recordings are kept exactly as on
+Android, by the same shared code: audio is saved to IndexedDB a second at a time while recording,
+deleted only once its transcript is saved, and listed under Settings → Chat → Voice input with
+Transcribe, Copy and Delete. That retry asks each connected server for the key in turn. The
+browser only allows the microphone over HTTPS or localhost.
 
 Fork-owned files: `packages/client-runtime/src/voice-input/elevenLabs.ts` (shared with F8),
+`packages/client-runtime/src/voice-input/savedRecordings.ts` (+ test, shared with F8),
 `apps/web/src/voiceInput/elevenLabsVoiceInput.ts` (recorder, transcriber, key request),
+`apps/web/src/voiceInput/savedRecordings.ts` (IndexedDB storage),
 `apps/web/src/components/chat/useComposerVoiceInput.ts`,
-`apps/web/src/components/chat/ComposerVoiceInputControl.tsx`, and
-`apps/server/src/voiceInput/elevenLabsApiKey.ts`.
+`apps/web/src/components/chat/ComposerVoiceInputControl.tsx`,
+`apps/web/src/components/settings/VoiceRecordingsSettings.tsx`, and
+`apps/server/src/voiceInput/elevenLabsApiKey.ts` (+ test).
 
 Touch points:
 
-- `packages/client-runtime/src/voice-input/index.ts`: re-exports `elevenLabs.ts`.
+- `packages/client-runtime/src/voice-input/index.ts`: re-exports `elevenLabs.ts` and
+  `savedRecordings.ts`.
+- `apps/web/src/components/settings/SettingsPanels.tsx`: `<VoiceRecordingsSettingsSection />` at
+  the end of `ChatSettingsPanel`.
+- `apps/web/src/components/settings/settingsSearch.ts`: the `voice-recordings` item.
 - `apps/web/src/components/chat/ChatComposer.tsx`: two imports; the voice block right after
   `applyPromptReplacementStable` (owner key, `readVoiceInputDraft`, `commitVoiceInputDraft`,
   `useComposerVoiceInput`); `voiceInputBusy` in `submitComposer`'s guard, the editor's `disabled`
@@ -534,9 +546,10 @@ Touch points:
 
 Verify:
 
-- `vp test run apps/mobile/src/features/voice-input/elevenLabsTranscription.test.ts packages/client-runtime/src/voice-input/controller.test.ts`
-- `grep -c "voiceInputBusy" apps/web/src/components/chat/ChatComposer.tsx` (four) and
-  `grep -c "<ComposerVoiceInputControl" apps/web/src/components/chat/ChatComposer.tsx` (one).
+- `vp test run packages/client-runtime/src/voice-input apps/server/src/voiceInput`
+- `grep -c "voiceInputBusy" apps/web/src/components/chat/ChatComposer.tsx` (four),
+  `grep -c "<ComposerVoiceInputControl" apps/web/src/components/chat/ChatComposer.tsx` (one) and
+  `grep -c "<VoiceRecordingsSettingsSection" apps/web/src/components/settings/SettingsPanels.tsx` (one).
 - `grep -ln "serverGetElevenLabsApiKey" apps/server/src/ws.ts apps/server/src/auth/RpcAuthorization.ts apps/server/src/observability/RpcInstrumentation.ts packages/contracts/src/rpc.ts` (all four).
 - If upstream ships its own web voice input, compare the two and drop this one.
 
