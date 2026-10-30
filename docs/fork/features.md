@@ -27,7 +27,8 @@ Measurements in the hotspot table are from fork main `ea7c8bf901` and upstream `
   and the `SettingsActionRow` re-export in October 2026), even when the fork uses it. The
   typecheck finds these. Prefer a small copy in the fork-owned file over restoring upstream's.
 - **New upstream rules reach fork-owned files.** Upstream adds lint rules and compile checks
-  (React Compiler coverage, effect reasons: every effect needs
+  (React Compiler coverage, which also runs in `check:changed` and rejects `finally` and `throw`
+  inside `try` in hooks; effect reasons: every effect needs
   `// oxlint-disable-next-line t3code/no-unreasoned-state-sync -- <why>`) often. The merge doesn't touch fork-owned files, so
   only the check against `origin/main` catches them. Follow upstream's fix or suppression pattern
   in the matching upstream file.
@@ -130,7 +131,9 @@ Touch points:
   `isMissedFixedTimeRun` to `isMissedRun` (+ `Schedule.test.ts`).
 - `apps/server/src/scheduledTasks/ScheduledTaskService.ts`: `nextRunState` / `endedMessage`
   replace `nextRunAt`. SQL updates switch ended tasks off (`enabled = CASE WHEN ... THEN 0`).
-  `runDueTasks` calls `endExpiredWebhookTasks`, defers runs that fall outside active hours,
+  `runDueTasks` calls `endExpiredWebhookTasks`, which also returns the next webhook end time so
+  upstream's idle wake-up (only queries when a run is due) still switches webhooks off on time;
+  it defers runs that fall outside active hours,
   validates one-off times on upsert, and applies webhook run limits
   (+ `ScheduledTaskService.schedule.test.ts`, `ScheduledTaskService.webhook.test.ts`).
 - `apps/server/src/mcp/OrchestratorMcpService.ts`: `runCount` in the summary; a new `at` turns a
@@ -193,7 +196,8 @@ Touch points:
   (on its VcsDriverRegistry layer), `apps/server/scripts/evaluate-thread-titles.ts`.
 - `apps/web/src/components/settings/ProjectDefaultsSettings.tsx`: the switch row.
   `settingsSearch.ts`: the `git-integration` search entry.
-  `apps/web/src/components/chat/ThreadDetailsPanel.tsx`: hides "Version Control" when off.
+  `apps/web/src/components/chat/ThreadDetailsPanel.tsx`: the `show.branch` and `show.git` flags
+  are false when off, so the details card has no Git rows.
 - `apps/mobile/src/features/settings/SettingsServerControlsRouteScreen.tsx`: a "Git" section with
   the switch row, first on the `source-control` page.
 - `docs/user/source-control.md`.
