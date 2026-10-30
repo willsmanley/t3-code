@@ -332,6 +332,8 @@ Fork-owned files: `apps/mobile/src/features/voice-input/elevenLabsTranscription.
 `savedRecordings.ts`, `apps/mobile/src/features/settings/VoiceTranscriptionSettings.tsx`, and
 `apps/mobile/src/native/voiceTranscription.android.ts`. That last file is a platform override of
 upstream's `voiceTranscription.ts`, so the Android build picks it up without any import change.
+The ElevenLabs URL, model, retries and error messages live in
+`packages/client-runtime/src/voice-input/elevenLabs.ts`, shared with web and desktop (F14).
 
 Touch points:
 
@@ -489,6 +491,46 @@ Verify:
   `adb shell input keyevent KEYCODE_ASSIST` opens a new thread in the assistant project, both when
   the app is closed and when it is in the background, with the recording timer running (or the
   "Add an ElevenLabs API key" notice when none is saved).
+
+### F14. Voice input on web and desktop through ElevenLabs (web/desktop)
+
+Added October 30, 2026.
+
+What it does: the composer gets a mic button beside send. It records with the browser's
+`MediaRecorder` and transcribes with the same ElevenLabs Scribe call as Android (F8), through
+upstream's shared `VoiceInputController`, so the transcript lands at the cursor with the same
+draft checks as mobile. While it records or transcribes, the editor is read-only and send is off;
+× cancels, ✓ transcribes. Recordings stop at 20 minutes, like Android. The API key goes in
+Settings → Chat → Voice input and stays in that browser's local storage (each browser and the
+desktop app keep their own, as each phone does). Unlike Android, a recording that still fails after
+the shared retries is not kept. The browser only allows the microphone over HTTPS or localhost.
+
+Fork-owned files: `packages/client-runtime/src/voice-input/elevenLabs.ts` (shared with F8),
+`apps/web/src/voiceInput/elevenLabsVoiceInput.ts` (recorder, transcriber, key storage),
+`apps/web/src/components/chat/useComposerVoiceInput.ts`,
+`apps/web/src/components/chat/ComposerVoiceInputControl.tsx`, and
+`apps/web/src/components/settings/VoiceInputSettings.tsx`.
+
+Touch points:
+
+- `packages/client-runtime/src/voice-input/index.ts`: re-exports `elevenLabs.ts`.
+- `apps/web/src/components/chat/ChatComposer.tsx`: two imports; the voice block right after
+  `applyPromptReplacementStable` (owner key, `readVoiceInputDraft`, `commitVoiceInputDraft`,
+  `useComposerVoiceInput`); `voiceInputBusy` in `submitComposer`'s guard, the editor's `disabled`
+  and the footer's `sendDisabledReason`; `<ComposerVoiceInputControl>` before
+  `<ComposerFooterPrimaryActions>`.
+- `apps/web/src/components/settings/SettingsPanels.tsx`: `<VoiceInputSettingsSection />` at the
+  end of `ChatSettingsPanel`.
+- `apps/web/src/components/settings/settingsSearch.ts`: the `elevenlabs-api-key` item.
+- `apps/web/tsconfig.json`: `ES2024.Promise` in `lib`, because the shared controller uses
+  `Promise.withResolvers`.
+
+Verify:
+
+- `vp test run apps/mobile/src/features/voice-input/elevenLabsTranscription.test.ts packages/client-runtime/src/voice-input/controller.test.ts`
+- `grep -c "voiceInputBusy" apps/web/src/components/chat/ChatComposer.tsx` (four) and
+  `grep -n "<ComposerVoiceInputControl\|<VoiceInputSettingsSection" apps/web/src/components/chat/ChatComposer.tsx apps/web/src/components/settings/SettingsPanels.tsx` (one each).
+- If upstream ships its own web voice input, compare the two and drop this one.
 
 ### C1. Nightly build and release workflow (CI)
 

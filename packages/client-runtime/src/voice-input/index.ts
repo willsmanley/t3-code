@@ -17,3 +17,9 @@ export {
   type VoiceTranscriptionErrorCode,
   type VoiceTranscriptionOptions,
 } from "./transcription.ts";
+export {
+  ELEVENLABS_SPEECH_TO_TEXT_FIELDS,
+  ELEVENLABS_SPEECH_TO_TEXT_URL,
+  transcribeWithElevenLabs,
+  type ElevenLabsUploadResponse,
+} from "./elevenLabs.ts";
