@@ -39,12 +39,8 @@ export function useThreadConversationActions() {
     reportFailure: false,
   });
 
-  const forkConversation = useStableCallback(async (source: ScopedThreadRef): Promise<boolean> => {
-    const key = scopedThreadKey(source);
-    if (pendingForks.current.has(key)) return false;
-    const thread = readThreadShell(source);
-    if (!thread) return false;
-    pendingForks.current.add(key);
+  // Catches every failure, so the caller always clears its pending entry.
+  const forkAndOpen = async (source: ScopedThreadRef, title: string): Promise<boolean> => {
     let created = false;
     try {
       const target = scopeThreadRef(source.environmentId, newThreadId());
@@ -53,7 +49,7 @@ export function useThreadConversationActions() {
         input: {
           sourceThreadId: source.threadId,
           targetThreadId: target.threadId,
-          title: `${thread.title} fork`,
+          title: `${title} fork`,
         },
       });
       if (result._tag === "Failure") {
@@ -64,9 +60,13 @@ export function useThreadConversationActions() {
       }
       created = true;
       if (!(await waitForThreadShell(target))) {
-        throw new Error(
-          "The fork was created, but has not reached this client. Open it from the sidebar after reconnecting.",
+        failureToast(
+          "Conversation forked, but could not open it",
+          new Error(
+            "The fork was created, but has not reached this client. Open it from the sidebar after reconnecting.",
+          ),
         );
+        return false;
       }
       await router.navigate({
         to: "/$environmentId/$threadId",
@@ -79,9 +79,19 @@ export function useThreadConversationActions() {
         error,
       );
       return false;
-    } finally {
-      pendingForks.current.delete(key);
     }
+  };
+
+  const forkConversation = useStableCallback(async (source: ScopedThreadRef): Promise<boolean> => {
+    const key = scopedThreadKey(source);
+    if (pendingForks.current.has(key)) return false;
+    const thread = readThreadShell(source);
+    if (!thread) return false;
+    pendingForks.current.add(key);
+    // React Compiler skips hooks that use `finally`.
+    const forked = await forkAndOpen(source, thread.title);
+    pendingForks.current.delete(key);
+    return forked;
   });
 
   const copyProviderSessionId = useStableCallback(
