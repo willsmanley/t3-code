@@ -47,7 +47,6 @@ import * as Struct from "effect/Struct";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { toastManager } from "~/components/ui/toast";
-import { forceLegacySidebar, isElectron } from "~/env";
 import { isHostedStaticApp } from "~/hostedPairing";
 import { environmentCatalog } from "~/connection/catalog";
 import { primaryServerSettingsAtom, serverEnvironment } from "~/state/server";
@@ -418,11 +417,9 @@ export function useEnvironmentIdentificationMode(): EnvironmentIdentificationMod
 
 /** Legacy sidebar opt-ins still count, so those users land in the boring sidebar. */
 export function useBoringSidebarEnabled(): boolean {
-  const enabled = useClientSettings(
+  return useClientSettings(
     (settings) => settings.boringSidebarEnabled || settings.legacySidebarEnabled,
   );
-  // The fork's desktop and preview builds always group threads by project.
-  return enabled || isElectron || forceLegacySidebar;
 }
 
 export async function prepareModelPreferencesPatch(

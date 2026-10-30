@@ -11,7 +11,7 @@ import { useLocation, useRouter, type AnyRouter } from "@tanstack/react-router";
 
 import { moveWorkspaceFocus, workspaceAreaProps } from "../lib/workspaceFocus";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
-import { isElectron } from "../env";
+import { forceLegacySidebar, isElectron } from "../env";
 import {
   releaseThreadUndoShortcut,
   threadUndoClaimsShortcut,
@@ -38,6 +38,7 @@ import {
   usePanelNavigationSuppression,
 } from "../panelAnimations";
 import { BackgroundThreadAnnouncer } from "./BackgroundThreadAnnouncer";
+import LegacyThreadSidebar from "./LegacySidebar";
 import ThreadSidebar from "./Sidebar";
 import { SidebarBrandWidthProbe } from "./sidebar/SidebarChrome";
 import { isAppModalPage } from "./sidebar/mainAppLocation";
@@ -468,7 +469,12 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           }}
           style={windowControlsInsetStyle}
         >
-          <ThreadSidebar routeReveal={sidebarRouteReveal} />
+          {/* Fork: desktop and preview builds keep the project-tree sidebar (F1). */}
+          {isElectron || forceLegacySidebar ? (
+            <LegacyThreadSidebar routeReveal={sidebarRouteReveal} />
+          ) : (
+            <ThreadSidebar routeReveal={sidebarRouteReveal} />
+          )}
           <SidebarRail onDoubleClick={resetSidebarWidth} />
         </Sidebar>
         {children}
