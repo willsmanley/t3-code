@@ -62,7 +62,7 @@ fi
 git cat-file -e "$sha^{commit}" 2>/dev/null || git fetch -q "https://github.com/$repo.git" "$sha"
 
 releases="$(gh api "repos/$repo/releases?per_page=100" --jq '.[] | "\(.tag_name) \(.target_commitish)"')"
-if [ "$force" = false ] && printf '%s\n' "$releases" | grep -q " $sha\$"; then
+if [ "$force" = false ] && printf '%s\n' "$releases" | grep " $sha\$" >/dev/null; then
   echo "A nightly release already exists for $sha:"
   printf '%s\n' "$releases" | grep " $sha\$"
   exit 0
@@ -92,7 +92,7 @@ unset ANDROID_KEYSTORE_BASE64
 
 log "Building $sha as nightly number $number in $build_dir"
 if [ -e "$build_dir" ]; then
-  git worktree list --porcelain | grep -qx "worktree $build_dir" || die "$build_dir exists and is not a worktree"
+  git worktree list --porcelain | grep -x "worktree $build_dir" >/dev/null || die "$build_dir exists and is not a worktree"
   git worktree remove --force "$build_dir"
 fi
 git worktree add --detach "$build_dir" "$sha"
