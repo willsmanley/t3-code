@@ -471,6 +471,23 @@ it.effect("stops taking deliveries after its end time and switches itself off", 
   ),
 );
 
+it.effect("switches itself off at its end time while the scheduler sits idle", () =>
+  withService(({ service, sql }) =>
+    Effect.gen(function* () {
+      const endAt = DateTime.formatIso(DateTime.add(yield* DateTime.now, { minutes: 2 }));
+      yield* service.upsert(yield* webhookTaskInput({ schedule: { type: "webhook", endAt } }));
+      const enabled = sql<{ enabled: number }>`SELECT enabled FROM scheduled_tasks`.pipe(
+        Effect.map(([row]) => row?.enabled),
+      );
+      // Idle polls remember the end time; the 10-minute backstop alone would sleep past it.
+      yield* TestClock.adjust("1 minute");
+      assert.equal(yield* enabled, 1);
+      yield* TestClock.adjust("70 seconds");
+      assert.equal(yield* enabled, 0);
+    }),
+  ),
+);
+
 it.effect("stops taking deliveries once its run limit is reached", () =>
   withService(({ service, launches }) =>
     Effect.gen(function* () {
