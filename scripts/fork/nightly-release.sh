@@ -182,7 +182,8 @@ log "Building the Android APK"
     echo "APK signer does not match $signing_cert_sha256" >&2
     exit 1
   fi
-  "$build_tools/aapt2" dump badging "$apk" | head -n 1
+  # sed reads all of it; head would stop aapt2 early and fail the pipe.
+  "$build_tools/aapt2" dump badging "$apk" | sed -n 1p
 )
 rm -f "$keystore"
 
