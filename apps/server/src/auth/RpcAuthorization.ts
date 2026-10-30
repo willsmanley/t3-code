@@ -112,6 +112,7 @@ export const RPC_REQUIRED_SCOPES = {
   // A registered phone receives thread titles and statuses, which is what reading orchestration shows.
   [WS_METHODS.serverRegisterPushDevice]: AuthOrchestrationReadScope,
   [WS_METHODS.serverUnregisterPushDevice]: AuthOrchestrationReadScope,
+  [WS_METHODS.serverGetElevenLabsApiKey]: AuthOrchestrationOperateScope,
   [WS_METHODS.scheduledTasksSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.secretsAnswerRequest]: AuthOrchestrationOperateScope,
   // Delivery logs hold request bodies, so they need the same scope as the URL.

@@ -8,39 +8,44 @@ import {
   type VoiceRecorderStatus,
   type VoiceTranscriber,
 } from "@t3tools/client-runtime/voice-input";
-import * as Schema from "effect/Schema";
+import { createEnvironmentRpcCommand, runAtomCommand } from "@t3tools/client-runtime/state/runtime";
+import { type EnvironmentId, WS_METHODS } from "@t3tools/contracts";
 
-import { getLocalStorageItem, useLocalStorage } from "../hooks/useLocalStorage";
+import { connectionAtomRuntime } from "../connection/runtime";
+import { appAtomRegistry } from "../rpc/atomRegistry";
 
 // The same ElevenLabs Scribe transcription as the fork's Android app (F8). The
-// key stays in this browser, like the phone keeps its own.
-const API_KEY_STORAGE_KEY = "t3code:voice-input.elevenlabs-api-key";
-const ApiKeySchema = Schema.NullOr(Schema.String);
+// key is saved once on the server, so no browser or desktop app needs its own.
+const getServerElevenLabsApiKey = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "voice-input:elevenlabs-api-key",
+  tag: WS_METHODS.serverGetElevenLabsApiKey,
+});
 
 /** Android's limit, so a long dictation behaves the same on every client. */
 export const WEB_VOICE_RECORDING_LIMIT_SECONDS = 20 * 60;
 
-export function useElevenLabsApiKey() {
-  return useLocalStorage(API_KEY_STORAGE_KEY, null, ApiKeySchema);
-}
-
-function readElevenLabsApiKey(): string | null {
-  try {
-    return getLocalStorageItem(API_KEY_STORAGE_KEY, ApiKeySchema)?.trim() || null;
-  } catch {
-    return null;
-  }
-}
-
-export function getElevenLabsTranscriber(): VoiceTranscriber {
+/** Transcribes with the ElevenLabs key saved on the thread's server. */
+export function getElevenLabsTranscriber(environmentId: EnvironmentId): VoiceTranscriber {
   return {
     prepare: async ({ signal }) => {
+      const result = await runAtomCommand(
+        appAtomRegistry,
+        getServerElevenLabsApiKey,
+        { environmentId, input: {} },
+        { reportFailure: false },
+      );
       throwIfVoiceTranscriptionAborted(signal);
-      const apiKey = readElevenLabsApiKey();
+      if (result._tag === "Failure") {
+        throw new VoiceTranscriptionError(
+          "unavailable",
+          "Could not get the ElevenLabs key from the server.",
+        );
+      }
+      const apiKey = result.value.apiKey;
       if (!apiKey) {
         throw new VoiceTranscriptionError(
           "unavailable",
-          "Add an ElevenLabs API key in Settings > Chat to use voice input.",
+          "Voice input needs an ElevenLabs API key saved on the server.",
         );
       }
       return {

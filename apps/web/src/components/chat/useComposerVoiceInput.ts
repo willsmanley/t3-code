@@ -3,6 +3,7 @@ import {
   type VoiceDraftSnapshot,
   type VoiceInputState,
 } from "@t3tools/client-runtime/voice-input";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 
 import {
@@ -12,6 +13,7 @@ import {
   getElevenLabsTranscriber,
   requestMicrophonePermission,
 } from "../../voiceInput/elevenLabsVoiceInput";
+import { useStableCallback } from "../../hooks/useStableCallback";
 import { toastManager } from "../ui/toast";
 
 const IDLE_STATE: VoiceInputState = { phase: "idle", error: null, errorAction: null };
@@ -22,6 +24,7 @@ const IDLE_STATE: VoiceInputState = { phase: "idle", error: null, errorAction: n
  * surface as toasts; the error phase still accepts another start.
  */
 export function useComposerVoiceInput(input: {
+  readonly environmentId: EnvironmentId;
   readonly ownerKey: string;
   readonly readDraft: () => VoiceDraftSnapshot | null;
   readonly commitDraft: (
@@ -31,6 +34,7 @@ export function useComposerVoiceInput(input: {
 }) {
   const [state, setState] = useState<VoiceInputState>(IDLE_STATE);
   const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null);
+  const getTranscriber = useStableCallback(() => getElevenLabsTranscriber(input.environmentId));
   const [controller] = useState(() => {
     const recorder = new WebVoiceRecorder((status) => {
       void controller.handleRecorderStatus(status);
@@ -38,7 +42,7 @@ export function useComposerVoiceInput(input: {
     const controller: VoiceInputController = new VoiceInputController({
       recorder,
       recordingLimitSeconds: WEB_VOICE_RECORDING_LIMIT_SECONDS,
-      getTranscriber: getElevenLabsTranscriber,
+      getTranscriber,
       requestPermission: requestMicrophonePermission,
       configureRecording: async () => {},
       releaseRecording: async () => recorder.releaseStream(),

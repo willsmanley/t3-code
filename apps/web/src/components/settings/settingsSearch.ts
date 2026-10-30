@@ -591,12 +591,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["queue steer running turn send default behavior composer"],
   },
   {
-    id: "elevenlabs-api-key",
-    title: "ElevenLabs API key",
-    to: "/settings/chat",
-    searchTerms: ["voice input microphone mic dictation speech transcription scribe"],
-  },
-  {
     id: "provider-update-checks",
     title: "Provider update checks",
     to: "/settings/maintenance",

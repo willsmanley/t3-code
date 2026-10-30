@@ -535,6 +535,8 @@ export const WS_METHODS = {
   serverReportClientActivity: "server.reportClientActivity",
   serverRegisterPushDevice: "server.registerPushDevice",
   serverUnregisterPushDevice: "server.unregisterPushDevice",
+  // Fork: the ElevenLabs key web and desktop voice input transcribe with.
+  serverGetElevenLabsApiKey: "server.getElevenLabsApiKey",
   serverGetUsageSummary: "server.getUsageSummary",
   serverRefreshUsageRates: "server.refreshUsageRates",
 
@@ -992,6 +994,12 @@ const WsServerRegisterPushDeviceRpc = Rpc.make(WS_METHODS.serverRegisterPushDevi
     DirectPushRegistrationError,
     EnvironmentAuthorizationError,
   ]),
+});
+
+const WsServerGetElevenLabsApiKeyRpc = Rpc.make(WS_METHODS.serverGetElevenLabsApiKey, {
+  payload: Schema.Struct({}),
+  success: Schema.Struct({ apiKey: Schema.NullOr(Schema.String) }),
+  error: EnvironmentAuthorizationError,
 });
 
 const WsServerUnregisterPushDeviceRpc = Rpc.make(WS_METHODS.serverUnregisterPushDevice, {
@@ -2035,6 +2043,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerReportClientActivityRpc,
   WsServerRegisterPushDeviceRpc,
   WsServerUnregisterPushDeviceRpc,
+  WsServerGetElevenLabsApiKeyRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
   WsPullRequestsListRpc,

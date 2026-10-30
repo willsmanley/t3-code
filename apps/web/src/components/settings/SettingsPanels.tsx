@@ -98,7 +98,6 @@ import { AdvancedSettings } from "./AdvancedSettings";
 import { PullRequestLinksOpenInAppSetting } from "./IntegrationsSettings";
 import { StorageCleanupSections } from "./StorageSettings";
 import { UpdateTrackSwitchDialog } from "./UpdateTrackSwitchDialog";
-import { VoiceInputSettingsSection } from "./VoiceInputSettings";
 import { environmentIdsKey } from "~/state/environmentAtomList";
 import { environmentSessionStatesAtom } from "~/state/session";
 import { canUpdateServer } from "../ServerUpdateAction";
@@ -1212,7 +1211,6 @@ export function ChatSettingsPanel() {
           }
         />
       </SettingsSection>
-      <VoiceInputSettingsSection />
     </SettingsPageContainer>
   );
 }
