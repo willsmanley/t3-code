@@ -1,9 +1,10 @@
 # Nightly upstream sync
 
 An agent runs this every night. It merges upstream T3 Code (`pingdotgg/t3code` main) into this
-fork's `main` (`willsmanley/t3-code`), keeps every fork feature working, and starts the nightly
-build. The schedule in `.github/workflows/custom-nightly-linux.yml` is only a fallback: it builds
-`main` on a night this job missed, without upstream.
+fork's `main` (`willsmanley/t3-code`), keeps every fork feature working, and builds and publishes
+the nightly release on its own machine with `scripts/fork/nightly-release.sh`. The workflow
+`.github/workflows/custom-nightly-linux.yml` makes the same release on GitHub Actions; its schedule
+is only a fallback that builds `main` on a night this job missed, when Actions is enabled.
 
 ## Rules
 
@@ -11,7 +12,7 @@ build. The schedule in `.github/workflows/custom-nightly-linux.yml` is only a fa
 - Never force-push or rewrite the fork's `main`. Merge upstream in; don't rebase the fork.
 - Every feature in [features.md](features.md) must still work afterwards. If upstream now does
   the same thing, drop the fork's copy and say so in the report.
-- Don't push to `main` while a nightly build runs. Publishing a release for a commit that is no
+- Don't push to `main` while a workflow build runs. Publishing a release for a commit that is no
   longer `main` can be refused when the newer commit changes workflow files.
 - Follow the repository's `AGENTS.md`: scoped checks only, never repo-wide runs.
 
@@ -50,11 +51,14 @@ build. The schedule in `.github/workflows/custom-nightly-linux.yml` is only a fa
    as in step 4 and update features.md.
 7. **Push.** Run `git fetch fork main`. If it moved, merge it in and check again. Then
    `git push fork HEAD:main`.
-8. **Build.** Run
+8. **Build.** Unlock Bitwarden so the script can read the Android signing key (`BW_SESSION`),
+   then run `ctx-build-governor exec -- scripts/fork/nightly-release.sh` from the sync checkout.
+   It builds the fork's `main` in `../nightly-build` (about half an hour), checks the SSH
+   runtime and the APK signature, and publishes the prerelease. It does nothing when a release
+   already exists for `main`. If it fails because of code, fix it, push, and run it once more.
+   If Hostkey can't build, start the workflow instead:
    `gh workflow run custom-nightly-linux.yml -R willsmanley/t3-code --ref main -f merge_upstream=false`,
-   find the new run with `gh run list`, and follow it to the end with
-   `gh run watch <run-id> -R willsmanley/t3-code --exit-status`. If it fails because of code, fix
-   it, push, and run it once more.
+   then `gh run watch <run-id> -R willsmanley/t3-code --exit-status`.
 9. **If you can't finish,** leave `main` alone. Push your work to `sync/upstream-<YYYYMMDD>` on
    the fork so it isn't lost, still run step 8 so `main` builds as it is, and say what blocks
    the merge.

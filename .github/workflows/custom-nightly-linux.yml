@@ -37,6 +37,7 @@ jobs:
       ref: ${{ steps.ref.outputs.ref }}
       upstream: ${{ steps.ref.outputs.upstream }}
       date: ${{ steps.ref.outputs.date }}
+      number: ${{ steps.ref.outputs.number }}
       skip: ${{ steps.ref.outputs.skip }}
     steps:
       - name: Checkout fork
@@ -60,6 +61,16 @@ jobs:
             skip=true
           fi
           echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          # Hostkey also publishes nightlies (scripts/fork/nightly-release.sh), so
+          # number this build past every earlier release as well as past earlier
+          # runs. The number is the APK's version code and has to keep growing.
+          last_release="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[].tag_name' |
+            sed -n 's/^v.*-nightly\.[0-9]\{8\}\.\([0-9]\{1,\}\)$/\1/p' | sort -n | tail -n 1)"
+          number="$GITHUB_RUN_NUMBER"
+          if [ -n "$last_release" ] && [ "$last_release" -ge "$number" ]; then
+            number=$((last_release + 1))
+          fi
+          echo "number=$number" >> "$GITHUB_OUTPUT"
           # The desktop and Android builds merge this one upstream commit so both
           # apps in a release ship the same code.
           upstream="$(git ls-remote https://github.com/pingdotgg/t3code.git refs/heads/main | cut -f1)"
@@ -128,7 +139,7 @@ jobs:
         shell: bash
         env:
           NIGHTLY_DATE: ${{ needs.sync.outputs.date }}
-          NIGHTLY_RUN_NUMBER: ${{ github.run_number }}
+          NIGHTLY_RUN_NUMBER: ${{ needs.sync.outputs.number }}
         run: |
           set -euo pipefail
           nightly_sha="$(git rev-parse HEAD)"
@@ -234,7 +245,7 @@ jobs:
       APP_VARIANT: preview
       T3CODE_MOBILE_APP_NAME: T3 Code Fork
       T3CODE_ANDROID_PACKAGE: com.willsmanley.t3code
-      T3CODE_ANDROID_VERSION_CODE: ${{ github.run_number }}
+      T3CODE_ANDROID_VERSION_CODE: ${{ needs.sync.outputs.number }}
       # Each nightly APK carries its own JavaScript; T3's over-the-air updates
       # target the store builds.
       T3CODE_MOBILE_UPDATES_ENABLED: "0"
@@ -302,7 +313,7 @@ jobs:
         shell: bash
         env:
           NIGHTLY_DATE: ${{ needs.sync.outputs.date }}
-          NIGHTLY_RUN_NUMBER: ${{ github.run_number }}
+          NIGHTLY_RUN_NUMBER: ${{ needs.sync.outputs.number }}
         run: |
           set -euo pipefail
           node scripts/resolve-nightly-release.ts \

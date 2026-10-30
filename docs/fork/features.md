@@ -495,17 +495,21 @@ Verify:
 Fork-owned: `.github/workflows/custom-nightly-linux.yml` (`5bffb2ec49` through `f9bc6b8b22`,
 17 CI commits).
 
-What it does: the nightly agent starts it after merging upstream into `main`, and a daily schedule
-(09:23 UTC) builds `main` as a fallback when no release exists for its commit.
+What it does: builds and publishes the nightly release on GitHub Actions. Since 2026-10-30 the
+nightly agent builds on Hostkey instead (`scripts/fork/nightly-release.sh`, the same steps run one
+after another), because Actions was disabled for the fork on 2026-10-27. The daily schedule
+(09:23 UTC) still builds `main` as a fallback when Actions is on and no release exists for its
+commit. Both number a build past every earlier release and run, since the number is the APK's
+version code.
 
-- **sync**: records the fork commit, the current upstream main SHA and the date, and decides
-  whether a scheduled run should skip.
+- **sync**: records the fork commit, the current upstream main SHA, the date and the build
+  number, and decides whether a scheduled run should skip.
 - **build**: merges that upstream SHA only when started with `merge_upstream=true` (on a conflict
   it aborts the merge and builds the fork as it is). Builds desktop JS with auto-update on, the
   CLI single executable, the resource monitor and the matching SSH runtime archive (with a smoke
   test). Packages the Linux AppImage, writes SHA256SUMS, and publishes a GitHub prerelease only
   from `main`.
-- **android**: same merge step. Preview variant, fork package and name, run-number version code,
+- **android**: same merge step. Preview variant, fork package and name, build-number version code,
   over-the-air updates off, optional Firebase config. Gradle arm64 release build, re-signed with
   `apksigner` and checked against the expected signer fingerprint.
 - **publish-android**: adds the APK and its checksum to the same release.
@@ -518,7 +522,10 @@ root `build:desktop`, desktop `ensure:electron`, `packageManager` in `package.js
 prebuild in `apps/mobile`.
 
 Repository secrets it uses (names only): `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
-`ANDROID_KEY_ALIAS`, and the optional `ANDROID_GOOGLE_SERVICES_JSON`.
+`ANDROID_KEY_ALIAS`, and the optional `ANDROID_GOOGLE_SERVICES_JSON`. The Hostkey script reads the
+same values from Bitwarden and the local Firebase config file (see its header).
+
+When a step changes in the workflow, change it in `scripts/fork/nightly-release.sh` too.
 
 Guess: the top-level `UPDATE_REPOSITORY` variable looks unused. Only the build job's
 `T3CODE_DESKTOP_UPDATE_REPOSITORY` is read.
@@ -527,8 +534,8 @@ Verify:
 
 - `for f in scripts/resolve-nightly-release.ts scripts/update-release-package-versions.ts scripts/build-cli-archive.ts scripts/smoke-cli-archive.ts scripts/build-desktop-artifact.ts apps/server/scripts/cli.ts native/resource-monitor/Cargo.toml; do test -e "$f" || echo "MISSING $f"; done`
 - `grep -n "resource-monitor-dir" scripts/build-cli-archive.ts; grep -n "T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR" scripts/build-desktop-artifact.ts`
-- A run on a branch builds everything without publishing:
-  `gh workflow run custom-nightly-linux.yml -R willsmanley/t3-code --ref <branch> -f merge_upstream=false`.
+- A test build without publishing: `ctx-build-governor exec -- scripts/fork/nightly-release.sh --ref <commit> --no-publish`,
+  or on Actions `gh workflow run custom-nightly-linux.yml -R willsmanley/t3-code --ref <branch> -f merge_upstream=false`.
 
 ### C2. Desktop auto-update from the fork's releases (desktop)
 
