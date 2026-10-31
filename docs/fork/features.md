@@ -399,7 +399,7 @@ Verify:
   (expect `.ts`, `.ios.ts` and `.android.ts`). If upstream adds its own `voiceTranscription.android.ts`
   or renames the function, the override breaks.
 - `grep -n "recordAudioAndroid: true\|enableBackgroundRecording: true" apps/mobile/app.config.ts` (two hits).
-- `grep -n "recordingLimitSeconds\|releaseRecording(uri)\|pruneSavedTranscripts()" apps/mobile/src/features/voice-input/VoiceInputProvider.tsx`
+- `grep -n "recordingLimitSeconds\|releaseRecording(androidRecordings\|pruneSavedTranscripts(androidRecordings)" apps/mobile/src/features/voice-input/VoiceInputProvider.tsx`
   (all three still wired in), and
   `grep -n "dependencies.recordingLimitSeconds" apps/mobile/src/features/voice-input/voiceInputSession.ts`.
 
