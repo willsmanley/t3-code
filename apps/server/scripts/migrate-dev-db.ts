@@ -216,6 +216,7 @@ const CLEARED_TABLES: ReadonlyArray<string> = [
   "auth_pairing_links",
   // Real phones' push tokens: a dev server with copied secrets would notify them.
   "direct_push_devices",
+  "peer_environment_links",
 ];
 
 const PROVIDER_SESSIONS_TABLE = "orchestration_v2_projection_provider_sessions";

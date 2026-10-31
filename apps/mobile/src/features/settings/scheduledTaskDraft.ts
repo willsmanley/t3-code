@@ -156,6 +156,10 @@ export function scheduleDraftForTask(task: Pick<ScheduledTask, "schedule">): Sch
   }
 }
 
+export function parseIntervalMinutes(value: string): number {
+  return Number(value.trim().replace(",", "."));
+}
+
 export function scheduleFromDraft(draft: ScheduleDraft): ScheduledTaskUpsertSchedule | null {
   if (draft.mode === "once") {
     return isAbsoluteDateTime(draft.onceAt) ? { type: "once", at: draft.onceAt } : null;
@@ -213,7 +217,7 @@ export function scheduleFromDraft(draft: ScheduleDraft): ScheduledTaskUpsertSche
     };
   }
   if (draft.mode === "interval") {
-    const minutes = Number(draft.intervalMinutes);
+    const minutes = parseIntervalMinutes(draft.intervalMinutes);
     const everyMs = Math.round(minutes * 60_000);
     const activeHours = parseActiveHoursDraft(draft.activeHours);
     return minutes >= 1 && Number.isSafeInteger(everyMs) && activeHours !== undefined
