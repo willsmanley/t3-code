@@ -159,6 +159,7 @@ import { threadStreamHaptics } from "./threadStreamHaptics";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { orchestrationEnvironment } from "../../state/orchestration";
 import { useDelayedStatus } from "../../lib/useDelayedStatus";
+import { CATCH_UP_SHOW_DELAY_MS } from "../home/workspace-connection-status-delay";
 import type { PendingUserInputDraftAnswer } from "@t3tools/client-runtime/state/pending-user-input";
 import type { RunStopPresentation } from "@t3tools/client-runtime/state/thread-execution";
 import type {
@@ -530,7 +531,11 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
         return null;
     }
   })();
-  const threadSyncLabel = useDelayedStatus(selectedThreadKey, realThreadSyncLabel);
+  const threadSyncLabel = useDelayedStatus(
+    selectedThreadKey,
+    realThreadSyncLabel,
+    contentPresentationKind === "ready" ? CATCH_UP_SHOW_DELAY_MS : undefined,
+  );
   const connectionRetrying =
     props.connectionStateLabel === "connecting" || props.connectionStateLabel === "reconnecting";
   const retryError = connectionRetrying ? props.connectionError : null;

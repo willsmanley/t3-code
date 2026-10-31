@@ -751,6 +751,26 @@ describe("EnvironmentSupervisor", () => {
     }).pipe(Effect.provide(TestClock.layer())),
   );
 
+  it.effect("gives a remote socket one second to answer after a long resume", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeSilentSocketHarness();
+      const supervisor = yield* EnvironmentSupervisor.make(RELAY_ENTRY, {
+        initiallyDesired: true,
+      }).pipe(Effect.provide(harness.dependencies));
+
+      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+      yield* harness.wake("application-active-long");
+      yield* TestClock.adjust("999 millis");
+      expect(yield* Ref.get(harness.sessionCount)).toBe(1);
+
+      yield* TestClock.adjust("1 millis");
+      yield* awaitState(
+        supervisor.state,
+        (state) => state.phase === "connected" && state.generation === 2,
+      );
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
   it.effect("replaces a remote socket after a long resume while the network reports offline", () =>
     Effect.gen(function* () {
       const harness = yield* makeSilentSocketHarness();
@@ -966,7 +986,7 @@ describe("EnvironmentSupervisor", () => {
       yield* awaitState(supervisor.state, (state) => state.phase === "connected");
       yield* harness.wake("application-active-long");
       yield* harness.setNetworkStatus("offline");
-      yield* TestClock.adjust("2999 millis");
+      yield* TestClock.adjust("999 millis");
       expect(yield* Ref.get(harness.sessionCount)).toBe(1);
 
       yield* TestClock.adjust("1 millis");

@@ -587,6 +587,40 @@ Verify:
 - `grep -ln "serverGetElevenLabsApiKey" apps/server/src/ws.ts apps/server/src/auth/RpcAuthorization.ts apps/server/src/observability/RpcInstrumentation.ts packages/contracts/src/rpc.ts` (all four).
 - If upstream ships its own web voice input, compare the two and drop this one.
 
+### F15. Faster return to the Android app (client-runtime, mobile)
+
+Added October 31, 2026.
+
+What it does: coming back to the app after a while shows the saved thread list and messages at
+once and catches up quietly.
+
+- After more than 10 seconds in the background, the old connection gets one second to answer
+  before it is replaced (upstream waits up to 3 seconds, or 2.5 seconds of silence on a remote
+  route such as T3 Connect). A phone's socket is usually dead by then.
+- With saved threads on screen, "Syncing threads...", "Reconnecting to ..." and "Syncing
+  messages..." wait 4 seconds before they show (upstream: 0.8 and 0.4 seconds). Offline, errors and
+  an empty list still show at once.
+
+Fork-owned files: `apps/mobile/src/features/home/workspace-connection-status-delay.ts` (+ test).
+
+Touch points:
+
+- `packages/client-runtime/src/connection/supervisor.ts`: `LONG_RESUME_PROBE_TIMEOUT` and its use
+  for `application-active-long` in `probeTimeoutFor` (+ two tests in `supervisor.test.ts`: one new,
+  one changed from 2999 to 999 ms). This affects iOS as well.
+- `apps/mobile/src/features/home/WorkspaceConnectionTitle.tsx`:
+  `workspaceConnectionStatusShowDelayMs(state)` replaces `STATUS_SHOW_DELAY_MS`.
+- `apps/mobile/src/features/threads/ThreadDetailScreen.tsx`: `CATCH_UP_SHOW_DELAY_MS` as the third
+  argument of the `threadSyncLabel` `useDelayedStatus` call.
+
+Verify:
+
+- `vp test run apps/mobile/src/features/home/workspace-connection-status-delay.test.ts packages/client-runtime/src/connection/supervisor.test.ts`
+- `grep -n "LONG_RESUME_PROBE_TIMEOUT" packages/client-runtime/src/connection/supervisor.ts` (two hits),
+  `grep -n "workspaceConnectionStatusShowDelayMs" apps/mobile/src/features/home/WorkspaceConnectionTitle.tsx`
+  and `grep -n "CATCH_UP_SHOW_DELAY_MS" apps/mobile/src/features/threads/ThreadDetailScreen.tsx`.
+- If upstream retunes the resume check, keep its structure and only shorten the long-resume wait.
+
 ### C1. Nightly build and release workflow (CI)
 
 Fork-owned: `.github/workflows/custom-nightly-linux.yml` (`5bffb2ec49` through `f9bc6b8b22`,

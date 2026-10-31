@@ -48,6 +48,10 @@ const establishmentTimeout = Duration.fromInputUnsafe(CONNECTION_ESTABLISHMENT_T
 const synchronizationTimeout = Duration.fromInputUnsafe("75 seconds");
 const CONNECTION_PROBE_TIMEOUT = "15 seconds";
 const QUICK_CONNECTION_PROBE_TIMEOUT = "3 seconds";
+// After a long time in the background a phone's socket is usually dead, and the
+// thread list waits on this check, so a live socket gets one second to answer
+// (fork, docs/fork/features.md F15).
+const LONG_RESUME_PROBE_TIMEOUT = "1 second";
 // A probe still unanswered this long checks the host with a fresh request. If
 // the host answers while the socket stays silent, the socket is dead.
 const SILENT_SOCKET_CHECK_AFTER = "500 millis";
@@ -642,7 +646,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
         // answer reconnects as quickly as a missing one, even on a remote
         // route where a reconnect takes longer than the wait it replaces.
         if (next.reason === "application-active-long") {
-          return QUICK_CONNECTION_PROBE_TIMEOUT;
+          return LONG_RESUME_PROBE_TIMEOUT;
         }
         if (next.reason !== "application-active-probe" && next.reason !== "network-changed") {
           return undefined;
