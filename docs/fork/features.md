@@ -368,11 +368,12 @@ Verify:
 
 Commits `434db9cba7`, `28d14f6f71`.
 
-What it does: Android gets voice input. It records AAC (ADTS) into document storage, so a crash
-doesn't lose the file. A recording can run up to 20 minutes and keeps going in the background
-behind a notification. It's transcribed with ElevenLabs speech-to-text, using an API key the user
-saves under Settings → Microphone (kept in secure storage). Recordings are kept until
-transcription succeeds, and the settings page lists them.
+What it does: Android gets voice input. It records AAC (ADTS, 16 kHz, 48 kbps) into document
+storage, so a crash doesn't lose the file. A recording can run up to 20 minutes and keeps going in
+the background behind a notification. Since F16 the thread's server transcribes it; the ElevenLabs
+key the user saves under Settings → Microphone (kept in secure storage) is only the fallback for a
+server that can't. Recordings are kept until transcription succeeds, and the settings page lists
+them.
 
 Fork-owned files: `apps/mobile/src/features/voice-input/elevenLabsTranscription.ts` (key and
 upload), `savedRecordings.ts` (where the files live),
@@ -551,10 +552,11 @@ upstream's shared `VoiceInputController`, so the transcript lands at the cursor 
 draft checks as mobile. While it records or transcribes, the editor is read-only and send is off;
 × cancels, ✓ transcribes. Recordings stop at 20 minutes, like Android. The API key is saved once
 on the server, in its secret store as `<base-dir>/userdata/secrets/elevenlabs-api-key.bin` (mode
-600). Each time the mic starts, the client asks the thread's server for it over the
-`server.getElevenLabsApiKey` RPC (operate scope, which can already run commands there) and then
-uploads straight to ElevenLabs, so no audio goes over the WebSocket. Nothing is pasted in a browser
-or the desktop app; Android still keeps its own key (F8). Recordings are kept exactly as on
+600). Since F16 the audio streams to the thread's server, which transcribes it. Only when that server
+can't (older, or unreachable for 90 seconds) does the client ask it for the key over the
+`server.getElevenLabsApiKey` RPC (operate scope, which can already run commands there) and upload
+straight to ElevenLabs. Nothing is pasted in a browser or the desktop app; Android still keeps its
+own key (F8). Recordings are kept exactly as on
 Android, by the same shared code: audio is saved to IndexedDB a second at a time while recording,
 deleted only once its transcript is saved, and listed under Settings → Chat → Voice input with
 Transcribe, Copy and Delete. That retry asks each connected server for the key in turn. The
@@ -632,6 +634,61 @@ Verify:
   `grep -n "workspaceConnectionStatusShowDelayMs" apps/mobile/src/features/home/WorkspaceConnectionTitle.tsx`
   and `grep -n "CATCH_UP_SHOW_DELAY_MS" apps/mobile/src/features/threads/ThreadDetailScreen.tsx`.
 - If upstream retunes the resume check, keep its structure and only shorten the long-resume wait.
+
+### F16. Dictation streams to the server, and ✓ sends the message (all clients)
+
+Added November 1, 2026.
+
+What it does: while you talk, web, desktop and Android send the recording to the thread's server
+about once a second over two RPCs, `voice.appendAudio` and `voice.transcribe` (operate scope). When
+the recording stops only the last second is still uploading, and the server sends the audio to
+ElevenLabs Scribe v2 over its own fast link (per-attempt timeout, three retries). The transcript
+comes back to the client, which puts it in the draft and sends the message the way the send button
+does, so an agent that is still working follows the follow-up setting (steer by default). Holding
+✓ (or Shift-clicking it on web and desktop) only puts the words in the draft. Every dictation
+writes one line to `<userdata>/logs/voice-dictation.ndjson` (sizes and timings, no words). The
+server keeps a recording's audio until it is transcribed and the transcript for a week, in
+`<userdata>/voice-dictation/`, so a client that loses its connection can ask again. Web records
+Opus at 24 kbps (48 kbps for MP4), Android AAC at 16 kHz and 48 kbps; tests on real and LibriSpeech
+audio found no accuracy loss against lossless at those rates. A client whose server lacks the RPCs
+or stays unreachable uploads straight to ElevenLabs as before, now with a 90-second limit on each
+attempt.
+
+Fork-owned files: `packages/contracts/src/voiceDictation.ts`,
+`apps/server/src/voiceInput/VoiceDictation.ts` (+ test),
+`packages/client-runtime/src/voice-input/serverDictation.ts` (+ test) and `serverDictationRpc.ts`,
+`apps/mobile/src/features/voice-input/useDictationSend.ts`.
+
+Touch points:
+
+- `packages/contracts/src/rpc.ts`: the two method names, `Rpc.make` definitions and `WsRpcGroup`
+  entries; `packages/contracts/src/index.ts`: the export.
+- `apps/server/src/ws.ts`: the import, `voiceDictation` beside `secretStore`, and the two handlers
+  after `serverGetElevenLabsApiKey`; `apps/server/src/server.ts`: `VoiceDictation.layer` after the
+  `DirectPush` block; `RpcAuthorization.ts` (operate scope) and `RpcInstrumentation.ts`; and
+  `ws.test.ts`: the `VoiceDictation` mock layer.
+- `packages/client-runtime/src/voice-input/controller.ts`: `stop()` resolves true once the transcript
+  is in the draft (+ `controller.test.ts`); `elevenLabs.ts`: the per-attempt timeout; `index.ts`:
+  the exports.
+- Web: `elevenLabsVoiceInput.ts` (server transcriber with the direct fallback, the live recording
+  kept in memory, `audioBitsPerSecond`), `useComposerVoiceInput.ts` (`stopAndSend`),
+  `ComposerVoiceInputControl.tsx` (send, hold or Shift-click to edit), and in `ChatComposer.tsx`
+  the `onConfirm`/`onConfirmWithoutSending` props.
+- Android: `elevenLabsTranscription.ts` (server transcriber, `setDictationEnvironment`, reading the
+  growing file); `VoiceInputProvider.tsx` (recording options and `streamRecordingAudio` in
+  `sampleRecording`); `useVoiceInputController.ts` (`environmentId`); `ThreadComposer.tsx`
+  (`environmentId`, `useDictationSend`, `onConfirmLongPress`); `ComposerDictationControl.tsx`
+  (`onConfirmLongPress` and the send label); `voiceInputSession.test.ts` (`Promise<boolean>`).
+
+Verify:
+
+- `vp test run apps/server/src/voiceInput packages/client-runtime/src/voice-input`
+- `grep -ln "voiceDictationAppend" apps/server/src/ws.ts apps/server/src/auth/RpcAuthorization.ts apps/server/src/observability/RpcInstrumentation.ts packages/contracts/src/rpc.ts`
+  (all four) and `grep -n "VoiceDictation.layer" apps/server/src/server.ts`.
+- `grep -n "stopAndSend\|onConfirmWithoutSending" apps/web/src/components/chat/ChatComposer.tsx`,
+  `grep -n "useDictationSend\|onConfirmLongPress\|environmentId: props.environmentId" apps/mobile/src/features/threads/ThreadComposer.tsx`
+  and `grep -n "streamRecordingAudio" apps/mobile/src/features/voice-input/VoiceInputProvider.tsx`.
+- After a dictation, a `transcribed` line appears in `<userdata>/logs/voice-dictation.ndjson`.
 
 ### C1. Nightly build and release workflow (CI)
 

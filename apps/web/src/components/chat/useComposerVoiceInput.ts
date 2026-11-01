@@ -5,7 +5,7 @@ import {
   type VoiceInputState,
 } from "@t3tools/client-runtime/voice-input";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   WEB_VOICE_RECORDING_LIMIT_SECONDS,
@@ -81,6 +81,20 @@ export function useComposerVoiceInput(input: {
     ],
   );
 
+  // The send waits for the render that has the transcript in the draft and the controller idle,
+  // because the composer's send checks read rendered state.
+  const pendingSend = useRef<(() => void) | null>(null);
+  const [sendRequest, setSendRequest] = useState(0);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- sends once React has rendered the committed transcript, which the composer's send guard reads
+  useEffect(() => {
+    const send = pendingSend.current;
+    pendingSend.current = null;
+    send?.();
+  }, [
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- each request is one send, after its render
+    sendRequest,
+  ]);
+
   const start = () => {
     if (!canRecordVoiceInput()) {
       toastManager.add({
@@ -98,6 +112,12 @@ export function useComposerVoiceInput(input: {
     recordingStartedAt,
     start,
     stop: () => void controller.stop(),
+    stopAndSend: (send: () => void) =>
+      void controller.stop().then((committed) => {
+        if (!committed) return;
+        pendingSend.current = send;
+        setSendRequest((request) => request + 1);
+      }),
     cancel: () => controller.cancel(),
   };
 }

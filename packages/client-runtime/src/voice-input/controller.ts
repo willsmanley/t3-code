@@ -300,8 +300,9 @@ export class VoiceInputController {
     }
   }
 
-  stop(): Promise<void> {
-    if (this.state.phase !== "recording") return Promise.resolve();
+  /** Resolves true once the transcript is in the draft. */
+  stop(): Promise<boolean> {
+    if (this.state.phase !== "recording") return Promise.resolve(false);
     return this.finishRecording(false, null);
   }
 
@@ -357,7 +358,7 @@ export class VoiceInputController {
       if (!status.url) {
         return this.interruptRecording();
       }
-      return this.finishRecording(true, status.url);
+      return this.finishRecording(true, status.url).then(() => {});
     }
   }
 
@@ -380,8 +381,8 @@ export class VoiceInputController {
   private async finishRecording(
     alreadyStopped: boolean,
     completedUri: string | null,
-  ): Promise<void> {
-    if (this.finishing || this.state.phase !== "recording") return;
+  ): Promise<boolean> {
+    if (this.finishing || this.state.phase !== "recording") return false;
     this.finishing = true;
     const operationToken = this.operationToken;
     this.setState({ phase: "transcribing", error: null, errorAction: null });
@@ -391,7 +392,7 @@ export class VoiceInputController {
       await this.releaseAudioSession();
       this.recordingUri = completedUri ?? this.dependencies.recorder.uri ?? this.recordingUri;
       this.rememberRecordingUri(this.recordingUri);
-      if (!this.isCurrent(operationToken)) return;
+      if (!this.isCurrent(operationToken)) return false;
       if (
         !this.recordingUri ||
         !this.transcription ||
@@ -399,7 +400,7 @@ export class VoiceInputController {
         !this.capturedDraft
       ) {
         this.setError("Could not finish voice recording.", "retry");
-        return;
+        return false;
       }
 
       const recordingUri = this.recordingUri;
@@ -415,9 +416,9 @@ export class VoiceInputController {
         if (this.isCurrent(operationToken)) {
           this.setError(transcriptionErrorMessage(error), "retry");
         }
-        return;
+        return false;
       }
-      if (!this.isCurrent(operationToken)) return;
+      if (!this.isCurrent(operationToken)) return false;
 
       const result = resolveTranscriptCommit(
         capturedDraft,
@@ -430,19 +431,21 @@ export class VoiceInputController {
           "The draft changed while voice input was running. The transcript was not added.",
           "retry",
         );
-        return;
+        return false;
       }
       if (result.kind === "empty") {
         this.setError("No speech was detected.", "retry");
-        return;
+        return false;
       }
 
       this.dependencies.commitDraft(result.text, result.selection);
       this.setState(IDLE_STATE);
+      return true;
     } catch {
       if (this.isCurrent(operationToken)) {
         this.setError("Could not finish voice recording.", "retry");
       }
+      return false;
     } finally {
       this.finishing = false;
       await this.releaseResources();

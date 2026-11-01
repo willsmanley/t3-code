@@ -1,6 +1,13 @@
 import type { VoiceInputPhase } from "@t3tools/client-runtime/voice-input";
 import { CheckIcon, MicIcon, XIcon } from "lucide-react";
-import { memo, useEffect, useState, type PointerEventHandler } from "react";
+import {
+  memo,
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent,
+  type PointerEventHandler,
+} from "react";
 
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
@@ -9,16 +16,47 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 const keepComposerFocus: PointerEventHandler<HTMLElement> = (event) => {
   event.preventDefault();
 };
+const HOLD_TO_EDIT_MS = 500;
 
-/** Mic, then cancel / status / confirm while a dictation runs, as on mobile. */
+/**
+ * Mic, then cancel / status / confirm while a dictation runs, as on mobile. Confirm sends the
+ * message; holding it (or Shift-clicking) only puts the words in the draft.
+ */
 export const ComposerVoiceInputControl = memo(function ComposerVoiceInputControl(props: {
   readonly phase: VoiceInputPhase;
   readonly recordingStartedAt: number | null;
   readonly disabled: boolean;
   readonly onStart: () => void;
   readonly onConfirm: () => void;
+  readonly onConfirmWithoutSending: () => void;
   readonly onCancel: () => void;
 }) {
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const held = useRef(false);
+  const clearHold = () => {
+    if (holdTimer.current !== null) clearTimeout(holdTimer.current);
+    holdTimer.current = null;
+  };
+  const startHold: PointerEventHandler<HTMLElement> = (event) => {
+    keepComposerFocus(event);
+    held.current = false;
+    clearHold();
+    holdTimer.current = setTimeout(() => {
+      holdTimer.current = null;
+      held.current = true;
+      props.onConfirmWithoutSending();
+    }, HOLD_TO_EDIT_MS);
+  };
+  const confirm = (event: MouseEvent<HTMLButtonElement>) => {
+    clearHold();
+    if (held.current) {
+      held.current = false;
+      return;
+    }
+    if (event.shiftKey) props.onConfirmWithoutSending();
+    else props.onConfirm();
+  };
+
   if (props.phase === "idle" || props.phase === "error") {
     return (
       <Tooltip>
@@ -67,17 +105,26 @@ export const ComposerVoiceInputControl = memo(function ComposerVoiceInputControl
           </>
         )}
       </span>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        disabled={props.phase !== "recording"}
-        onPointerDown={keepComposerFocus}
-        onClick={props.onConfirm}
-        aria-label="Finish voice input"
-      >
-        <CheckIcon />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              disabled={props.phase !== "recording"}
+              onPointerDown={startHold}
+              onPointerUp={clearHold}
+              onPointerLeave={clearHold}
+              onClick={confirm}
+              aria-label="Send voice message"
+            />
+          }
+        >
+          <CheckIcon />
+        </TooltipTrigger>
+        <TooltipPopup>Send · hold or Shift-click to edit first</TooltipPopup>
+      </Tooltip>
     </div>
   );
 });

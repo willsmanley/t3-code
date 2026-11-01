@@ -410,6 +410,13 @@ import {
 } from "./sourceControl.ts";
 import { VcsError } from "./vcs.ts";
 import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
+import {
+  VoiceDictationAppendInput,
+  VoiceDictationAppendResult,
+  VoiceDictationError,
+  VoiceDictationTranscribeInput,
+  VoiceDictationTranscribeResult,
+} from "./voiceDictation.ts";
 
 export const WS_METHODS = {
   projectsListEntries: "projects.listEntries",
@@ -545,6 +552,9 @@ export const WS_METHODS = {
   serverUnregisterPushDevice: "server.unregisterPushDevice",
   // Fork: the ElevenLabs key web and desktop voice input transcribe with.
   serverGetElevenLabsApiKey: "server.getElevenLabsApiKey",
+  // Fork: dictation audio streamed to the server while recording, then transcribed there.
+  voiceDictationAppend: "voice.appendAudio",
+  voiceDictationTranscribe: "voice.transcribe",
   serverGetUsageSummary: "server.getUsageSummary",
   serverRefreshUsageRates: "server.refreshUsageRates",
 
@@ -1017,6 +1027,18 @@ const WsServerGetElevenLabsApiKeyRpc = Rpc.make(WS_METHODS.serverGetElevenLabsAp
   payload: Schema.Struct({}),
   success: Schema.Struct({ apiKey: Schema.NullOr(Schema.String) }),
   error: EnvironmentAuthorizationError,
+});
+
+const WsVoiceDictationAppendRpc = Rpc.make(WS_METHODS.voiceDictationAppend, {
+  payload: VoiceDictationAppendInput,
+  success: VoiceDictationAppendResult,
+  error: Schema.Union([VoiceDictationError, EnvironmentAuthorizationError]),
+});
+
+const WsVoiceDictationTranscribeRpc = Rpc.make(WS_METHODS.voiceDictationTranscribe, {
+  payload: VoiceDictationTranscribeInput,
+  success: VoiceDictationTranscribeResult,
+  error: Schema.Union([VoiceDictationError, EnvironmentAuthorizationError]),
 });
 
 const WsServerUnregisterPushDeviceRpc = Rpc.make(WS_METHODS.serverUnregisterPushDevice, {
@@ -2075,6 +2097,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRegisterPushDeviceRpc,
   WsServerUnregisterPushDeviceRpc,
   WsServerGetElevenLabsApiKeyRpc,
+  WsVoiceDictationAppendRpc,
+  WsVoiceDictationTranscribeRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
   WsPullRequestsListRpc,

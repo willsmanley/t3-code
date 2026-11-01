@@ -90,6 +90,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.serverRegisterPushDevice]: "server",
   [WS_METHODS.serverUnregisterPushDevice]: "server",
   [WS_METHODS.serverGetElevenLabsApiKey]: "server",
+  [WS_METHODS.voiceDictationAppend]: "server",
+  [WS_METHODS.voiceDictationTranscribe]: "server",
   [WS_METHODS.scheduledTasksSubscribe]: "scheduledTasks",
   [WS_METHODS.scheduledTasksUpsert]: "scheduledTasks",
   [WS_METHODS.scheduledTasksSetEnabled]: "scheduledTasks",

@@ -2,13 +2,27 @@ import {
   ELEVENLABS_SPEECH_TO_TEXT_FIELDS,
   ELEVENLABS_SPEECH_TO_TEXT_URL,
   createElevenLabsTranscriber,
+  createServerDictationCommands,
+  createServerDictationTranscriber,
+  serverDictationTransport,
   type ElevenLabsRecordings,
   type VoiceTranscriber,
 } from "@t3tools/client-runtime/voice-input";
-import { File, UploadType } from "expo-file-system";
+import type { EnvironmentId } from "@t3tools/contracts";
+import { File, FileMode, UploadType } from "expo-file-system";
 import * as SecureStore from "expo-secure-store";
 
+import { connectionAtomRuntime } from "../../connection/runtime";
+import { appAtomRegistry } from "../../state/atom-registry";
 import { androidRecordings } from "./savedRecordings";
+
+const serverDictationCommands = createServerDictationCommands(connectionAtomRuntime);
+let dictationEnvironmentId: EnvironmentId | null = null;
+
+/** The server the next dictation streams to: the one that owns the composer's thread (F16). */
+export function setDictationEnvironment(environmentId: EnvironmentId | null): void {
+  dictationEnvironmentId = environmentId;
+}
 
 const API_KEY_STORAGE_KEY = "voice-input.elevenlabs-api-key";
 
@@ -26,11 +40,44 @@ export const androidElevenLabsRecordings: ElevenLabsRecordings = {
   upload: uploadRecording,
 };
 
+/**
+ * Streams the recording to the thread's server, which transcribes it. Without a reachable
+ * server that can, the recording goes straight to ElevenLabs with the key saved on this phone.
+ */
 export function getElevenLabsTranscriber(): VoiceTranscriber {
-  return createElevenLabsTranscriber(
-    androidElevenLabsRecordings,
-    () => Intl.DateTimeFormat().resolvedOptions().locale,
-  );
+  const locale = () => Intl.DateTimeFormat().resolvedOptions().locale;
+  return createServerDictationTranscriber({
+    transport:
+      dictationEnvironmentId === null
+        ? null
+        : serverDictationTransport(
+            appAtomRegistry,
+            serverDictationCommands,
+            dictationEnvironmentId,
+          ),
+    read: readRecordingFrom,
+    recordings: androidElevenLabsRecordings,
+    source: "mobile",
+    locale,
+    fallback: createElevenLabsTranscriber(androidElevenLabsRecordings, locale),
+  });
+}
+
+// ADTS is a run of self-contained frames, so a file still being recorded can be read up to its
+// current end and the rest sent later.
+async function readRecordingFrom(uri: string, offset: number, maxBytes: number) {
+  const handle = new File(uri).open(FileMode.ReadOnly);
+  try {
+    const size = handle.size ?? 0;
+    if (offset >= size) return { bytes: new Uint8Array(), mimeType: "audio/aac" };
+    handle.offset = offset;
+    return {
+      bytes: await handle.readBytes(Math.min(size - offset, maxBytes)),
+      mimeType: "audio/aac",
+    };
+  } finally {
+    handle.close();
+  }
 }
 
 function uploadRecording(uri: string, apiKey: string, signal: AbortSignal) {

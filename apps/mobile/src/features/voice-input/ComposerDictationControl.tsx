@@ -253,10 +253,12 @@ export function DictationElapsedTime(props: {
 function VoiceActionButton(props: {
   readonly size?: "regular" | "large";
   readonly accessibilityLabel: string;
+  readonly accessibilityHint?: string;
   readonly disabled?: boolean;
   readonly icon: AppSymbolName;
   readonly loading?: boolean;
   readonly onPress: () => void;
+  readonly onLongPress?: () => void;
   readonly variant?: "plain" | "primary";
 }) {
   const { scale } = useAndroidControlSizing();
@@ -274,11 +276,13 @@ function VoiceActionButton(props: {
   return (
     <Pressable
       accessibilityLabel={props.accessibilityLabel}
+      accessibilityHint={props.accessibilityHint}
       accessibilityRole="button"
       accessibilityState={{ busy: props.loading, disabled: props.disabled }}
       className="size-[44px] shrink-0 items-center justify-center active:opacity-70"
       disabled={props.disabled}
       onPress={props.onPress}
+      onLongPress={props.onLongPress}
       style={{
         opacity: props.disabled && !props.loading ? 0.4 : 1,
         // Matches ComposerActionButton so the circle stays concentric with the large composer corner.
@@ -410,21 +414,28 @@ export function ComposerDictationPrimaryAction(props: {
   readonly disabled?: boolean;
   readonly onStart: () => void;
   readonly onConfirm: () => void;
+  /** Fork (F16): set where ✓ sends, to put the words in the draft without sending. */
+  readonly onConfirmLongPress?: () => void;
   readonly onCancel: () => void;
 }) {
   if (props.presentation.trailingAction === "confirm") {
+    const sends = props.onConfirmLongPress !== undefined;
     return (
       <VoiceActionButton
         size={props.size}
         accessibilityLabel={
           props.presentation.confirmationEnabled
-            ? "Finish dictation"
+            ? sends
+              ? "Send dictation"
+              : "Finish dictation"
             : (props.presentation.statusLabel ?? "Preparing voice input")
         }
+        {...(sends ? { accessibilityHint: "Long-press to edit before sending" } : {})}
         disabled={!props.presentation.confirmationEnabled}
         icon="checkmark"
         loading={!props.presentation.confirmationEnabled}
         onPress={props.onConfirm}
+        {...(props.onConfirmLongPress ? { onLongPress: props.onConfirmLongPress } : {})}
         variant="primary"
       />
     );

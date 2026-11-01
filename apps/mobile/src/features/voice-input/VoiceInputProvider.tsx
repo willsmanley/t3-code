@@ -24,6 +24,7 @@ import {
   VOICE_RECORDING_LIMIT_SECONDS,
   pruneSavedTranscripts,
   releaseRecording,
+  streamRecordingAudio,
   voiceInputBlocksSubmission,
 } from "@t3tools/client-runtime/voice-input";
 import { createLazyVoiceRecorder } from "./lazyVoiceRecorder";
@@ -52,9 +53,10 @@ const VOICE_RECORDING_OPTIONS =
       }
     : {
         extension: ".aac",
-        sampleRate: 44_100,
+        // Transcribes as well as 44.1 kHz at 96 kbps in half the bytes (fork F16).
+        sampleRate: 16_000,
         numberOfChannels: 1,
-        bitRate: 96_000,
+        bitRate: 48_000,
         isMeteringEnabled: true,
         outputFormat: "aac_adts",
         audioEncoder: "aac",
@@ -146,6 +148,7 @@ const voiceInputAtom = Atom.make((get) => {
         : new File(uri).delete(),
     sampleRecording: () => {
       const status = recorder.getStatus();
+      if (status?.isRecording && recorder.uri) streamRecordingAudio(recorder.uri);
       return status?.isRecording
         ? { durationMillis: status.durationMillis, metering: status.metering }
         : null;

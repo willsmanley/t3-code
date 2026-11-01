@@ -230,6 +230,7 @@ import * as EventLoopMonitor from "./observability/EventLoopMonitor.ts";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as DirectPush from "./notifications/DirectPush.ts";
 import { readElevenLabsApiKey } from "./voiceInput/elevenLabsApiKey.ts";
+import * as VoiceDictation from "./voiceInput/VoiceDictation.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import { requiredScopeForDeviceList, rpcAuthorizationError } from "./auth/RpcAuthorization.ts";
 import * as RpcAuthorization from "./auth/RpcAuthorization.ts";
@@ -1380,6 +1381,7 @@ export const layerWsRpc = (
       const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
       const directPush = yield* DirectPush.DirectPush;
       const secretStore = yield* ServerSecretStore.ServerSecretStore;
+      const voiceDictation = yield* VoiceDictation.VoiceDictation;
       const rpcClientIds = yield* Ref.make(new Set<RpcClientId>());
       yield* Effect.addFinalizer(() =>
         Ref.get(rpcClientIds).pipe(
@@ -2607,6 +2609,8 @@ export const layerWsRpc = (
             }),
           ),
         [WS_METHODS.serverGetElevenLabsApiKey]: (_input) => readElevenLabsApiKey(secretStore),
+        [WS_METHODS.voiceDictationAppend]: (input) => voiceDictation.append(input),
+        [WS_METHODS.voiceDictationTranscribe]: (input) => voiceDictation.transcribe(input),
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) => relayClient.resolve,
         [WS_METHODS.cloudInstallRelayClient]: (_input) =>
           Stream.callback<RelayClientInstallProgressEvent, RelayClientInstallFailedError>((queue) =>

@@ -3501,7 +3501,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     recordingStartedAt={voiceInput.recordingStartedAt}
                     disabled={voiceInputUnavailable}
                     onStart={voiceInput.start}
-                    onConfirm={voiceInput.stop}
+                    onConfirm={() => voiceInput.stopAndSend(submitComposerStable)}
+                    onConfirmWithoutSending={voiceInput.stop}
                     onCancel={voiceInput.cancel}
                   />
                   <ComposerFooterPrimaryActions

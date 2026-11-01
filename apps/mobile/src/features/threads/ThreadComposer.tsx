@@ -113,6 +113,7 @@ import {
   ComposerDictationToolbar,
 } from "../voice-input/ComposerDictationControl";
 import { useVoiceInputController } from "../voice-input/useVoiceInputController";
+import { useDictationSend } from "../voice-input/useDictationSend";
 import { useAssistantDictation } from "../assistant/assistantDictation";
 import { resolveVoiceComposerPresentation } from "../voice-input/voiceInputPresentation";
 import type { ExistingThreadSettingsRouteParams } from "./ThreadSettingsSheet";
@@ -565,6 +566,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
   });
   const voiceInput = useVoiceInputController({
     ownerKey: composerDraftKey,
+    environmentId: props.environmentId,
     label: props.selectedThread.title || "Untitled thread",
     readDraftMessage: () => getComposerDraftSnapshot(composerDraftKey).text,
     subscribeToDraftChanges: (onChange) => appAtomRegistry.subscribe(composerDraftsAtom, onChange),
@@ -710,6 +712,10 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
       projectTitle: props.environmentLabel ?? "T3 Code",
     });
   };
+
+  const sendDictation = useDictationSend(voiceInput.stop, () => {
+    if (canSend) void handleSend();
+  });
 
   const lockedProviderInstanceId = props.canSwitchProvider
     ? undefined
@@ -1164,7 +1170,8 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                     isAvailable={voiceInput.isAvailable}
                     disabled={isSubmissionLocked}
                     onStart={voiceInput.start}
-                    onConfirm={voiceInput.stop}
+                    onConfirm={sendDictation}
+                    onConfirmLongPress={voiceInput.stop}
                     onCancel={voiceInput.cancel}
                   />
                   {showStopAction ? (

@@ -33,3 +33,10 @@ export {
   type SavedRecording,
   type SavedRecordingStorage,
 } from "./savedRecordings.ts";
+export {
+  createServerDictationTranscriber,
+  streamRecordingAudio,
+  type RecordingAudioReader,
+  type ServerDictationTransport,
+} from "./serverDictation.ts";
+export { createServerDictationCommands, serverDictationTransport } from "./serverDictationRpc.ts";

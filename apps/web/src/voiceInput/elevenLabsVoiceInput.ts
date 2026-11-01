@@ -3,7 +3,11 @@ import {
   ELEVENLABS_SPEECH_TO_TEXT_URL,
   VoiceTranscriptionError,
   createElevenLabsTranscriber,
+  createServerDictationCommands,
+  createServerDictationTranscriber,
   pruneSavedTranscripts,
+  serverDictationTransport,
+  streamRecordingAudio,
   type ElevenLabsRecordings,
   type VoiceRecorder,
   type VoiceRecorderStatus,
@@ -24,6 +28,8 @@ const getServerElevenLabsApiKey = createEnvironmentRpcCommand(connectionAtomRunt
   tag: WS_METHODS.serverGetElevenLabsApiKey,
 });
 
+const serverDictationCommands = createServerDictationCommands(connectionAtomRuntime);
+
 /** Android's limit, so a long dictation behaves the same on every client. */
 export const WEB_VOICE_RECORDING_LIMIT_SECONDS = 20 * 60;
 // MediaRecorder hands over audio this often, and each piece is saved as it comes.
@@ -42,12 +48,35 @@ export function webElevenLabsRecordings(
   };
 }
 
-/** Transcribes with the ElevenLabs key saved on the thread's server. */
+/**
+ * Streams the recording to the thread's server, which transcribes it (F16). An older server,
+ * or one that stays unreachable, gets the recording uploaded straight to ElevenLabs instead.
+ */
 export function getElevenLabsTranscriber(environmentId: EnvironmentId): VoiceTranscriber {
-  return createElevenLabsTranscriber(
-    webElevenLabsRecordings([environmentId]),
-    () => navigator.language,
-  );
+  const recordings = webElevenLabsRecordings([environmentId]);
+  const locale = () => navigator.language;
+  return createServerDictationTranscriber({
+    transport: serverDictationTransport(appAtomRegistry, serverDictationCommands, environmentId),
+    read: readRecordingFrom,
+    recordings,
+    source: "web",
+    locale,
+    fallback: createElevenLabsTranscriber(recordings, locale),
+  });
+}
+
+// The recording in progress, kept in memory so streaming it doesn't re-read IndexedDB each second.
+let liveRecording: { readonly id: string; readonly pieces: Blob[]; type: string } | null = null;
+
+async function readRecordingFrom(uri: string, offset: number, maxBytes: number) {
+  const audio =
+    liveRecording?.id === uri
+      ? new Blob(liveRecording.pieces, { type: liveRecording.type })
+      : await readRecordingAudio(uri);
+  return {
+    bytes: new Uint8Array(await audio.slice(offset, offset + maxBytes).arrayBuffer()),
+    mimeType: audio.type || "audio/webm",
+  };
 }
 
 let prunedThisLoad = false;
@@ -138,6 +167,9 @@ export async function requestMicrophonePermission(): Promise<{
 }
 
 const PREFERRED_MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"];
+// Speech transcribes as well at these rates as at the browser's default, in a fraction of the bytes.
+const audioBitsPerSecond = (mimeType: string | undefined) =>
+  mimeType === undefined || mimeType.includes("mp4") ? 48_000 : 24_000;
 
 /**
  * MediaRecorder behind the shared controller's recorder interface, saving audio
@@ -167,15 +199,23 @@ export class WebVoiceRecorder implements VoiceRecorder {
     this.started = false;
     this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const mimeType = PREFERRED_MIME_TYPES.find((type) => MediaRecorder.isTypeSupported(type));
-    const recorder = new MediaRecorder(this.stream, mimeType ? { mimeType } : undefined);
+    const recorder = new MediaRecorder(this.stream, {
+      ...(mimeType ? { mimeType } : {}),
+      audioBitsPerSecond: audioBitsPerSecond(mimeType),
+    });
     const id = randomUUID();
     this.recorder = recorder;
     this.uri = id;
+    const live = { id, pieces: [] as Blob[], type: recorder.mimeType || mimeType || "audio/webm" };
+    liveRecording = live;
     recorder.addEventListener("dataavailable", (event) => {
       if (event.data.size === 0) return;
       const type = recorder.mimeType || mimeType || "audio/webm";
+      live.pieces.push(event.data);
+      live.type = type;
       this.saving = this.saving
         .then(() => appendRecordingAudio(id, event.data, type))
+        .then(() => streamRecordingAudio(id))
         .catch(() => this.fail("Voice recording could not be saved."));
     });
     recorder.addEventListener("error", () => this.fail("Voice recording was interrupted."));

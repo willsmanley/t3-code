@@ -5,7 +5,10 @@ import {
   type VoiceInputState,
 } from "@t3tools/client-runtime/voice-input";
 
+import type { EnvironmentId } from "@t3tools/contracts";
+
 import type { ComposerEditorSelection } from "../../components/ComposerEditor";
+import { setDictationEnvironment } from "./elevenLabsTranscription";
 import { useGlobalVoiceInput } from "./VoiceInputProvider";
 import { createVoiceInputTarget } from "./voiceInputSession";
 
@@ -13,6 +16,8 @@ const IDLE_STATE: VoiceInputState = { phase: "idle", error: null, errorAction: n
 
 export function useVoiceInputController(input: {
   readonly ownerKey: string | null;
+  /** The server that transcribes this composer's dictation. */
+  readonly environmentId?: EnvironmentId;
   readonly label: string;
   readonly readDraftMessage: () => string | null;
   readonly subscribeToDraftChanges: (onChange: () => void) => () => void;
@@ -47,6 +52,7 @@ export function useVoiceInputController(input: {
   const start = useCallback(() => {
     const captured = latestInput.current;
     if (!captured.ownerKey || captured.disabled) return;
+    setDictationEnvironment(captured.environmentId ?? null);
     void session.start({
       ...createVoiceInputTarget(
         captured.ownerKey,

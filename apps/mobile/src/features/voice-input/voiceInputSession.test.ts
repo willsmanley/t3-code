@@ -210,7 +210,7 @@ describe("global voice input", () => {
         createTarget("first", () => "first", firstCommit, { start: 5, end: 5 }),
       );
       await preparationEntered.promise;
-      let stopping: Promise<void> | null = null;
+      let stopping: Promise<boolean> | null = null;
       if (phase !== "preparing") {
         preparation.resolve({
           locale: "en-US",

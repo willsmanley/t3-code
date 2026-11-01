@@ -236,7 +236,7 @@ describe("VoiceInputController", () => {
       error: null,
       url: "file:///voice.m4a",
     });
-    await stopping;
+    await expect(stopping).resolves.toBe(true);
 
     expect(harness.commits).toEqual([
       { text: "hello new text", selection: { start: 14, end: 14 } },
@@ -367,7 +367,7 @@ describe("VoiceInputController", () => {
     await transcriptionEntered.promise;
     harness.setDraft(draft({ ownerKey: "environment:other-thread" }));
     transcription.resolve("late text");
-    await stopping;
+    await expect(stopping).resolves.toBe(false);
 
     expect(harness.commits).toEqual([]);
     expect(harness.controller.currentState.error).toContain("draft changed");

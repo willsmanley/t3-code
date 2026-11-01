@@ -15,6 +15,8 @@ export const ELEVENLABS_SPEECH_TO_TEXT_FIELDS = {
 // About three minutes of retries rides out a dropped connection while the
 // composer waits.
 const RETRY_DELAYS_MS = [2_000, 5_000, 10_000, 20_000, 30_000, 30_000, 30_000, 60_000];
+// A stalled connection otherwise waits on the platform's own timeout, or forever in a browser.
+const ATTEMPT_TIMEOUT_MS = 90_000;
 
 export type ElevenLabsUploadResponse = { readonly status: number; readonly body: string };
 
@@ -41,7 +43,7 @@ async function transcribeWithElevenLabs(options: {
     throwIfVoiceTranscriptionAborted(signal);
     let response: ElevenLabsUploadResponse | null = null;
     try {
-      response = await upload(signal);
+      response = await uploadWithTimeout(upload, signal);
     } catch {
       throwIfVoiceTranscriptionAborted(signal);
     }
@@ -55,6 +57,20 @@ async function transcribeWithElevenLabs(options: {
     if (delay === undefined) throw fail("Could not reach ElevenLabs.");
     await wait(delay, signal);
   }
+}
+
+function uploadWithTimeout(
+  upload: (signal: AbortSignal) => Promise<ElevenLabsUploadResponse>,
+  signal: AbortSignal,
+): Promise<ElevenLabsUploadResponse> {
+  const attempt = new AbortController();
+  const abort = () => attempt.abort();
+  signal.addEventListener("abort", abort, { once: true });
+  const timer = setTimeout(abort, ATTEMPT_TIMEOUT_MS);
+  return upload(attempt.signal).finally(() => {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", abort);
+  });
 }
 
 /** What a platform supplies to transcribe its kept recordings with ElevenLabs. */
