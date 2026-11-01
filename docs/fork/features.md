@@ -140,51 +140,63 @@ Verify:
 - `vp test run apps/web/src/hooks/useThreadConversationActions.test.ts apps/web/src/lib/threadProviderIdentity.test.ts apps/web/src/components/threadActionMenu.logic.test.ts apps/web/src/hooks/useThreadActionMenu.test.ts packages/client-runtime/src/operations/commands.test.ts`
 - `grep -ln '"fork-conversation"' apps/web/src/components/Sidebar.tsx apps/web/src/components/LegacySidebar.tsx apps/web/src/hooks/useThreadActionMenu.ts apps/web/src/components/threadActionMenu.logic.ts` (all four files listed).
 
-### F4. Scheduler: time zones, active hours, one-off tasks, tasks that end themselves
+### F4. Scheduler: time zones, active hours, tasks that end themselves
 
 Commits `7b635bccae`, `c4674d8d70`, `6e4956e624`, `15ef0c5a16`, `26bc3b2dc5`, `229aaaec8d`.
 
 What it does: a scheduled task can (a) run a fixed-time schedule in a chosen IANA time zone,
-(b) limit an interval task to active hours, (c) run once at a set time, and (d) stop after N runs
-or at an end time. A task that ends stays listed but switched off, labeled Done, Missed or Ended.
-All of this works in web settings, mobile settings and the agent MCP tools
-(`schedule_task`, which also updates a task given `scheduledTaskId`).
+(b) limit an interval task to active hours, and (c) stop after N runs or at an end time. A task
+that ends stays listed but switched off, labeled Ended. All of this works in web settings, mobile
+settings and the agent MCP tools (`schedule_task`, which also updates a task given
+`scheduledTaskId`).
+
+One-off tasks are upstream's since November 1, 2026 (`{ type: "once", runAt }`, upstream
+`4ac97be2b6`). The fork's own one-off (`{ type: "once", at }`, switched off after its run and
+skipped when missed) was dropped in that merge. Upstream's one-off stays on after it runs, with no
+next run, and runs late if the server was down. Stored fork one-offs are rewritten to `runAt` at
+startup by `apps/server/src/scheduledTasks/legacyOnceSchedules.ts` (+ test). Older fork one-offs
+that already ran stay switched off and show Done or Missed (`scheduledTaskEnding`).
 
 Fork-owned files: `packages/client-runtime/src/scheduledTaskSchedule.ts` (+ test), the draft
-helpers shared by web and mobile.
+helpers shared by web and mobile; `apps/server/src/scheduledTasks/legacyOnceSchedules.ts` (+ test).
 
 Touch points:
 
 - `packages/contracts/src/scheduledTask.ts`: new schema pieces (`timeZone`, `activeHours`,
-  `once`, `endAfterRuns` / `endAt`), the validators `isValidTimeZone` and `isAbsoluteDateTime`,
-  and a `once` member in both unions (+ `scheduledTask.test.ts`).
+  `endAfterRuns` / `endAt`), the validators `isValidTimeZone` and `isAbsoluteDateTime` (end
+  times), and `ScheduledTaskUpsertFixedTimeSchedule` in the upsert union (+ `scheduledTask.test.ts`).
+  The `once` member is upstream's.
 - `packages/contracts/src/orchestratorMcp.ts`: schedule description, and `runCount` on the MCP
   task summary.
 - `apps/server/src/scheduledTasks/Schedule.ts`: `activeHoursDeferral`, `endsToStore`,
-  `timerScheduleToStore`, `scheduleEnd`, time-zone-aware next run, and the rename of
-  `isMissedFixedTimeRun` to `isMissedRun` (+ `Schedule.test.ts`).
+  `timerScheduleToStore` (also stores upstream's `runAt` in UTC), `scheduleEnd` (never ends a
+  one-off), time-zone-aware next run (+ `Schedule.test.ts`).
 - `apps/server/src/scheduledTasks/ScheduledTaskService.ts`: `nextRunState` / `endedMessage`
-  replace `nextRunAt`. SQL updates switch ended tasks off (`enabled = CASE WHEN ... THEN 0`).
-  `runDueTasks` calls `endExpiredWebhookTasks`, which also returns the next webhook end time so
-  upstream's idle wake-up (only queries when a run is due) still switches webhooks off on time;
-  it defers runs that fall outside active hours,
-  validates one-off times on upsert, and applies webhook run limits
-  (+ `ScheduledTaskService.schedule.test.ts`, `ScheduledTaskService.webhook.test.ts`).
-- `apps/server/src/mcp/OrchestratorMcpService.ts`: `runCount` in the summary; a new `at` turns a
-  finished one-off back on (+ test).
+  replace upstream's `nextRunAt`; upstream's `nextRunAfterRun` became `runOrigin`, and its
+  `requireFutureOnce` uses `nextRunTime`. SQL updates switch ended tasks off
+  (`enabled = CASE WHEN ... THEN 0`). The run completion uses upstream's transaction with the
+  fork's run state. `runDueTasks` calls `endExpiredWebhookTasks`, which also returns the next
+  webhook end time so upstream's idle wake-up still switches webhooks off on time; it defers runs
+  that fall outside active hours and applies webhook run limits. The layer calls
+  `migrateLegacyOnceSchedules` before its crash recovery (+ `ScheduledTaskService.schedule.test.ts`,
+  `ScheduledTaskService.webhook.test.ts`).
+- `apps/server/src/mcp/OrchestratorMcpService.ts`: `runCount` in the summary.
 - `apps/server/src/mcp/toolkits/orchestrator/tools.ts`: the `schedule_task` description's
-  time-zone, kept-on-update and one-off hints.
+  time-zone and kept-on-update hints.
 - `apps/server/src/provider/agentContextBudget.json`: `mcpToolListJsonBytes` is the fork's
   measured size (see "Merge hazards").
-- `apps/web/src/components/settings/ScheduledTasksSettings.tsx`: Once mode, time zone field,
-  active hours, "Stop after N runs / at" fields, `ScheduledStoppedLabel`, a richer
-  `scheduleLabel`.
-- `apps/web/src/components/settings/scheduledTasksSettings.logic.ts`: draft fields,
-  `scheduleDraftErrors` (renamed from `webhookDraftErrors`), `localDateTimeInputValue` (+ test).
+- `apps/web/src/components/settings/ScheduledTasksSettings.tsx`: time zone field, active hours,
+  "Stop after N runs / at" fields (hidden for once), `ScheduledStoppedLabel`, `cadenceLabel`
+  (wraps upstream's label). The Once toggle is upstream's.
+- `apps/web/src/components/settings/scheduledTasksSettings.logic.ts`: draft fields, the fork's
+  checks in upstream's `scheduleDraftErrors` (webhook checks in a private `webhookDraftErrors`),
+  `endsFromDraft`; end times use upstream's `toDateTimeLocalValue` (+ test).
 - `apps/web/src/components/chat/ThreadAutomationsPanel.tsx`: uses `ScheduledStoppedLabel`.
 - `apps/mobile/src/features/settings/SettingsScheduledTasksRouteScreen.tsx`: the same fields on
-  mobile (date-time pickers, labels).
-- `apps/mobile/src/features/settings/scheduledTaskDraft.ts`: draft fields (+ test).
+  mobile (`TimeOfDayRow`, `InstantRows` for the end time, `stoppedLabel`). The once rows and
+  `runAtPicker` are upstream's.
+- `apps/mobile/src/features/settings/scheduledTaskDraft.ts`: draft fields; upstream's once branch
+  runs first in `scheduleFromDraft`, so stop fields never block a once save (+ test).
 - `packages/client-runtime/package.json`: export `./scheduled-task-schedule`.
 - `apps/server/scripts/migrate-dev-db.ts`: seeded dev databases also clear
   `scheduled_task_webhook_pending` and `scheduled_task_webhook_replay_keys`.
@@ -192,9 +204,9 @@ Touch points:
 
 Verify:
 
-- `vp test run packages/contracts/src/scheduledTask.test.ts packages/client-runtime/src/scheduledTaskSchedule.test.ts apps/server/src/scheduledTasks/Schedule.test.ts apps/server/src/scheduledTasks/ScheduledTaskService.schedule.test.ts apps/server/src/scheduledTasks/ScheduledTaskService.webhook.test.ts apps/web/src/components/settings/scheduledTasksSettings.logic.test.ts apps/mobile/src/features/settings/scheduledTaskDraft.test.ts`
-- `vp test run apps/server/src/mcp/OrchestratorMcpService.test.ts -t "one-off"`
-- `grep -n 'Toggle value="once"' apps/web/src/components/settings/ScheduledTasksSettings.tsx` (one hit).
+- `vp test run packages/contracts/src/scheduledTask.test.ts packages/client-runtime/src/scheduledTaskSchedule.test.ts apps/server/src/scheduledTasks/Schedule.test.ts apps/server/src/scheduledTasks/ScheduledTaskService.schedule.test.ts apps/server/src/scheduledTasks/ScheduledTaskService.webhook.test.ts apps/server/src/scheduledTasks/legacyOnceSchedules.test.ts apps/web/src/components/settings/scheduledTasksSettings.logic.test.ts apps/mobile/src/features/settings/scheduledTaskDraft.test.ts`
+- `grep -rn 'onceAt\|schedule\.at\b' apps/web/src apps/mobile/src packages/client-runtime/src` (no hits).
+- `grep -n "migrateLegacyOnceSchedules" apps/server/src/scheduledTasks/ScheduledTaskService.ts` (two hits).
 
 ### F5. Switch to turn off Git integration (server setting; web and mobile UI)
 
