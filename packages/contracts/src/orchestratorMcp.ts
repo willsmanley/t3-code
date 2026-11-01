@@ -67,7 +67,7 @@ const OrchestratorMcpSchedule = Schema.Union([
   OrchestratorMcpScheduleFromJsonString,
 ]).annotate({
   description:
-    "Trigger: {type:'interval',everyMs,activeHours?}, {type:'fixed_time',timeOfDay,weekdays?,timeZone?}, {type:'once',at}, or {type:'webhook'}. Repeating triggers take endAfterRuns? and endAt?.",
+    "Trigger: {type:'interval',everyMs,activeHours?}, {type:'fixed_time',timeOfDay,weekdays?,timeZone?}, {type:'once',runAt}, or {type:'webhook'}. Repeating triggers take endAfterRuns? and endAt?.",
 });
 
 const OrchestratorMcpTargetOptionsFromRecord = Schema.Record(

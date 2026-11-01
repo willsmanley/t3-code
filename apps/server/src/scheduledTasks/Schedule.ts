@@ -79,9 +79,10 @@ export function nextScheduledRunAt(
 ): DateTime.DateTime | null {
   if (schedule.type === "webhook") return null;
   if (schedule.type === "once") {
-    const at = DateTime.make(schedule.at);
-    return Option.isSome(at) && DateTime.toEpochMillis(at.value) > DateTime.toEpochMillis(from)
-      ? at.value
+    const runAt = DateTime.make(schedule.runAt);
+    return Option.isSome(runAt) &&
+      DateTime.toEpochMillis(runAt.value) > DateTime.toEpochMillis(from)
+      ? runAt.value
       : null;
   }
   if (schedule.type === "interval") {
@@ -152,7 +153,7 @@ export function timerScheduleToStore(
   input: Exclude<ScheduledTaskUpsertSchedule, { readonly type: "webhook" }>,
   stored: ScheduledTaskSchedule | undefined,
 ): ScheduledTaskSchedule {
-  if (input.type === "once") return { type: "once", at: utcInstant(input.at) };
+  if (input.type === "once") return { type: "once", runAt: utcInstant(input.runAt) };
   if (input.type === "interval") {
     const activeHours = kept(
       input.activeHours,
@@ -200,7 +201,7 @@ export function isSameSchedule(a: ScheduledTaskSchedule, b: ScheduledTaskSchedul
     );
   }
   if (a.type === "webhook") return b.type === "webhook";
-  if (a.type === "once") return b.type === "once" && Date.parse(a.at) === Date.parse(b.at);
+  if (a.type === "once") return b.type === "once" && Date.parse(a.runAt) === Date.parse(b.runAt);
   if (b.type !== "fixed_time") return false;
   // Compare parsed times so padded-hour edits do not reschedule pending runs.
   const aTime = parseTimeOfDay(a.timeOfDay);
@@ -215,24 +216,24 @@ export function isSameSchedule(a: ScheduledTaskSchedule, b: ScheduledTaskSchedul
   );
 }
 
-const MISSED_RUN_GRACE_MS = 10 * MINUTE_MS;
+const MISSED_FIXED_TIME_GRACE_MS = 10 * MINUTE_MS;
 
-/** A fixed-time or one-off run this late, as after the server was down, is skipped; interval runs still run late. */
-export function isMissedRun(
+export function isMissedFixedTimeRun(
   schedule: ScheduledTaskSchedule,
   dueAt: DateTime.DateTime,
   now: DateTime.DateTime,
 ): boolean {
-  if (schedule.type !== "fixed_time" && schedule.type !== "once") return false;
-  return DateTime.toEpochMillis(now) - DateTime.toEpochMillis(dueAt) > MISSED_RUN_GRACE_MS;
+  if (schedule.type !== "fixed_time") return false;
+  return DateTime.toEpochMillis(now) - DateTime.toEpochMillis(dueAt) > MISSED_FIXED_TIME_GRACE_MS;
 }
 
-export type ScheduleEnd = "once" | "run_limit" | "end_time";
+export type ScheduleEnd = "run_limit" | "end_time";
 
 /**
- * Why a schedule has no run left, or null while it has: a one-off past its
- * time, a run limit reached, or no run before the end time. `next` is the run
- * the schedule would make next; webhooks have none and end when the time passes.
+ * Why a repeating schedule has no run left, or null while it has: a run limit
+ * reached, or no run before the end time. `next` is the run the schedule would
+ * make next; webhooks have none and end when the time passes. A one-off never
+ * ends this way: after its time it simply has no next run.
  */
 export function scheduleEnd(
   schedule: ScheduledTaskSchedule,
@@ -240,7 +241,7 @@ export function scheduleEnd(
   next: DateTime.DateTime | null,
   now: DateTime.DateTime,
 ): ScheduleEnd | null {
-  if (schedule.type === "once") return next === null ? "once" : null;
+  if (schedule.type === "once") return null;
   if (schedule.endAfterRuns !== undefined && runCount >= schedule.endAfterRuns) return "run_limit";
   const endAt =
     schedule.endAt === undefined ? null : Option.getOrNull(DateTime.make(schedule.endAt));

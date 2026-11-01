@@ -154,12 +154,14 @@ describe("scheduleFromDraft", () => {
     expect(scheduleFromDraft({ ...draft, endAfterRuns: "1.5" })).toBeNull();
   });
 
-  it("keeps a one-off time and refuses a blank one", () => {
-    const at = "2026-07-03T14:00:00.000Z";
-    const draft = scheduleDraftForTask({ schedule: { type: "once", at } });
+  it("keeps a one-time run, ignores stop fields, and refuses a blank time", () => {
+    const runAt = "2026-07-03T14:00:00.000Z";
+    const draft = scheduleDraftForTask({ schedule: { type: "once", runAt } });
     expect(draft.mode).toBe("once");
-    expect(scheduleFromDraft(draft)).toEqual({ type: "once", at });
-    expect(scheduleFromDraft({ ...draft, onceAt: "" })).toBeNull();
+    expect(scheduleFromDraft(draft)).toEqual({ type: "once", runAt });
+    // Stop fields left from another mode don't apply to a one-time run.
+    expect(scheduleFromDraft({ ...draft, endAfterRuns: "0" })).toEqual({ type: "once", runAt });
+    expect(scheduleFromDraft({ ...draft, runAt: "" })).toBeNull();
   });
 
   it("keeps an interval's active hours and refuses an empty window", () => {

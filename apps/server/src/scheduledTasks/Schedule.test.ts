@@ -5,7 +5,6 @@ import * as DateTime from "effect/DateTime";
 import {
   activeHoursDeferral,
   endsToStore,
-  isMissedRun,
   isSameSchedule,
   nextScheduledRunAt,
   scheduleEnd,
@@ -155,7 +154,7 @@ describe("scheduled task schedule calculation", () => {
   });
 
   describe("one-off", () => {
-    const once = { type: "once", at: "2026-07-03T14:00:00.000Z" } as const;
+    const once = { type: "once", runAt: "2026-07-03T14:00:00.000Z" } as const;
     const at = (value: string) => DateTime.makeUnsafe(value);
 
     it("runs at its time and has no run after it", () => {
@@ -165,23 +164,12 @@ describe("scheduled task schedule calculation", () => {
       expect(nextScheduledRunAt(once, at("2026-07-03T14:00:01.000Z"))).toBeNull();
     });
 
-    it("is stored in UTC and compared as an instant", () => {
+    it("is stored in UTC", () => {
       const stored = timerScheduleToStore(
-        { type: "once", at: "2026-07-03T09:00:00-05:00" },
+        { type: "once", runAt: "2026-07-03T09:00:00-05:00" },
         undefined,
       );
       expect(stored).toEqual(once);
-      expect(isSameSchedule(stored, { type: "once", at: "2026-07-03T16:00:00+02:00" })).toBe(true);
-      expect(isSameSchedule(stored, { type: "once", at: "2026-07-03T14:01:00.000Z" })).toBe(false);
-    });
-
-    it("skips a run more than ten minutes late, like a fixed time", () => {
-      const due = at(once.at);
-      expect(isMissedRun(once, due, at("2026-07-03T14:10:00.000Z"))).toBe(false);
-      expect(isMissedRun(once, due, at("2026-07-03T14:10:01.000Z"))).toBe(true);
-      expect(
-        isMissedRun({ type: "interval", everyMs: 60_000 }, due, at("2026-07-04T00:00:00.000Z")),
-      ).toBe(false);
     });
   });
 
@@ -201,12 +189,12 @@ describe("scheduled task schedule calculation", () => {
       expect(scheduleEnd({ type: "fixed_time", timeOfDay: "09:00" }, 9, null, now)).toBeNull();
     });
 
-    it("ends a webhook once the time passes, and a one-off once its time has gone", () => {
+    it("ends a webhook once the time passes, but never a one-off", () => {
       const webhook = { type: "webhook", signature: null, endAt } as const;
       expect(scheduleEnd(webhook, 0, null, now)).toBeNull();
       expect(scheduleEnd(webhook, 0, null, at("2026-07-03T12:00:01.000Z"))).toBe("end_time");
       expect(scheduleEnd({ ...webhook, endAfterRuns: 1 }, 1, null, now)).toBe("run_limit");
-      expect(scheduleEnd({ type: "once", at: endAt }, 0, null, now)).toBe("once");
+      expect(scheduleEnd({ type: "once", runAt: endAt }, 0, null, now)).toBeNull();
     });
 
     it("stores ends in UTC and keeps omitted ones across trigger types", () => {
@@ -217,11 +205,17 @@ describe("scheduled task schedule calculation", () => {
       expect(stored).toEqual({ type: "interval", everyMs: 60_000, endAfterRuns: 2, endAt });
       expect(endsToStore({}, stored)).toEqual({ endAfterRuns: 2, endAt });
       expect(endsToStore({ endAfterRuns: null }, stored)).toEqual({ endAt });
-      expect(endsToStore({}, { type: "once", at: endAt })).toEqual({});
+      expect(endsToStore({}, { type: "once", runAt: endAt })).toEqual({});
     });
   });
 
   it("compares schedules structurally", () => {
+    expect(
+      isSameSchedule(
+        { type: "once", runAt: "2026-11-01T03:00:00-05:00" },
+        { type: "once", runAt: "2026-11-01T08:00:00.000Z" },
+      ),
+    ).toBe(true);
     expect(
       isSameSchedule({ type: "interval", everyMs: 60_000 }, { type: "interval", everyMs: 60_000 }),
     ).toBe(true);

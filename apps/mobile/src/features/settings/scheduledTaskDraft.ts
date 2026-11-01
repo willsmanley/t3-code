@@ -58,8 +58,10 @@ export function scheduledTaskDefaultModel(
 }
 
 export type ScheduleDraft = {
-  readonly mode: "fixed_time" | "interval" | "once" | "webhook";
+  readonly mode: "fixed_time" | "once" | "interval" | "webhook";
   readonly timeOfDay: string;
+  /** ISO time for a one-time run. Empty until the user picks the "Once" mode. */
+  readonly runAt: string;
   readonly weekdays: ReadonlyArray<number>;
   /** Blank runs at the environment's local time. */
   readonly timeZone: string;
@@ -67,8 +69,6 @@ export type ScheduleDraft = {
   readonly savedTimeZone: string;
   readonly intervalMinutes: string;
   readonly activeHours: ActiveHoursDraft;
-  /** ISO time of a one-off run, or blank before one is picked. */
-  readonly onceAt: string;
   /** Blank for no run limit. */
   readonly endAfterRuns: string;
   /** ISO end time, or blank for none. */
@@ -86,12 +86,12 @@ export type ScheduleDraft = {
 export const DEFAULT_SCHEDULE: ScheduleDraft = {
   mode: "fixed_time",
   timeOfDay: "09:00",
+  runAt: "",
   weekdays: [1, 2, 3, 4, 5],
   timeZone: "",
   savedTimeZone: "",
   intervalMinutes: "15",
   activeHours: activeHoursDraft(undefined),
-  onceAt: "",
   endAfterRuns: "",
   endAt: "",
   signature: null,
@@ -124,6 +124,8 @@ export function scheduleDraftForTask(task: Pick<ScheduledTask, "schedule">): Sch
         timeZone: task.schedule.timeZone ?? "",
         savedTimeZone: task.schedule.timeZone ?? "",
       };
+    case "once":
+      return { ...DEFAULT_SCHEDULE, mode: "once", runAt: task.schedule.runAt };
     case "interval":
       return {
         ...DEFAULT_SCHEDULE,
@@ -132,8 +134,6 @@ export function scheduleDraftForTask(task: Pick<ScheduledTask, "schedule">): Sch
         intervalMinutes: String(Math.max(1, task.schedule.everyMs / 60_000)),
         activeHours: activeHoursDraft(task.schedule.activeHours),
       };
-    case "once":
-      return { ...DEFAULT_SCHEDULE, mode: "once", onceAt: task.schedule.at };
     case "webhook":
       return {
         ...DEFAULT_SCHEDULE,
@@ -162,7 +162,8 @@ export function parseIntervalMinutes(value: string): number {
 
 export function scheduleFromDraft(draft: ScheduleDraft): ScheduledTaskUpsertSchedule | null {
   if (draft.mode === "once") {
-    return isAbsoluteDateTime(draft.onceAt) ? { type: "once", at: draft.onceAt } : null;
+    const runAt = new Date(draft.runAt);
+    return Number.isNaN(runAt.getTime()) ? null : { type: "once", runAt: runAt.toISOString() };
   }
   // Sent in full, so clearing a field in the form removes it on the server.
   const endAfterRuns = parseRunLimitDraft(draft.endAfterRuns);
@@ -272,11 +273,11 @@ function draftSignature(draft: ScheduledTaskDraft): string {
       .map((option) => [option.id, option.value]),
     draft.schedule.mode,
     draft.schedule.timeOfDay,
+    draft.schedule.runAt,
     [...draft.schedule.weekdays].sort((a, b) => a - b),
     draft.schedule.timeZone,
     draft.schedule.intervalMinutes,
     draft.schedule.activeHours,
-    draft.schedule.onceAt,
     draft.schedule.endAfterRuns,
     draft.schedule.endAt,
     draft.schedule.maxDeliveryAgeMinutes,

@@ -52,7 +52,7 @@ describe("scheduledTaskEnding", () => {
   const at = "2026-07-03T14:00:00.000Z";
   const once = {
     enabled: false,
-    schedule: { type: "once", at },
+    schedule: { type: "once", runAt: at },
     lastRunAt: null,
     runCount: 0,
   } as const;

@@ -59,7 +59,7 @@ export function validateScheduledTasksSearch(raw: Record<string, unknown>) {
   };
 }
 
-export type ScheduleMode = "fixed" | "interval" | "once" | "webhook";
+export type ScheduleMode = "fixed" | "once" | "interval" | "webhook";
 export type WorkspaceMode = "root" | "worktree" | "existing_worktree";
 
 export interface DraftState {
@@ -71,11 +71,13 @@ export interface DraftState {
   readonly intervalMinutes: string;
   readonly activeHours: ActiveHoursDraft;
   readonly timeOfDay: string;
+  /** Local date and time as a `datetime-local` input value, such as 2026-11-02T15:00. */
+  readonly runAt: string;
+  /** The stored ISO run time, sent back unchanged when the field was not edited. */
+  readonly savedRunAt: string;
   readonly weekdays: ReadonlySet<number>;
   /** Blank runs at the environment's local time. */
   readonly timeZone: string;
-  /** A datetime-local value, read in this browser's time zone. */
-  readonly onceAt: string;
   /** Blank for no limit. */
   readonly endAfterRuns: string;
   /** A datetime-local value, or blank for no end time. */
@@ -114,11 +116,23 @@ export const WEBHOOK_SIGNATURE_DEFAULTS = {
   signaturePrefix: "sha256=",
 } as const;
 
+/** Formats a date as a `datetime-local` input value in the browser's time zone. */
+export function toDateTimeLocalValue(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 export function scheduleDraftErrors(draft: DraftState) {
   if (draft.scheduleMode === "once") {
-    return oneOffTime(draft.onceAt) === null
-      ? [{ title: "Pick a time", description: "Choose the date and time to run the task." }]
-      : [];
+    const runAt = new Date(draft.runAt);
+    if (Number.isNaN(runAt.getTime()))
+      return [{ title: "Invalid run time", description: "Pick a date and time." }];
+    // A time skipped by a daylight saving change parses to a different clock time.
+    if (toDateTimeLocalValue(runAt) !== draft.runAt)
+      return [
+        { title: "Invalid run time", description: "That time does not exist in your time zone." },
+      ];
+    return [];
   }
   const errors: Array<{ title: string; description: string }> =
     draft.scheduleMode === "webhook" ? webhookDraftErrors(draft) : [];
@@ -141,7 +155,7 @@ export function scheduleDraftErrors(draft: DraftState) {
       title: "Invalid run limit",
       description: "Enter a whole number of runs, or leave it blank.",
     });
-  if (draft.endAt.trim() && oneOffTime(draft.endAt) === null)
+  if (draft.endAt.trim() && endTime(draft.endAt) === null)
     errors.push({ title: "Invalid end time", description: "Pick a date and time, or clear it." });
   return errors;
 }
@@ -150,7 +164,7 @@ export function scheduleDraftErrors(draft: DraftState) {
 function endsFromDraft(draft: DraftState) {
   return {
     endAfterRuns: parseRunLimitDraft(draft.endAfterRuns) ?? null,
-    endAt: draft.endAt.trim() ? oneOffTime(draft.endAt) : null,
+    endAt: draft.endAt.trim() ? endTime(draft.endAt) : null,
   };
 }
 
@@ -164,7 +178,7 @@ function webhookDraftErrors(draft: DraftState): Array<{ title: string; descripti
     ];
   const errors: Array<{ title: string; description: string }> = [];
   for (const [label, value] of [
-    ["Replay key", draft.replayKey],
+    ["Duplicate request key", draft.replayKey],
     ["Coalesce key", draft.coalesceKey],
   ] as const) {
     if (value.trim() && !isWebhookDedupeTemplate(value.trim()))
@@ -200,21 +214,32 @@ export function webhookDeliveryLabel(delivery: {
   return labels[delivery.outcome] ?? delivery.outcome.replaceAll("_", " ");
 }
 
-function oneOffTime(value: string): string | null {
+/** A `datetime-local` end time as an instant, read in this browser's time zone. */
+function endTime(value: string): string | null {
   const time = new Date(value);
   return Number.isFinite(time.getTime()) ? time.toISOString() : null;
 }
 
-/** The datetime-local value for an instant, in this browser's time zone. */
-export function localDateTimeInputValue(value: string | Date): string {
-  const time = typeof value === "string" ? new Date(value) : value;
-  if (!Number.isFinite(time.getTime())) return "";
-  const pad = (part: number) => String(part).padStart(2, "0");
-  return `${time.getFullYear()}-${pad(time.getMonth() + 1)}-${pad(time.getDate())}T${pad(time.getHours())}:${pad(time.getMinutes())}`;
-}
-
 export function scheduleFromDraft(draft: DraftState): ScheduledTaskUpsertSchedule | null {
   if (scheduleDraftErrors(draft).length > 0) return null;
+  if (draft.scheduleMode === "once") {
+    const saved = draft.savedRunAt ? new Date(draft.savedRunAt) : null;
+    if (saved !== null && toDateTimeLocalValue(saved) === draft.runAt)
+      return { type: "once", runAt: draft.savedRunAt };
+    // A `datetime-local` value has no offset. In an hour that repeats when clocks go
+    // back, keep the saved time's offset; otherwise Date reads it as local time.
+    const withSavedOffset =
+      saved === null
+        ? null
+        : new Date(Date.parse(`${draft.runAt}Z`) + saved.getTimezoneOffset() * 60_000);
+    return {
+      type: "once",
+      runAt:
+        withSavedOffset !== null && toDateTimeLocalValue(withSavedOffset) === draft.runAt
+          ? withSavedOffset.toISOString()
+          : new Date(draft.runAt).toISOString(),
+    };
+  }
   if (draft.scheduleMode === "webhook") {
     const maxDeliveryAgeMinutes = parseMaxDeliveryAge(draft.maxDeliveryAgeMinutes);
     const replayKey = draft.replayKey.trim();
@@ -253,10 +278,6 @@ export function scheduleFromDraft(draft: DraftState): ScheduledTaskUpsertSchedul
       ...endsFromDraft(draft),
     };
   }
-  if (draft.scheduleMode === "once") {
-    const at = oneOffTime(draft.onceAt);
-    return at === null ? null : { type: "once", at };
-  }
   if (draft.scheduleMode === "interval") {
     const everyMs = Math.round(Number(draft.intervalMinutes) * 60_000);
     return {
@@ -288,25 +309,23 @@ export function taskToDraft(task: ScheduledTask): DraftState {
     title: task.title,
     prompt: task.prompt,
     enabled: task.enabled,
-    scheduleMode:
-      schedule.type === "interval" || schedule.type === "once" || schedule.type === "webhook"
-        ? schedule.type
-        : "fixed",
+    scheduleMode: schedule.type === "fixed_time" ? "fixed" : schedule.type,
     intervalMinutes:
       schedule.type === "interval" ? String(Math.max(1, schedule.everyMs / 60_000)) : "15",
     activeHours: activeHoursDraft(schedule.type === "interval" ? schedule.activeHours : undefined),
     timeOfDay: schedule.type === "fixed_time" ? schedule.timeOfDay : "09:00",
+    runAt: schedule.type === "once" ? toDateTimeLocalValue(new Date(schedule.runAt)) : "",
+    savedRunAt: schedule.type === "once" ? schedule.runAt : "",
     weekdays,
     timeZone: schedule.type === "fixed_time" ? (schedule.timeZone ?? "") : "",
     savedTimeZone: schedule.type === "fixed_time" ? (schedule.timeZone ?? "") : "",
-    onceAt: schedule.type === "once" ? localDateTimeInputValue(schedule.at) : "",
     endAfterRuns:
       schedule.type !== "once" && schedule.endAfterRuns !== undefined
         ? String(schedule.endAfterRuns)
         : "",
     endAt:
       schedule.type !== "once" && schedule.endAt !== undefined
-        ? localDateTimeInputValue(schedule.endAt)
+        ? toDateTimeLocalValue(new Date(schedule.endAt))
         : "",
     projectId: task.projectId,
     threadId: task.threadId ?? "",
@@ -380,4 +399,26 @@ export function scheduledTaskDefaultModel(
   );
   const fallback = models.find(({ model }) => model.isDefault) ?? models[0];
   return fallback ? { instanceId: fallback.instanceId, model: fallback.model.slug } : null;
+}
+
+/**
+ * A new task's project: a pinned open project, then any open one. An archived
+ * project only when Settings is scoped to it, so that scope can still save.
+ */
+export function defaultScheduledTaskProjectId<
+  TProject extends {
+    readonly id: ProjectId;
+    readonly pinnedAt?: string | null | undefined;
+    readonly archivedAt?: string | null | undefined;
+  },
+>(scopedProjects: ReadonlyArray<TProject>, scope: ResolvedSettingsScope): ProjectId | "" {
+  const open = scopedProjects.filter((project) => project.archivedAt == null);
+  const scopedToProject = scope.kind === "project" || scope.kind === "checkout";
+  return (
+    (
+      open.find((project) => project.pinnedAt != null) ??
+      open[0] ??
+      (scopedToProject ? scopedProjects[0] : undefined)
+    )?.id ?? ""
+  );
 }

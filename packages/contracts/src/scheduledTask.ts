@@ -156,25 +156,33 @@ const ScheduledTaskUpsertFixedTimeSchedule = Schema.Struct({
     "Run at a fixed wall-clock time on selected weekdays, in timeZone or the environment's local time.",
 });
 
-const ScheduledTaskOnceType = Schema.Literal("once").annotate({
-  description: "Run one time.",
-});
+const ISO_WITH_OFFSET =
+  /^(\d{4})-(\d{2})-(\d{2})T([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
 
-const OnceDescription =
-  "Run once at a set time. Afterwards the task stays listed, switched off, until a new time is saved.";
+const YEAR_0000 = Date.parse("0000-01-01T00:00:00Z");
+const YEAR_10000 = Date.parse("+010000-01-01T00:00:00Z");
 
+/** Date.parse rolls impossible days like Feb 30 into the next month, so check the day too. */
+function isIsoWithOffset(value: string): boolean {
+  const match = ISO_WITH_OFFSET.exec(value);
+  // The server stores UTC, which must stay a four-digit year to decode again.
+  const time = Date.parse(value);
+  if (!match || !(time >= YEAR_0000 && time < YEAR_10000)) return false;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
+  return days !== undefined && day >= 1 && day <= days;
+}
+
+// Checked by filter, not pattern, to keep the MCP tool schema small.
 const ScheduledTaskOnceSchedule = Schema.Struct({
-  type: ScheduledTaskOnceType,
-  at: IsoDateTime,
-}).annotate({ description: OnceDescription });
-
-const ScheduledTaskUpsertOnceSchedule = Schema.Struct({
-  type: ScheduledTaskOnceType,
-  at: WritableInstant.annotate({
-    description:
-      "When to run, as an ISO date-time with Z or an offset, such as 2026-10-23T14:00:00Z. Must be in the future.",
-  }),
-}).annotate({ description: OnceDescription });
+  type: Schema.Literal("once"),
+  runAt: TrimmedNonEmptyString.check(
+    Schema.makeFilter(
+      (value) => isIsoWithOffset(value) || "Expected an ISO date and time with an offset.",
+    ),
+  ),
+});
 
 const ScheduledTaskWebhookSignatureFields = {
   header: TrimmedNonEmptyString.annotate({
@@ -318,7 +326,7 @@ export const ScheduledTaskUpsertSchedule = Schema.Union([
     ...WritableEndFields,
   }),
   ScheduledTaskUpsertFixedTimeSchedule,
-  ScheduledTaskUpsertOnceSchedule,
+  ScheduledTaskOnceSchedule,
   ScheduledTaskUpsertWebhookSchedule,
 ]);
 export type ScheduledTaskUpsertSchedule = typeof ScheduledTaskUpsertSchedule.Type;

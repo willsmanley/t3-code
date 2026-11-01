@@ -105,9 +105,9 @@ export function scheduledTaskEnding(
   if (task.enabled) return null;
   const schedule = task.schedule;
   if (schedule.type === "once") {
-    const at = Date.parse(schedule.at);
-    if (task.lastRunAt !== null && Date.parse(task.lastRunAt) >= at) return "ran";
-    return at <= now ? "missed" : null;
+    const runAt = Date.parse(schedule.runAt);
+    if (task.lastRunAt !== null && Date.parse(task.lastRunAt) >= runAt) return "ran";
+    return runAt <= now ? "missed" : null;
   }
   const limitReached =
     schedule.endAfterRuns !== undefined && task.runCount >= schedule.endAfterRuns;
