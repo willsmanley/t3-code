@@ -913,6 +913,49 @@ it.layer(
       );
     });
 
+    it("drops Prime models a completed probe no longer lists", () => {
+      const previousProvider = {
+        instanceId: ProviderInstanceId.make("prime"),
+        driver: ProviderDriverKind.make("prime"),
+        status: "ready",
+        enabled: true,
+        installed: true,
+        auth: { status: "authenticated" },
+        checkedAt: "2026-11-01T00:00:00.000Z",
+        version: "0.10.2",
+        models: [
+          { slug: "default", name: "Prime default", isCustom: false, capabilities: null },
+          {
+            slug: "cpa-claude/claude-opus-5-5",
+            name: "claude-opus-5-5",
+            isCustom: false,
+            capabilities: null,
+          },
+        ],
+        slashCommands: [],
+        skills: [],
+      } as const satisfies ServerProvider;
+      const refreshedProvider = {
+        ...previousProvider,
+        checkedAt: "2026-11-02T00:00:00.000Z",
+        models: [previousProvider.models[1]],
+      } satisfies ServerProvider;
+      const unreadableProvider = {
+        ...refreshedProvider,
+        status: "warning",
+        message: "Prime Agent is installed but `prime-agent model list` could not be read.",
+      } satisfies ServerProvider;
+
+      assert.deepStrictEqual(
+        ProviderRegistry.mergeProviderSnapshot(previousProvider, refreshedProvider).models,
+        [previousProvider.models[1]],
+      );
+      assert.deepStrictEqual(
+        ProviderRegistry.mergeProviderSnapshot(previousProvider, unreadableProvider).models,
+        [previousProvider.models[1], previousProvider.models[0]],
+      );
+    });
+
     it("retains stale OpenCode models when a refresh fails", () => {
       const previousProvider = {
         instanceId: ProviderInstanceId.make("opencode"),

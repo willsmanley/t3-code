@@ -729,6 +729,9 @@ Touch points:
 - Root `package.json` (knip workspace list) and `scripts/release-smoke.ts` (workspace manifests).
 - `packages/provider-acp/src/server/adapter.ts`: the `relaunchOnActiveSession` flavor field and its
   use in `restartAcpRuntime` (the replacement process launches on the active session).
+- `apps/server/src/provider/ProviderRegistry.ts`: a `prime` branch in
+  `shouldRetainMissingProviderModels`, so a ready probe drops cached models Prime no longer lists
+  (the retired "default"); test in `ProviderRegistry.test.ts`.
 
 Verify:
 

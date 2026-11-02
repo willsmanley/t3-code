@@ -182,6 +182,12 @@ const shouldRetainMissingProviderModels = (provider: ServerProvider): boolean =>
     return !(provider.installed && provider.status === "ready");
   }
 
+  if (provider.driver === ProviderDriverKind.make("prime")) {
+    // Prime is ready only once `prime-agent model list` is read, so a ready
+    // probe drops models it no longer lists (e.g. the retired "default").
+    return !(provider.installed && provider.status === "ready");
+  }
+
   const isAntigravity = provider.driver === ProviderDriverKind.make("antigravity");
   const isCodex = provider.driver === ProviderDriverKind.make("codex");
   if (!isAntigravity && !isCodex && provider.driver !== ProviderDriverKind.make("opencode")) {
