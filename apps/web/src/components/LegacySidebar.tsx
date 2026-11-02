@@ -193,27 +193,27 @@ import {
 } from "../threadSelectionStore";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import {
-  archiveSelectedThreadEntries,
   deleteSelectedThreadEntries,
   filterSidebarV2VisibleThreads,
   resolveAdjacentThreadId,
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
-  resolveProjectStatusIndicator,
   resolveThreadLastVisitedAt,
   resolveThreadStatusPill,
   orderItemsByPreferredIds,
-  sortProjectsForSidebar,
   useSidebarRowSubscriptionLease,
   setFileDragActive,
   useThreadJumpHintsVisible,
   ThreadStatusPill,
 } from "./Sidebar.logic";
 import {
+  archiveSelectedThreadEntries,
   buildMultiSelectThreadContextMenuItems,
   getSidebarThreadIdsToPrewarm,
   isContextMenuPointerDown,
+  resolveProjectStatusIndicator,
   shouldClearThreadSelectionOnMouseDown,
+  sortProjectsForSidebar,
 } from "./LegacySidebar.logic";
 import { sortThreads } from "@t3tools/client-runtime/state/thread-sort";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
