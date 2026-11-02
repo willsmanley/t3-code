@@ -119,7 +119,7 @@ const setConfig = (
   answer("session/set_config_option", { configOptions: configAfter }),
 ];
 
-/** One turn under Prime's id, answered with `reply`, then the session closes. */
+/** One turn under Prime's id, answered with `reply`. */
 const turn = (primeSessionId: string, reply: string): ReadonlyArray<Frame> => [
   outbound("session/prompt", { sessionId: primeSessionId, prompt: "<any>" }),
   // Prime 0.10.2 reports every action as a Python cell.
@@ -143,20 +143,24 @@ const turn = (primeSessionId: string, reply: string): ReadonlyArray<Frame> => [
     content: { type: "text", text: reply },
   }),
   answer("session/prompt", { stopReason: "end_turn" }),
-  // Closing the T3 session closes Prime's own session id.
+];
+
+/** Closing the T3 session closes Prime's own session id. */
+const close = (primeSessionId: string): ReadonlyArray<Frame> => [
   outbound("session/close", { sessionId: primeSessionId }),
   answer("session/close", {}),
 ];
 
 /**
- * Opens a Prime session against a scripted ACP agent and runs one turn. The
- * runtime is the replay agent behind Prime's stable-session wrapper, which
- * is what `makePrimeAcpRuntime` returns around `prime-agent --mode acp`.
+ * Opens a Prime session against scripted ACP agents and runs one turn per
+ * message. Each launch of `prime-agent --mode acp` replays the next process
+ * script, behind the stable-session wrapper `makePrimeAcpRuntime` adds.
  */
-const runPrimeTurn = Effect.fn("runPrimeTurn")(function* (input: {
+const runPrimeTurns = Effect.fn("runPrimeTurns")(function* (input: {
   readonly scenario: string;
-  readonly frames: ReadonlyArray<Frame>;
+  readonly processes: ReadonlyArray<ReadonlyArray<Frame>>;
   readonly model: string;
+  readonly messages: ReadonlyArray<string>;
   /** Reopens this T3 session id instead of starting one. */
   readonly resumeSessionId?: string;
 }) {
@@ -166,27 +170,33 @@ const runPrimeTurn = Effect.fn("runPrimeTurn")(function* (input: {
   const replayDir = yield* fileSystem.makeTempDirectoryScoped({
     prefix: `t3-prime-${input.scenario}-`,
   });
-  const statusPath = path.join(replayDir, "status.json");
-  const transcript = yield* decodeAcpReplayTranscript(
-    {
-      provider: PRIME_DRIVER_KIND,
-      protocol: ACP_PROTOCOL,
-      version: "1",
-      scenario: input.scenario,
-      entries: input.frames as never,
-    },
-    PRIME_DRIVER_KIND,
+  const scriptPath = yield* path.fromFileUrl(
+    new URL("../../../scripts/acp-replay-agent.ts", import.meta.url),
   );
-  const replayRuntime = makeAcpReplayRuntime({
-    transcript,
-    statusPath,
-    scriptPath: yield* path.fromFileUrl(
-      new URL("../../../scripts/acp-replay-agent.ts", import.meta.url),
-    ),
-    childProcessSpawner,
-    fileSystem,
-    cancelBehavior: "wait-for-prompt",
-  });
+  const replays = yield* Effect.forEach(input.processes, (frames, index) =>
+    Effect.gen(function* () {
+      const statusPath = path.join(replayDir, `status-${index}.json`);
+      const transcript = yield* decodeAcpReplayTranscript(
+        {
+          provider: PRIME_DRIVER_KIND,
+          protocol: ACP_PROTOCOL,
+          version: "1",
+          scenario: `${input.scenario}-${index}`,
+          entries: frames as never,
+        },
+        PRIME_DRIVER_KIND,
+      );
+      const runtime = makeAcpReplayRuntime({
+        transcript,
+        statusPath,
+        scriptPath,
+        childProcessSpawner,
+        fileSystem,
+        cancelBehavior: "wait-for-prompt",
+      });
+      return { statusPath, transcript, runtime };
+    }),
+  );
   const resumedIds: Array<string | undefined> = [];
   const instanceId = ProviderInstanceId.make(`prime-${input.scenario}`);
   const adapter = yield* makePrimeAdapterV2({
@@ -196,10 +206,16 @@ const runPrimeTurn = Effect.fn("runPrimeTurn")(function* (input: {
     selfInvocation: yield* resolveSelfInvocation(),
     sessionDirectory: (sessionId) => path.join(replayDir, sessionId),
     makeRuntime: ({ resumeSessionId, ...runtimeInput }) => {
+      const replay = replays[resumedIds.length];
       resumedIds.push(resumeSessionId);
-      return replayRuntime(runtimeInput).pipe(
-        Effect.map((runtime) => withPrimeStableSession(runtime, resumeSessionId ?? NEW_SESSION_ID)),
-      );
+      if (replay === undefined) return Effect.die("Prime launched more processes than scripted");
+      return replay
+        .runtime(runtimeInput)
+        .pipe(
+          Effect.map((runtime) =>
+            withPrimeStableSession(runtime, resumeSessionId ?? NEW_SESSION_ID),
+          ),
+        );
     },
   });
   const threadId = ThreadId.make(`thread-prime-${input.scenario}`);
@@ -221,111 +237,146 @@ const runPrimeTurn = Effect.fn("runPrimeTurn")(function* (input: {
     });
     const providerThread = yield* session.ensureThread({ threadId, modelSelection, runtimePolicy });
     const now = yield* DateTime.now;
-    yield* session.startTurn({
-      appThread: {
-        createdBy: "user",
-        creationSource: "web",
-        id: threadId,
-        projectId: ProjectId.make(`project:${threadId}`),
-        title: "Prime adapter test",
-        providerInstanceId: instanceId,
-        modelSelection,
-        runtimeMode: runtimePolicy.runtimeMode,
-        interactionMode: "default",
-        branch: null,
-        worktreePath: null,
-        activeProviderThreadId: providerThread.id,
-        lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
-        forkedFrom: null,
-        createdAt: now,
-        updatedAt: now,
-        archivedAt: null,
-        settledOverride: null,
-        settledAt: null,
-        lastVisitedAt: null,
-        deletedAt: null,
-      },
-      threadId,
-      runId: RunId.make(`run:${threadId}:1`),
-      runOrdinal: 1,
-      providerTurnOrdinal: 1,
-      attemptId: RunAttemptId.make(`attempt:${threadId}:1`),
-      rootNodeId: NodeId.make(`node:${threadId}:1`),
-      providerThread,
-      message: {
-        createdBy: "user",
-        creationSource: "web",
-        messageId: MessageId.make(`message:${threadId}:1`),
-        text: "ping",
-        attachments: [],
-      },
-      modelSelection,
-      runtimePolicy,
-    });
-    const events = yield* session.events.pipe(
-      Stream.takeUntil((event) => event.type === "turn.terminal"),
-      Stream.runCollect,
+    const turns = yield* Effect.forEach(input.messages, (text, index) =>
+      Effect.gen(function* () {
+        const ordinal = index + 1;
+        yield* session.startTurn({
+          appThread: {
+            createdBy: "user",
+            creationSource: "web",
+            id: threadId,
+            projectId: ProjectId.make(`project:${threadId}`),
+            title: "Prime adapter test",
+            providerInstanceId: instanceId,
+            modelSelection,
+            runtimeMode: runtimePolicy.runtimeMode,
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            activeProviderThreadId: providerThread.id,
+            lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+            forkedFrom: null,
+            createdAt: now,
+            updatedAt: now,
+            archivedAt: null,
+            settledOverride: null,
+            settledAt: null,
+            lastVisitedAt: null,
+            deletedAt: null,
+          },
+          threadId,
+          runId: RunId.make(`run:${threadId}:${ordinal}`),
+          runOrdinal: ordinal,
+          providerTurnOrdinal: ordinal,
+          attemptId: RunAttemptId.make(`attempt:${threadId}:${ordinal}`),
+          rootNodeId: NodeId.make(`node:${threadId}:${ordinal}`),
+          providerThread,
+          message: {
+            createdBy: "user",
+            creationSource: "web",
+            messageId: MessageId.make(`message:${threadId}:${ordinal}`),
+            text,
+            attachments: [],
+          },
+          modelSelection,
+          runtimePolicy,
+        });
+        const events = yield* session.events.pipe(
+          Stream.takeUntil((event) => event.type === "turn.terminal"),
+          Stream.runCollect,
+        );
+        const items = events.flatMap((event) =>
+          event.type === "turn_item.updated" ? [event.turnItem] : [],
+        );
+        const terminal = events.find((event) => event.type === "turn.terminal");
+        return {
+          reply: items
+            .flatMap((item) => (item.type === "assistant_message" ? [item.text] : []))
+            .at(-1),
+          command: items
+            .flatMap((item) => (item.type === "command_execution" ? [item.input] : []))
+            .at(-1),
+          status: terminal?.type === "turn.terminal" ? terminal.status : undefined,
+          failure: terminal?.type === "turn.terminal" ? terminal.failure : undefined,
+        };
+      }),
     );
-    const replies = events.flatMap((event) =>
-      event.type === "turn_item.updated" && event.turnItem.type === "assistant_message"
-        ? [event.turnItem.text]
-        : [],
-    );
-    const commands = events.flatMap((event) =>
-      event.type === "turn_item.updated" && event.turnItem.type === "command_execution"
-        ? [event.turnItem.input]
-        : [],
-    );
-    const terminal = events.find((event) => event.type === "turn.terminal");
-    return {
-      nativeThreadId: providerThread.nativeThreadRef?.nativeId,
-      reply: replies.at(-1),
-      command: commands.at(-1),
-      terminalStatus: terminal?.type === "turn.terminal" ? terminal.status : undefined,
-    };
+    return { nativeThreadId: providerThread.nativeThreadRef?.nativeId, turns };
   }).pipe(Effect.scoped);
-  yield* makeAcpReplayCompletenessAssertion(fileSystem, statusPath, transcript);
+  yield* Effect.forEach(
+    replays,
+    ({ statusPath, transcript }) =>
+      makeAcpReplayCompletenessAssertion(fileSystem, statusPath, transcript),
+    { discard: true },
+  );
   return { ...result, resumedIds };
 });
+
+/** Prime 0.10.2's reply to a prompt after its background service went away. */
+const lostServicePrompt = (primeSessionId: string): ReadonlyArray<Frame> => [
+  outbound("session/prompt", { sessionId: primeSessionId, prompt: "<any>" }),
+  {
+    type: "emit_inbound",
+    label: "session/prompt.error",
+    frame: {
+      kind: "response",
+      method: "session/prompt",
+      error: {
+        code: -32603,
+        message: "Internal error",
+        data: {
+          details: "the daemon connection is closed",
+          kind: "other",
+          category: "other",
+          retryable: false,
+        },
+      },
+    },
+  },
+];
 
 describe("PrimeAdapterV2", () => {
   // Prime names each connection's session itself, so T3 must keep its own id
   // for the thread and still see the turn Prime streams under Prime's id.
   it.effect("keeps T3's session id for a new thread and streams Prime's replies into it", () =>
     Effect.gen(function* () {
-      const result = yield* runPrimeTurn({
+      const result = yield* runPrimeTurns({
         scenario: "new-session",
         model: "cpa-codex/gpt-6-luna",
-        frames: [
-          ...initialize,
-          outbound("session/new", { cwd: "<workspace>", mcpServers: "<any>" }),
-          answer("session/new", {
-            sessionId: "prime-acp-1",
-            configOptions: primeConfig({ model: OPUS, thoughtLevel: "medium" }),
-          }),
-          // `provider/model` goes out as Prime's JSON pair.
-          ...setConfig(
-            "prime-acp-1",
-            "model",
-            LUNA,
-            primeConfig({ model: LUNA, thoughtLevel: "medium" }),
-          ),
-          // A thread without a stored reasoning level runs at high.
-          ...setConfig(
-            "prime-acp-1",
-            "thought_level",
-            "high",
-            primeConfig({ model: LUNA, thoughtLevel: "high" }),
-          ),
-          ...turn("prime-acp-1", "pong"),
+        messages: ["ping"],
+        processes: [
+          [
+            ...initialize,
+            outbound("session/new", { cwd: "<workspace>", mcpServers: "<any>" }),
+            answer("session/new", {
+              sessionId: "prime-acp-1",
+              configOptions: primeConfig({ model: OPUS, thoughtLevel: "medium" }),
+            }),
+            // `provider/model` goes out as Prime's JSON pair.
+            ...setConfig(
+              "prime-acp-1",
+              "model",
+              LUNA,
+              primeConfig({ model: LUNA, thoughtLevel: "medium" }),
+            ),
+            // A thread without a stored reasoning level runs at high.
+            ...setConfig(
+              "prime-acp-1",
+              "thought_level",
+              "high",
+              primeConfig({ model: LUNA, thoughtLevel: "high" }),
+            ),
+            ...turn("prime-acp-1", "pong"),
+            ...close("prime-acp-1"),
+          ],
         ],
       });
       assert.deepEqual(result.resumedIds, [undefined]);
       assert.equal(result.nativeThreadId, NEW_SESSION_ID);
-      assert.equal(result.reply, "pong");
+      assert.equal(result.turns[0]?.reply, "pong");
       // A Python cell shows its code, not Prime's generic "Python cell" title.
-      assert.equal(result.command, "print(17 * 23)");
-      assert.equal(result.terminalStatus, "completed");
+      assert.equal(result.turns[0]?.command, "print(17 * 23)");
+      assert.equal(result.turns[0]?.status, "completed");
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
@@ -333,25 +384,71 @@ describe("PrimeAdapterV2", () => {
   // `--continue` restores the conversation under a fresh Prime id.
   it.effect("reopens a thread by its T3 id while Prime answers under a new id", () =>
     Effect.gen(function* () {
-      const result = yield* runPrimeTurn({
+      const result = yield* runPrimeTurns({
         scenario: "reopened-session",
         model: "default",
+        messages: ["ping"],
         resumeSessionId: "t3-prime-1",
-        frames: [
-          ...initialize,
-          // Never session/load or session/resume, which Prime lacks.
-          outbound("session/new", { cwd: "<workspace>", mcpServers: "<any>" }),
-          answer("session/new", {
-            sessionId: "prime-acp-2",
-            configOptions: primeConfig({ model: OPUS, thoughtLevel: "high" }),
-          }),
-          ...turn("prime-acp-2", "still here"),
+        processes: [
+          [
+            ...initialize,
+            // Never session/load or session/resume, which Prime lacks.
+            outbound("session/new", { cwd: "<workspace>", mcpServers: "<any>" }),
+            answer("session/new", {
+              sessionId: "prime-acp-2",
+              configOptions: primeConfig({ model: OPUS, thoughtLevel: "high" }),
+            }),
+            ...turn("prime-acp-2", "still here"),
+            ...close("prime-acp-2"),
+          ],
         ],
       });
       assert.deepEqual(result.resumedIds, ["t3-prime-1"]);
       assert.equal(result.nativeThreadId, "t3-prime-1");
-      assert.equal(result.reply, "still here");
-      assert.equal(result.terminalStatus, "completed");
+      assert.equal(result.turns[0]?.reply, "still here");
+      assert.equal(result.turns[0]?.status, "completed");
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
+  // After `prime-agent update` or a crash restarts Prime's background
+  // service, the old ACP process fails every prompt. The next turn must run
+  // in a new process that continues the same session.
+  it.effect("relaunches Prime on the thread's session after its service restarts", () =>
+    Effect.gen(function* () {
+      const opened = [
+        ...initialize,
+        outbound("session/new", { cwd: "<workspace>", mcpServers: "<any>" }),
+      ];
+      const result = yield* runPrimeTurns({
+        scenario: "lost-service",
+        model: "default",
+        messages: ["first", "second"],
+        processes: [
+          [
+            ...opened,
+            answer("session/new", {
+              sessionId: "prime-acp-3",
+              configOptions: primeConfig({ model: OPUS, thoughtLevel: "high" }),
+            }),
+            ...lostServicePrompt("prime-acp-3"),
+          ],
+          [
+            ...opened,
+            answer("session/new", {
+              sessionId: "prime-acp-4",
+              configOptions: primeConfig({ model: OPUS, thoughtLevel: "high" }),
+            }),
+            ...turn("prime-acp-4", "continued"),
+            ...close("prime-acp-4"),
+          ],
+        ],
+      });
+      assert.deepEqual(result.resumedIds, [undefined, NEW_SESSION_ID]);
+      assert.equal(result.turns[0]?.status, "failed");
+      assert.equal(result.turns[0]?.failure?.class, "transport_error");
+      assert.match(result.turns[0]?.failure?.message ?? "", /background service stopped/);
+      assert.equal(result.turns[1]?.reply, "continued");
+      assert.equal(result.turns[1]?.status, "completed");
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 });

@@ -16,6 +16,7 @@ import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as EffectAcpErrors from "effect-acp/errors";
 
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
+import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import {
   type AcpToolCallState,
   collectSessionConfigOptionValues,
@@ -133,6 +134,56 @@ export function normalizePrimeToolCall(tool: AcpToolCallState): AcpToolCallState
   return tool.command === undefined && typeof code === "string" && code.trim().length > 0
     ? { ...tool, command: code.trim() }
     : tool;
+}
+
+/** The `data` of Prime's failed-prompt reply: its message and classification. */
+const decodePrimeTurnFailure = Schema.decodeUnknownOption(
+  Schema.Struct({
+    details: Schema.String,
+    kind: Schema.optional(Schema.String),
+    retryable: Schema.optional(Schema.Boolean),
+  }),
+);
+const isAcpRequestError = Schema.is(EffectAcpErrors.AcpRequestError);
+
+function primeTurnFailure(error: unknown) {
+  return isAcpRequestError(error)
+    ? Option.getOrUndefined(decodePrimeTurnFailure(error.data))
+    : undefined;
+}
+
+/**
+ * Prime's ACP process outlives its background service (`prime-agent update`,
+ * `shutdown`, a crash) but then fails every prompt, so T3 replaces it.
+ */
+export function primeLostBackgroundService(error: unknown): boolean {
+  return /daemon connection (is )?closed/.test(primeTurnFailure(error)?.details ?? "");
+}
+
+/** Shows Prime's own reason for a failed turn instead of a bare "Internal error". */
+export function primePromptFailure(error: unknown) {
+  const failure = primeTurnFailure(error);
+  if (failure === undefined) return makeProviderFailure({ cause: error, class: "provider_error" });
+  if (primeLostBackgroundService(error)) {
+    return makeProviderFailure({
+      cause: error,
+      class: "transport_error",
+      message:
+        "Prime Agent's background service stopped during this turn. Send it again to continue.",
+      retryable: true,
+    });
+  }
+  return makeProviderFailure({
+    cause: error,
+    message: failure.details,
+    class:
+      failure.kind === "rate_limit"
+        ? "usage_limit"
+        : failure.kind === "model_transport"
+          ? "transport_error"
+          : "provider_error",
+    retryable: failure.retryable ?? null,
+  });
 }
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9-]{1,128}$/;

@@ -20,6 +20,8 @@ import {
   makePrimeAcpRuntime,
   normalizePrimeToolCall,
   PRIME_DRIVER_KIND,
+  primeLostBackgroundService,
+  primePromptFailure,
 } from "./acpSupport.ts";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
@@ -90,6 +92,10 @@ function makePrimeAcpAdapterFlavor(options: PrimeAdapterV2Options): AcpAdapterV2
     mcpOverHttp: true,
     makeRuntime,
     normalizeToolCall: normalizePrimeToolCall,
+    promptFailure: primePromptFailure,
+    // A replacement process continues the thread's session (`--continue`).
+    restartRuntimeAfterPromptError: primeLostBackgroundService,
+    relaunchOnActiveSession: true,
     applyModelSelection: ({ runtime, modelSelection }) =>
       applyPrimeModelSelection(runtime, modelSelection).pipe(
         Effect.tap(() => applyPrimeThoughtLevelDefault(runtime, modelSelection)),

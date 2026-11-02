@@ -409,6 +409,8 @@ export interface AcpAdapterV2Flavor {
   readonly restartRuntimeAfterInterrupt?: boolean;
   /** Prompt failures after which the agent process keeps failing until replaced. */
   readonly restartRuntimeAfterPromptError?: (error: unknown) => boolean;
+  /** The agent picks its session at launch (Prime), so a replacement process launches on the active one. */
+  readonly relaunchOnActiveSession?: boolean;
   readonly restartRuntimeOnEveryInterrupt?: boolean;
   readonly terminateRuntimeProcessGroupOnInterrupt?: boolean;
   readonly preserveRuntimeOnSettledInterrupt?: boolean;
@@ -6506,7 +6508,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         });
 
         const restartAcpRuntime = Effect.fnUntraced(function* (threadId: ThreadId | null) {
-          yield* spawnAcpRuntime(threadId);
+          const relaunchSessionId = flavor.relaunchOnActiveSession
+            ? yield* Ref.get(activeSessionId)
+            : null;
+          yield* spawnAcpRuntime(threadId, relaunchSessionId ?? undefined);
           yield* wireAcpRuntimeHandlers(runtime, yield* Ref.get(runtimeCallbackGeneration));
         });
 

@@ -703,8 +703,11 @@ T3's MCP tools reach Prime over HTTP. Only Full access is offered: Prime never a
 Prime 0.10.2 cannot load or resume an ACP session and names each connection's session itself, so
 each T3 session gets its own id and directory (`<userdata>/prime-agent/<instance>/<id>`); reopening
 relaunches Prime there with `--continue`, and `withPrimeStableSession` shows T3 only that id
-(`session/resume` answers for it, forwarded updates carry it). No app text generation: titles and
-commit messages come from another provider.
+(`session/resume` answers for it, forwarded updates carry it). When Prime's background service
+restarts (`prime-agent update`, a crash), its ACP process fails every prompt with "the daemon
+connection is closed"; that turn fails with a plain message and the next one relaunches Prime on the
+same session. Failed turns show Prime's own reason. No app text generation: titles and commit
+messages come from another provider.
 
 Fork-owned files: `packages/provider-prime/**`,
 `apps/server/src/orchestration-v2/Adapters/PrimeAdapterV2.test.ts`.
@@ -719,10 +722,13 @@ Touch points:
   `PROVIDER_DISPLAY_NAMES`; `packages/contracts/src/settings.ts`: `"prime"` in
   `DEFAULT_DISABLED_PROVIDER_DRIVERS`.
 - Root `package.json` (knip workspace list) and `scripts/release-smoke.ts` (workspace manifests).
+- `packages/provider-acp/src/server/adapter.ts`: the `relaunchOnActiveSession` flavor field and its
+  use in `restartAcpRuntime` (the replacement process launches on the active session).
 
 Verify:
 
 - `vp test run packages/provider-prime apps/server/src/orchestration-v2/Adapters/PrimeAdapterV2.test.ts`
+- `grep -n "relaunchOnActiveSession" packages/provider-acp/src/server/adapter.ts` (field and use).
 - `grep -n "PrimeDriver" apps/server/src/provider/builtInDrivers.ts` and
   `grep -n "primeClient" packages/client-runtime/src/providerClients.ts`.
 - With `prime-agent` installed, a Prime thread keeps its conversation across a server restart.
