@@ -10,7 +10,6 @@ import * as ChildProcess from "effect/process/ChildProcess";
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import {
-  PRIME_DEFAULT_MODEL_SLUG,
   PRIME_DRIVER_KIND,
   PRIME_SUPPORTED_RUNTIME_MODES,
   PRIME_THOUGHT_LEVEL_OPTION_DESCRIPTOR,
@@ -72,36 +71,31 @@ function parsePrimeModelList(stdout: string): ReadonlyArray<PrimeListedModel> | 
   });
 }
 
-/** "Default" keeps the model Prime's settings pick; the rest are `provider/model`. */
+/**
+ * Models as `provider/model`. There is no "Prime default" entry: Prime saves
+ * every model switch as its default, so that entry meant whichever model any
+ * session used last.
+ */
 const primeModels = (
   settings: PrimeSettings,
   listed: ReadonlyArray<PrimeListedModel> = [],
 ): ReadonlyArray<ServerProviderModel> => {
   const seen = new Set<string>();
   return providerModelsFromSettings(
-    [
-      {
-        slug: PRIME_DEFAULT_MODEL_SLUG,
-        name: "Prime default",
-        isCustom: false,
-        isDefault: true,
-        capabilities: PRIME_THINKING_CAPABILITIES,
-      },
-      ...listed.flatMap(({ provider, model, thinking }) => {
-        const slug = `${provider}/${model}`;
-        if (seen.has(slug)) return [];
-        seen.add(slug);
-        return [
-          {
-            slug,
-            name: model,
-            subProvider: provider,
-            isCustom: false,
-            capabilities: thinking ? PRIME_THINKING_CAPABILITIES : PRIME_PLAIN_CAPABILITIES,
-          },
-        ];
-      }),
-    ],
+    listed.flatMap(({ provider, model, thinking }) => {
+      const slug = `${provider}/${model}`;
+      if (seen.has(slug)) return [];
+      seen.add(slug);
+      return [
+        {
+          slug,
+          name: model,
+          subProvider: provider,
+          isCustom: false,
+          capabilities: thinking ? PRIME_THINKING_CAPABILITIES : PRIME_PLAIN_CAPABILITIES,
+        },
+      ];
+    }),
     settings.customModels,
     PRIME_THINKING_CAPABILITIES,
   );

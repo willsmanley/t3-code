@@ -160,6 +160,8 @@ const runPrimeTurns = Effect.fn("runPrimeTurns")(function* (input: {
   readonly scenario: string;
   readonly processes: ReadonlyArray<ReadonlyArray<Frame>>;
   readonly model: string;
+  /** A stored reasoning level for the thread. */
+  readonly thoughtLevel?: string;
   readonly messages: ReadonlyArray<string>;
   /** Reopens this T3 session id instead of starting one. */
   readonly resumeSessionId?: string;
@@ -219,7 +221,13 @@ const runPrimeTurns = Effect.fn("runPrimeTurns")(function* (input: {
     },
   });
   const threadId = ThreadId.make(`thread-prime-${input.scenario}`);
-  const modelSelection = { instanceId, model: input.model };
+  const modelSelection = {
+    instanceId,
+    model: input.model,
+    ...(input.thoughtLevel === undefined
+      ? {}
+      : { options: [{ id: "thought_level", value: input.thoughtLevel }] }),
+  };
   const runtimePolicy = ProviderAdapterV2RuntimePolicy.make({
     runtimeMode: "full-access",
     interactionMode: "default",
@@ -376,6 +384,39 @@ describe("PrimeAdapterV2", () => {
       assert.equal(result.turns[0]?.reply, "pong");
       // A Python cell shows its code, not Prime's generic "Python cell" title.
       assert.equal(result.turns[0]?.command, "print(17 * 23)");
+      assert.equal(result.turns[0]?.status, "completed");
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
+  // Prime 0.10.2 offers plain models levels up to high. A thread that stored
+  // Max runs at high, not at whatever level the session started with.
+  it.effect("runs a stored reasoning level the model lacks at the highest one it offers", () =>
+    Effect.gen(function* () {
+      const result = yield* runPrimeTurns({
+        scenario: "clamped-level",
+        model: "cpa-codex/gpt-6-luna",
+        thoughtLevel: "max",
+        messages: ["ping"],
+        processes: [
+          [
+            ...initialize,
+            outbound("session/new", { cwd: "<workspace>", mcpServers: "<any>" }),
+            answer("session/new", {
+              sessionId: "prime-acp-5",
+              configOptions: primeConfig({ model: LUNA, thoughtLevel: "low" }),
+            }),
+            ...setConfig(
+              "prime-acp-5",
+              "thought_level",
+              "high",
+              primeConfig({ model: LUNA, thoughtLevel: "high" }),
+            ),
+            ...turn("prime-acp-5", "pong"),
+            ...close("prime-acp-5"),
+          ],
+        ],
+      });
+      assert.equal(result.turns[0]?.reply, "pong");
       assert.equal(result.turns[0]?.status, "completed");
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );

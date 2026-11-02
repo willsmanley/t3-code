@@ -73,7 +73,6 @@ describe("checkPrimeProviderStatus", () => {
       assert.deepEqual(
         draft.models.map((model) => [model.slug, model.name, model.subProvider]),
         [
-          ["default", "Prime default", undefined],
           ["cpa-claude/claude-opus-5-5", "claude-opus-5-5", "cpa-claude"],
           ["cpa-codex/gpt-6-luna", "gpt-6-luna", "cpa-codex"],
           // A model id with its own slash keeps it after the provider.
@@ -83,7 +82,7 @@ describe("checkPrimeProviderStatus", () => {
       // Only models Prime marks as thinking offer a reasoning level.
       assert.deepEqual(
         draft.models.map((model) => model.capabilities?.optionDescriptors?.length ?? 0),
-        [1, 1, 1, 0],
+        [1, 1, 0],
       );
     }),
   );
@@ -93,10 +92,7 @@ describe("checkPrimeProviderStatus", () => {
       const signedOut = yield* check(NO_MODELS);
       assert.equal(signedOut.draft.status, "error");
       assert.equal(signedOut.draft.auth.status, "unauthenticated");
-      assert.deepEqual(
-        signedOut.draft.models.map((model) => model.slug),
-        ["default"],
-      );
+      assert.deepEqual(signedOut.draft.models, []);
 
       // A future table T3 cannot read is not reported as signed out.
       const unreadable = yield* check("Provider | Model\nprime | x\n");

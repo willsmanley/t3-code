@@ -23,21 +23,28 @@ import {
 } from "@t3tools/provider-acp/server/runtimeModel";
 
 export const PRIME_DRIVER_KIND = ProviderDriverKind.make("prime");
-/** T3's slug for "Default": the model Prime's own settings pick, never a Prime model id. */
-export const PRIME_DEFAULT_MODEL_SLUG = "default";
+/**
+ * The slug of the old "Prime default" picker entry, which threads made before it
+ * was dropped still carry: the session keeps the model it has. Not a Prime model id.
+ */
+const PRIME_DEFAULT_MODEL_SLUG = "default";
 const PRIME_MODEL_CONFIG_ID = "model";
 const PRIME_THOUGHT_LEVEL_CONFIG_ID = "thought_level";
 const PRIME_DEFAULT_THOUGHT_LEVEL = "high";
 
+/**
+ * The levels Prime offers models that its config gives no level map, which
+ * covers every model in a plain models.json. Extra High and Max exist only
+ * through such a map, so the picker stops at High.
+ */
 const PRIME_THOUGHT_LEVEL_LABELS = {
   off: "Off",
   minimal: "Minimal",
   low: "Low",
   medium: "Medium",
   high: "High",
-  xhigh: "Extra High",
-  max: "Max",
 } as const;
+const PRIME_THOUGHT_LEVEL_ORDER = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 export const PRIME_THOUGHT_LEVEL_OPTION_DESCRIPTOR: ProviderOptionDescriptor = {
   id: PRIME_THOUGHT_LEVEL_CONFIG_ID,
@@ -75,8 +82,8 @@ function primeModelValue(slug: string): string | undefined {
 }
 
 /**
- * Writes config id `model`. "Default" keeps the model Prime's settings gave
- * the session. A `provider/model` pair the session does not list is still
+ * Writes config id `model`. The old "default" slug keeps the session's model.
+ * A `provider/model` pair the session does not list is still
  * sent: Prime resolves it against its own models.json and refuses unknown
  * ones, so a thread never runs on a model it did not pick.
  */
@@ -106,21 +113,31 @@ export const applyPrimeModelSelection = Effect.fn("applyPrimeModelSelection")(fu
   return requested;
 });
 
-/** The shared option loop writes a stored reasoning level; a thread without one starts at high. */
-export const applyPrimeThoughtLevelDefault = Effect.fn("applyPrimeThoughtLevelDefault")(function* (
+/**
+ * The shared option loop writes a stored reasoning level the model offers.
+ * This covers the rest: a thread without one starts at high, and a level the
+ * model does not offer runs at the highest offered level below it rather than
+ * whatever the session had.
+ */
+export const applyPrimeThoughtLevel = Effect.fn("applyPrimeThoughtLevel")(function* (
   runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
   modelSelection: ModelSelection,
 ): Effect.fn.Return<void, EffectAcpErrors.AcpError> {
-  if (getModelSelectionStringOptionValue(modelSelection, PRIME_THOUGHT_LEVEL_CONFIG_ID)) return;
   const option = (yield* runtime.getConfigOptions).find(
     (entry) => entry.id === PRIME_THOUGHT_LEVEL_CONFIG_ID && entry.type === "select",
   );
-  if (
-    option?.type === "select" &&
-    option.currentValue !== PRIME_DEFAULT_THOUGHT_LEVEL &&
-    collectSessionConfigOptionValues(option).includes(PRIME_DEFAULT_THOUGHT_LEVEL)
-  ) {
-    yield* runtime.setConfigOption(PRIME_THOUGHT_LEVEL_CONFIG_ID, PRIME_DEFAULT_THOUGHT_LEVEL);
+  if (option?.type !== "select") return;
+  const offered = collectSessionConfigOptionValues(option);
+  const stored =
+    getModelSelectionStringOptionValue(modelSelection, PRIME_THOUGHT_LEVEL_CONFIG_ID) || undefined;
+  if (stored !== undefined && offered.includes(stored)) return;
+  const requested = stored ?? PRIME_DEFAULT_THOUGHT_LEVEL;
+  const target = PRIME_THOUGHT_LEVEL_ORDER.slice(
+    0,
+    PRIME_THOUGHT_LEVEL_ORDER.indexOf(requested) + 1,
+  ).findLast((level) => offered.includes(level));
+  if (target !== undefined && target !== option.currentValue) {
+    yield* runtime.setConfigOption(PRIME_THOUGHT_LEVEL_CONFIG_ID, target);
   }
 });
 

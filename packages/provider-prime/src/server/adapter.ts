@@ -16,7 +16,7 @@ import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import { makeAcpNativeLoggerFactory } from "@t3tools/provider-acp/server/nativeLogging";
 import {
   applyPrimeModelSelection,
-  applyPrimeThoughtLevelDefault,
+  applyPrimeThoughtLevel,
   makePrimeAcpRuntime,
   normalizePrimeToolCall,
   PRIME_DRIVER_KIND,
@@ -98,7 +98,7 @@ function makePrimeAcpAdapterFlavor(options: PrimeAdapterV2Options): AcpAdapterV2
     relaunchOnActiveSession: true,
     applyModelSelection: ({ runtime, modelSelection }) =>
       applyPrimeModelSelection(runtime, modelSelection).pipe(
-        Effect.tap(() => applyPrimeThoughtLevelDefault(runtime, modelSelection)),
+        Effect.tap(() => applyPrimeThoughtLevel(runtime, modelSelection)),
       ),
   };
 }

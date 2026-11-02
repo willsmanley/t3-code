@@ -699,8 +699,11 @@ Added November 1, 2026.
 What it does: adds Prime Intellect's `prime-agent` as a provider (driver `prime`, off until an
 instance enables it). T3 runs `prime-agent --mode acp` through the shared ACP adapter. Models come
 from `prime-agent model list` as `provider/model` (Prime's ACP value is a JSON `[provider, model]`
-pair); "Prime default" keeps the model Prime's own `~/.prime/agent/settings.json` picks; a thread
-without a stored reasoning level runs at high. Every action is a Python cell, shown with its code.
+pair). There is no "Prime default" entry: Prime saves every model switch as its default, so it
+meant whichever model any session used last; older threads that carry the `default` slug keep their
+session's model. Reasoning offers Off to High, the levels Prime gives models without a level map in
+its config; a thread without a stored level runs at high, and a stored level the model lacks (Extra
+High or Max from older threads) runs at the highest level it offers. Every action is a Python cell, shown with its code.
 T3's MCP tools reach Prime over HTTP. Only Full access is offered: Prime never asks before acting.
 Prime 0.10.2 cannot load or resume an ACP session and names each connection's session itself, so
 each T3 session gets its own id and directory (`<userdata>/prime-agent/<instance>/<id>`); reopening
