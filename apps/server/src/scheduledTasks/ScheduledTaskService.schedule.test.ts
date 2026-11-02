@@ -189,6 +189,7 @@ const serviceLayerWith = (
         }),
         Layer.mock(ThreadManagementService.ThreadManagementService)({}),
         Layer.mock(SecretRequests.SecretRequests)({}),
+        ManagedPolicy.layerTest(),
       ),
     ),
   );
