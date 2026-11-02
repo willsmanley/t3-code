@@ -690,6 +690,43 @@ Verify:
   and `grep -n "streamRecordingAudio" apps/mobile/src/features/voice-input/VoiceInputProvider.tsx`.
 - After a dictation, a `transcribed` line appears in `<userdata>/logs/voice-dictation.ndjson`.
 
+### F17. Prime Agent provider (server, contracts, all clients)
+
+Added November 1, 2026.
+
+What it does: adds Prime Intellect's `prime-agent` as a provider (driver `prime`, off until an
+instance enables it). T3 runs `prime-agent --mode acp` through the shared ACP adapter. Models come
+from `prime-agent model list` as `provider/model` (Prime's ACP value is a JSON `[provider, model]`
+pair); "Prime default" keeps the model Prime's own `~/.prime/agent/settings.json` picks; a thread
+without a stored reasoning level runs at high. Every action is a Python cell, shown with its code.
+T3's MCP tools reach Prime over HTTP. Only Full access is offered: Prime never asks before acting.
+Prime 0.10.2 cannot load or resume an ACP session and names each connection's session itself, so
+each T3 session gets its own id and directory (`<userdata>/prime-agent/<instance>/<id>`); reopening
+relaunches Prime there with `--continue`, and `withPrimeStableSession` shows T3 only that id
+(`session/resume` answers for it, forwarded updates carry it). No app text generation: titles and
+commit messages come from another provider.
+
+Fork-owned files: `packages/provider-prime/**`,
+`apps/server/src/orchestration-v2/Adapters/PrimeAdapterV2.test.ts`.
+
+Touch points:
+
+- `apps/server/src/provider/builtInDrivers.ts`: import, `PrimeDriverEnv`, `PrimeDriver` before
+  `AcpRegistryDriver`; `apps/server/package.json`: the dependency.
+- `packages/client-runtime/src/providerClients.ts`: `primeClient` (web and mobile both read it);
+  `packages/client-runtime/package.json`: the dependency.
+- `packages/contracts/src/model.ts`: `PRIME_DRIVER_KIND` in `DEFAULT_MODEL_BY_PROVIDER` and
+  `PROVIDER_DISPLAY_NAMES`; `packages/contracts/src/settings.ts`: `"prime"` in
+  `DEFAULT_DISABLED_PROVIDER_DRIVERS`.
+- Root `package.json` (knip workspace list) and `scripts/release-smoke.ts` (workspace manifests).
+
+Verify:
+
+- `vp test run packages/provider-prime apps/server/src/orchestration-v2/Adapters/PrimeAdapterV2.test.ts`
+- `grep -n "PrimeDriver" apps/server/src/provider/builtInDrivers.ts` and
+  `grep -n "primeClient" packages/client-runtime/src/providerClients.ts`.
+- With `prime-agent` installed, a Prime thread keeps its conversation across a server restart.
+
 ### C1. Nightly build and release workflow (CI)
 
 Fork-owned: `.github/workflows/custom-nightly-linux.yml` (`5bffb2ec49` through `f9bc6b8b22`,
