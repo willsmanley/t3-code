@@ -53,8 +53,10 @@ column left of the title, and short timestamps like "5m". Elsewhere upstream's s
 including the Labs "boring sidebar".
 
 Fork-owned files: `apps/web/src/components/LegacySidebar.tsx` (upstream's last copy plus the fork's
-changes), `apps/web/src/components/LegacySidebar.logic.ts` (helpers upstream removed from
-`Sidebar.logic.ts`).
+changes), `apps/web/src/components/LegacySidebar.logic.ts` (+ test; helpers upstream removed from
+`Sidebar.logic.ts`, including `archiveSelectedThreadEntries`, `resolveProjectStatusIndicator` and
+`sortProjectsForSidebar`, which upstream deleted as unused on November 1, 2026; the project sort
+wraps upstream's `sortScopedProjectsForSidebar`).
 
 Touch points:
 
