@@ -1,4 +1,4 @@
-import { attachSidebarTree, SIDEBAR_TREE_PROPS } from "../lib/sidebarTree";
+import { attachSidebarTree } from "../lib/sidebarTree";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/client-runtime/thread-pull-requests";
 import { Spinner } from "~/components/ui/spinner";
@@ -686,8 +686,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     >
       <div
         ref={isActive ? (node) => revealActiveRow(node, threadKey) : undefined}
-        role="treeitem"
-        tabIndex={-1}
+        role="button"
+        tabIndex={0}
         data-sidebar-row={threadKey}
         data-sidebar-parent={props.navigationParent}
         aria-current={isActive ? "page" : undefined}
@@ -1048,8 +1048,8 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
         <SidebarMenuSubItem className="w-full">
           <SidebarMenuSubButton
             render={showMoreButtonRender}
-            role="treeitem"
-            tabIndex={-1}
+            role="button"
+            tabIndex={0}
             data-sidebar-row={`project:${projectKey}:more`}
             data-sidebar-parent={`project:${projectKey}`}
             data-thread-selection-safe
@@ -1069,8 +1069,8 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
         <SidebarMenuSubItem className="w-full">
           <SidebarMenuSubButton
             render={showLessButtonRender}
-            role="treeitem"
-            tabIndex={-1}
+            role="button"
+            tabIndex={0}
             data-sidebar-row={`project:${projectKey}:less`}
             data-sidebar-parent={`project:${projectKey}`}
             data-thread-selection-safe
@@ -2334,8 +2334,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           className={isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : undefined}
           {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.attributes : {})}
           {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.listeners : {})}
-          role="treeitem"
-          tabIndex={-1}
+          role="button"
+          tabIndex={0}
           data-sidebar-row={`project:${project.projectKey}`}
           aria-expanded={projectExpanded}
           aria-label={project.displayName}
@@ -2991,7 +2991,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
             onDragEnd={handleProjectDragEnd}
             onDragCancel={handleProjectDragCancel}
           >
-            <SidebarMenu {...SIDEBAR_TREE_PROPS} ref={attachSidebarTree}>
+            <SidebarMenu role="presentation" ref={attachSidebarTree}>
               <SortableContext items={sortedProjectKeys} strategy={verticalListSortingStrategy}>
                 {sortedProjects.map((project) => (
                   <SortableProjectItem key={project.projectKey} projectId={project.projectKey}>
@@ -3027,7 +3027,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
             </SidebarMenu>
           </DndContext>
         ) : (
-          <SidebarMenu {...SIDEBAR_TREE_PROPS} ref={attachTreeRef}>
+          <SidebarMenu role="presentation" ref={attachTreeRef}>
             {sortedProjects.map((project) => (
               <SidebarProjectListRow
                 key={project.projectKey}
