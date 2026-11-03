@@ -560,7 +560,7 @@ What it does: the composer gets a mic button beside send. It records with the br
 `MediaRecorder` and transcribes with the same ElevenLabs Scribe call as Android (F8), through
 upstream's shared `VoiceInputController`, so the transcript lands at the cursor with the same
 draft checks as mobile. While it records or transcribes, the editor is read-only and send is off;
-× cancels, ✓ transcribes. **Composer: Voice Input** (`mod+shift+space` by default, added November 3, 2026) presses the mic, then ✓ (send); Escape cancels while recording. Recordings stop at 20
+× cancels, ✓ transcribes. **Composer: Voice Input** (`ctrl+space` on every platform by default, since `mod+space` is Spotlight on macOS; added November 3, 2026) presses the mic, then ✓ (send). While recording, Enter sends, Shift+Enter only fills the draft, and Escape cancels. Recordings stop at 20
 minutes, like Android. The API key is saved once
 on the server, in its secret store as `<base-dir>/userdata/secrets/elevenlabs-api-key.bin` (mode
 600). Since F16 the audio streams to the thread's server, which transcribes it. Only when that server
@@ -603,7 +603,7 @@ Touch points:
 - `apps/web/tsconfig.json`: `ES2024.Promise` in `lib`, because the shared controller uses
   `Promise.withResolvers`.
 - `packages/contracts/src/keybindings.ts`: `"composer.voiceInput"` after `"composer.branch"`;
-  `packages/shared/src/keybindings.ts`: its `mod+shift+space` default after
+  `packages/shared/src/keybindings.ts`: its `ctrl+space` default after
   `composer.previousWorktree`. The handler lives in `ComposerVoiceInputControl.tsx`.
 
 Verify:

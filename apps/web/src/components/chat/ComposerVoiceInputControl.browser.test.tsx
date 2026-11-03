@@ -25,20 +25,29 @@ import { BackgroundThreadContext } from "./backgroundThread";
 import { ComposerVoiceInputControl } from "./ComposerVoiceInputControl";
 
 function control(phase: VoiceInputPhase, options: { disabled?: boolean } = {}) {
-  const handlers = { onStart: vi.fn(), onConfirm: vi.fn(), onCancel: vi.fn() };
+  const handlers = {
+    onStart: vi.fn(),
+    onConfirm: vi.fn(),
+    onConfirmWithoutSending: vi.fn(),
+    onCancel: vi.fn(),
+  };
   const element = (
-    <ComposerVoiceInputControl
-      phase={phase}
-      recordingStartedAt={phase === "recording" ? 0 : null}
-      disabled={options.disabled ?? false}
-      onConfirmWithoutSending={vi.fn()}
-      {...handlers}
-    />
+    <>
+      <form>
+        <ComposerVoiceInputControl
+          phase={phase}
+          recordingStartedAt={phase === "recording" ? 0 : null}
+          disabled={options.disabled ?? false}
+          {...handlers}
+        />
+      </form>
+      <input aria-label="Search threads" />
+    </>
   );
   return { element, ...handlers };
 }
 
-const shortcut = () => userEvent.keyboard("{Control>}{Shift>}[Space]{/Shift}{/Control}");
+const shortcut = () => userEvent.keyboard("{Control>}[Space]{/Control}");
 const linux = () => vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
 
 describe("voice input shortcut", () => {
@@ -58,6 +67,25 @@ describe("voice input shortcut", () => {
     expect(recording.onConfirm).toHaveBeenCalledOnce();
     await userEvent.keyboard("{Escape}");
     expect(recording.onCancel).toHaveBeenCalledOnce();
+  });
+
+  it("sends a recording on Enter, and Shift+Enter only fills the draft", async () => {
+    using _platform = linux();
+    const recording = control("recording");
+    await using _screen = await render(recording.element);
+    await userEvent.keyboard("{Enter}");
+    expect(recording.onConfirm).toHaveBeenCalledOnce();
+    await userEvent.keyboard("{Shift>}{Enter}{/Shift}");
+    expect(recording.onConfirmWithoutSending).toHaveBeenCalledOnce();
+  });
+
+  it("leaves Enter alone in a field outside the composer", async () => {
+    using _platform = linux();
+    const recording = control("recording");
+    await using screen = await render(recording.element);
+    await userEvent.click(screen.getByRole("textbox", { name: "Search threads" }));
+    await userEvent.keyboard("{Enter}");
+    expect(recording.onConfirm).not.toHaveBeenCalled();
   });
 
   it("does nothing while the mic is unavailable", async () => {

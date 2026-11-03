@@ -29,7 +29,8 @@ const HOLD_TO_EDIT_MS = 500;
 /**
  * Mic, then cancel / status / confirm while a dictation runs, as on mobile. Confirm sends the
  * message; holding it (or Shift-clicking) only puts the words in the draft. The voice input
- * shortcut (Mod+Shift+Space by default) starts a dictation and sends it; Escape cancels one.
+ * shortcut (Ctrl+Space by default) starts a dictation and sends it. While recording, Enter sends,
+ * Shift+Enter only puts the words in the draft, and Escape cancels.
  */
 export const ComposerVoiceInputControl = memo(function ComposerVoiceInputControl(props: {
   readonly phase: VoiceInputPhase;
@@ -56,11 +57,28 @@ export const ComposerVoiceInputControl = memo(function ComposerVoiceInputControl
     if (!event.repeat && props.phase === "recording") props.onConfirm();
     return true;
   });
-  // Bubble phase, so a menu or dialog that takes Escape first keeps it.
-  const cancelOnEscape = useStableCallback((event: KeyboardEvent) => {
-    if (props.phase !== "recording" || event.key !== "Escape" || event.isComposing) return false;
+  // Bubble phase, so a menu or dialog that takes the key first keeps it.
+  const recordingRef = useRef<HTMLDivElement>(null);
+  const handleRecordingKey = useStableCallback((event: KeyboardEvent) => {
+    if (props.phase !== "recording" || event.isComposing) return false;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      props.onCancel();
+      return true;
+    }
+    if (event.key !== "Enter" || event.ctrlKey || event.altKey || event.metaKey) return false;
+    // Enter on a focused button, or in a field outside this composer, keeps its own meaning.
+    const target = event.target;
+    const inComposer =
+      target === document.body ||
+      (target instanceof Element &&
+        target.closest("button") === null &&
+        recordingRef.current?.closest("form")?.contains(target) === true);
+    if (!inComposer) return false;
     event.preventDefault();
-    props.onCancel();
+    if (event.repeat) return true;
+    if (event.shiftKey) props.onConfirmWithoutSending();
+    else props.onConfirm();
     return true;
   });
   const backgroundThread = use(BackgroundThreadContext);
@@ -69,9 +87,9 @@ export const ComposerVoiceInputControl = memo(function ComposerVoiceInputControl
     if (backgroundThread) return;
     return registerCommands(
       { "composer.voiceInput": handleShortcut },
-      { onKeyDown: cancelOnEscape, when: (event) => !isInSideChatPane(event.target) },
+      { onKeyDown: handleRecordingKey, when: (event) => !isInSideChatPane(event.target) },
     );
-  }, [backgroundThread, cancelOnEscape, handleShortcut]);
+  }, [backgroundThread, handleRecordingKey, handleShortcut]);
 
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const held = useRef(false);
@@ -123,7 +141,11 @@ export const ComposerVoiceInputControl = memo(function ComposerVoiceInputControl
   }
 
   return (
-    <div className="flex shrink-0 items-center gap-1" data-composer-voice-input={props.phase}>
+    <div
+      ref={recordingRef}
+      className="flex shrink-0 items-center gap-1"
+      data-composer-voice-input={props.phase}
+    >
       <Button
         type="button"
         variant="ghost"
@@ -166,7 +188,8 @@ export const ComposerVoiceInputControl = memo(function ComposerVoiceInputControl
           <CheckIcon />
         </TooltipTrigger>
         <TooltipPopup>
-          Send{shortcutLabel ? ` · ${shortcutLabel}` : null} · hold or Shift-click to edit first
+          Send · Enter{shortcutLabel ? ` or ${shortcutLabel}` : null} · hold, Shift-click or
+          Shift+Enter to edit first
         </TooltipPopup>
       </Tooltip>
     </div>
