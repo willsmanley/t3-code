@@ -51,6 +51,8 @@ export const EVENT_CODE_SHORTCUT_KEYS: Readonly<Record<string, string>> = {
   Quote: "'",
   Semicolon: ";",
   Slash: "/",
+  // Linux Electron reports Ctrl+Space with key "Unidentified".
+  Space: " ",
 };
 
 export const US_SHIFTED_TO_UNSHIFTED_KEYS: ReadonlyMap<string, string> = new Map([

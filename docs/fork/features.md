@@ -604,7 +604,9 @@ Touch points:
   `Promise.withResolvers`.
 - `packages/contracts/src/keybindings.ts`: `"composer.voiceInput"` after `"composer.branch"`;
   `packages/shared/src/keybindings.ts`: its `ctrl+space` default after
-  `composer.previousWorktree`. The handler lives in `ComposerVoiceInputControl.tsx`.
+  `composer.previousWorktree`, and `Space: " "` in `EVENT_CODE_SHORTCUT_KEYS`, because Electron on
+  Linux reports Ctrl+Space with key `Unidentified`. The handler lives in
+  `ComposerVoiceInputControl.tsx`.
 
 Verify:
 

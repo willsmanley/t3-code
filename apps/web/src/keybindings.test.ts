@@ -426,6 +426,20 @@ describe("model picker navigation helpers", () => {
 });
 
 describe("chat/editor shortcuts", () => {
+  it("starts voice input on Ctrl+Space even when the key name is missing", () => {
+    // Electron on Linux reports Ctrl+Space as key "Unidentified" with code "Space".
+    for (const key of [" ", "Unidentified"]) {
+      assert.strictEqual(
+        resolveShortcutCommand(
+          event({ key, code: "Space", ctrlKey: true }),
+          DEFAULT_RESOLVED_KEYBINDINGS,
+          { platform: "Linux", context: { terminalFocus: false, editableFocus: true } },
+        ),
+        "composer.voiceInput",
+      );
+    }
+  });
+
   it("toggles the thread panel by default without taking terminal keystrokes", () => {
     for (const platform of ["MacIntel", "Win32", "Linux"]) {
       const input = event({
