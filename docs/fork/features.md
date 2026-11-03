@@ -19,8 +19,16 @@ Measurements in the hotspot table are from fork main `ea7c8bf901` and upstream `
   MCP tool list and agent instructions with `apps/server/src/provider/agentContextBudget.json`
   exactly. The fork's scheduling fields make the tool list larger, so after each merge set the
   file to the values the test reports, and keep fork tool text short.
-- **Renamed upstream symbols.** `isMissedFixedTimeRun` became `isMissedRun` (Schedule.ts) and
-  `webhookDraftErrors` became `scheduleDraftErrors` (web scheduler logic). Renames turn upstream
+- **Library upgrades reach fork-owned code.** When upstream moved to Effect 4.1 (November 3,
+  2026), `effect/Crypto` went away. Fork code now uses `effect/crypto/Digest` and
+  `effect/crypto/SecureRandom`, and fork tests provide `NodeCrypto.layer` next to
+  `NodeServices.layer`. A `catchTags` handler for an error that can no longer happen left
+  `undefined` in a layer's requirements and broke every CLI test's typecheck far from the cause.
+- **The lockfile.** A merged `pnpm-lock.yaml` with no text conflict can still disagree with itself
+  (`ERR_PNPM_INCONSISTENT_PATCH_HASH` from `pnpm install --frozen-lockfile`). Take upstream's
+  lockfile and run `pnpm install`, as the runbook says for a conflicted one.
+- **Renamed upstream symbols.** `webhookDraftErrors` became `scheduleDraftErrors` (web scheduler
+  logic). Renames turn upstream
   edits near those names into conflicts. Prefer keeping the upstream name.
 - **Dead-code sweeps.** Upstream deletes or un-exports code nothing upstream reaches (for
   example `readEnvironmentSupportsSnooze`, `logRegistrationDebug`, `useWorkspaceListNavigation`
