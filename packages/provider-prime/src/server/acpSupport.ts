@@ -6,7 +6,7 @@ import {
 } from "@t3tools/contracts";
 import type { PrimeSettings } from "../settings.ts";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -277,7 +277,7 @@ export const makePrimeAcpRuntime = Effect.fn("makePrimeAcpRuntime")(function* (
 ): Effect.fn.Return<
   AcpSessionRuntime.AcpSessionRuntime["Service"],
   EffectAcpErrors.AcpError,
-  ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto | Scope.Scope
+  ChildProcessSpawner.ChildProcessSpawner | SecureRandom.SecureRandom | Scope.Scope
 > {
   const { primeSettings, environment, resumeSessionId, sessionDirectory, ...runtimeOptions } =
     input;
@@ -289,7 +289,7 @@ export const makePrimeAcpRuntime = Effect.fn("makePrimeAcpRuntime")(function* (
   }
   const sessionId =
     resumeSessionId ??
-    (yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(
+    (yield* (yield* SecureRandom.SecureRandom).uuidV4().pipe(
       Effect.mapError(
         (cause) =>
           new EffectAcpErrors.AcpTransportError({

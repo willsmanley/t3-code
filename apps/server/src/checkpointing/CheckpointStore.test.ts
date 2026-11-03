@@ -135,7 +135,7 @@ it.effect("captures no checkpoint while source control is off", () =>
           ),
         ),
         Layer.provideMerge(layerVcsProcessTest),
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       ),
     ),
   ),

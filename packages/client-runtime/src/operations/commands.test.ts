@@ -194,7 +194,7 @@ describe("V2 environment commands", () => {
           title: "Conversation fork",
         },
       ]);
-    }).pipe(Effect.provide(layerTestCrypto)),
+    }).pipe(Effect.provide(layerTestRandom)),
   );
 
   it.effect("resolves run ordinal zero to the persisted thread-start checkpoint", () =>

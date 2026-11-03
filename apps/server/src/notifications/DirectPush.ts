@@ -29,7 +29,7 @@ import {
   isTerminalPhase,
 } from "@t3tools/shared/agentActivityPayloads";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as Digest from "effect/crypto/Digest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -234,7 +234,7 @@ const make = Effect.gen(function* () {
   const devices = yield* DirectPushDevices.DirectPushDevices;
   const fcm = yield* FcmClient.FcmClient;
   const sessions = yield* SessionStore.SessionStore;
-  const crypto = yield* Crypto.Crypto;
+  const digester = yield* Digest.Digest;
   const scope = yield* Effect.scope;
   // The relay keeps these rows in its database; one environment's rows are
   // rebuilt from the startup snapshot that AgentAwarenessRelay publishes.
@@ -318,11 +318,10 @@ const make = Effect.gen(function* () {
       if (delivery.alertIdentity !== null) {
         // A grouped alert's identity lists every thread in it; hash it rather
         // than spend FCM's 4 KB payload on ids. The phone deduplicates by it.
-        const digest = yield* crypto.digest(
-          "SHA-256",
+        data.alert_id = yield* digester.digestHex(
+          Digest.sha256,
           new TextEncoder().encode(delivery.alertIdentity),
         );
-        data.alert_id = Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
       }
       const result = yield* fcm
         .send({
@@ -363,8 +362,6 @@ const make = Effect.gen(function* () {
       DirectPushDevicePersistenceError: (error) =>
         Effect.logWarning("direct push delivery skipped", { error: error.message }),
       DirectPushSessionCheckError: (error) =>
-        Effect.logWarning("direct push delivery skipped", { error: error.message }),
-      PlatformError: (error) =>
         Effect.logWarning("direct push delivery skipped", { error: error.message }),
     }),
   );

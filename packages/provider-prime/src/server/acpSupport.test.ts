@@ -1,7 +1,9 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import * as ChildProcess from "effect/process/ChildProcess";
@@ -29,7 +31,7 @@ const launch = (resumeSessionId?: string) =>
     const launches: Array<ReadonlyArray<string>> = [];
     const spawner = ChildProcessSpawner.make((command) => {
       if (ChildProcess.isStandardCommand(command))
-        launches.push([command.command, ...command.args]);
+        launches.push([command.command, ...command.args.map(String)]);
       return Effect.succeed(idleProcess);
     });
     const exit = yield* makePrimeAcpRuntime({
@@ -44,7 +46,7 @@ const launch = (resumeSessionId?: string) =>
       Effect.exit,
     );
     return { exit, launches };
-  }).pipe(Effect.provide(NodeServices.layer));
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 
 describe("makePrimeAcpRuntime", () => {
   it.effect("gives a new session its own directory and continues it there when reopened", () =>
