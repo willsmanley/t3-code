@@ -124,14 +124,13 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
         void scratch.startScratchThread(environmentId);
       },
       "chat.new": (event) => {
-        // The boring sidebar's folders already show the context, so it starts in
-        // the current project like the legacy sidebar did.
-        const { boringSidebarEnabled, legacySidebarEnabled } = getClientSettings();
-        const boringSidebar =
-          boringSidebarEnabled || legacySidebarEnabled || isElectron || forceLegacySidebar;
+        // The fork's desktop and preview builds use the project-tree sidebar, so they
+        // start in the current project like the legacy sidebar does.
+        const { legacySidebarEnabled } = getClientSettings();
+        const projectSidebar = legacySidebarEnabled || isElectron || forceLegacySidebar;
         const groups = readProjectGroups();
         if (
-          !boringSidebar &&
+          !projectSidebar &&
           !shouldCreateNewThreadInCurrentProject(
             false,
             groups.filter((group) => !group.archived).length,

@@ -63,6 +63,14 @@ export function getElevenLabsTranscriber(): VoiceTranscriber {
   });
 }
 
+/**
+ * Android's voice input transcriber. It builds the transcriber as each dictation starts, after the
+ * composer has set its server, so the audio streams to the thread's own server.
+ */
+export const androidVoiceTranscriber: VoiceTranscriber = {
+  prepare: (options) => getElevenLabsTranscriber().prepare(options),
+};
+
 // ADTS is a run of self-contained frames, so a file still being recorded can be read up to its
 // current end and the rest sent later.
 async function readRecordingFrom(uri: string, offset: number, maxBytes: number) {
