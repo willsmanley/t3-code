@@ -739,6 +739,8 @@ Fork-owned files: `packages/provider-prime/**`,
 
 Touch points:
 
+- `apps/server/src/policy/managedProviders.ts`: `primeClient` in `PACKAGED_CLIENTS`, so a managed
+  policy can name the `prime` driver (upstream's test allows every built-in driver).
 - `apps/server/src/provider/builtInDrivers.ts`: import, `PrimeDriverEnv`, `PrimeDriver` before
   `AcpRegistryDriver`; `apps/server/package.json`: the dependency.
 - `packages/client-runtime/src/providerClients.ts`: `primeClient` (web and mobile both read it);
