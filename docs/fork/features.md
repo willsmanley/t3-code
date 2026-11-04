@@ -385,11 +385,17 @@ key the user saves under Settings → Microphone (kept in secure storage) is onl
 server that can't. Recordings are kept until transcription succeeds, and the settings page lists
 them.
 
-Fork-owned files: `apps/mobile/src/features/voice-input/elevenLabsTranscription.ts` (key and
-upload), `savedRecordings.ts` (where the files live),
-`apps/mobile/src/features/settings/VoiceTranscriptionSettings.tsx`, and
-`apps/mobile/src/native/voiceTranscription.android.ts`. That last file is a platform override of
-upstream's `voiceTranscription.ts`, so the Android build picks it up without any import change.
+Fork-owned files: `apps/mobile/src/features/voice-input/elevenLabsTranscription.ts` (key,
+upload, and `androidVoiceTranscriber`), `savedRecordings.ts` (where the files live), and
+`apps/mobile/src/features/settings/VoiceTranscriptionSettings.tsx`.
+
+Upstream added its own on-device Android dictation on November 3, 2026 (`d1ec71e6ff`: Google
+speech services, the `modules/t3-voice-transcription` native module and its own
+`apps/mobile/src/native/voiceTranscription.android.ts`). The fork keeps that code as upstream has
+it but never uses it on Android: `localVoiceTranscriberAtom` returns `androidVoiceTranscriber`
+there, which builds the ElevenLabs/server transcriber as each dictation starts, so it picks up
+the composer's server (F16). Upstream's user doc (`docs/user/composer.md`) describes the on-device
+engine; the fork's Android build doesn't use it.
 Everything else is shared with web and desktop (F14) in `packages/client-runtime/src/voice-input/`:
 `elevenLabs.ts` (URL, model, retries, error messages, the transcriber and the retry from settings)
 and `savedRecordings.ts` (keeping audio until its transcript is saved, listing, pruning), each with
@@ -397,30 +403,29 @@ a test.
 
 Touch points:
 
-- `apps/mobile/src/features/voice-input/VoiceInputProvider.tsx`: Android recording options and
+- `apps/mobile/src/features/voice-input/VoiceInputProvider.tsx`: `localVoiceTranscriberAtom`'s
+  `read` returns `androidVoiceTranscriber` on Android; Android recording options and
   `RECORDING_LIMIT_SECONDS`; inside `voiceInputAtom`, the session's `recordingLimitSeconds`, the
   background-recording flag, `releaseRecording` instead of delete, no cancel on background while
-  recording or while the microphone permission dialog is up (it pauses the app, so the first try
-  would otherwise stop), and pruning saved transcripts once per launch.
+  Android records (in the `createVoiceRecordingPermission` callback; upstream's permission helper
+  covers the permission dialog), and pruning saved transcripts once per launch.
 - `apps/mobile/src/features/voice-input/voiceInputSession.ts`: the elapsed-time clamp uses
   `recordingLimitSeconds`, so the Android timer runs past five minutes.
 - `apps/mobile/src/lib/audioSession.ts`: an `allowsBackgroundRecording` parameter.
 - `packages/client-runtime/src/voice-input/controller.ts`: a `recordingLimitSeconds` dependency;
   passes `VoiceTranscriptionError` messages through (+ `controller.test.ts`).
-- `apps/mobile/src/features/settings/SettingsRouteScreen.tsx`: lists the Microphone page on
-  Android too.
 - `apps/mobile/src/features/settings/SettingsMicrophoneRouteScreen.tsx`: renders
   `<VoiceTranscriptionSettings>` on Android.
 - `apps/mobile/app.config.ts`: expo-audio `recordAudioAndroid: true` and
-  `enableBackgroundRecording: true`. expo-image-picker no longer sets
-  `microphonePermission: false`, which blocked RECORD_AUDIO.
+  `enableBackgroundRecording: true`. (Upstream now lists Settings → Microphone on Android and no
+  longer turns off the image picker's microphone permission, so those fork edits are gone.)
 
 Verify:
 
 - `vp test run packages/client-runtime/src/voice-input`
-- `grep -n "export function getLocalVoiceTranscriber" apps/mobile/src/native/voiceTranscription*.ts`
-  (expect `.ts`, `.ios.ts` and `.android.ts`). If upstream adds its own `voiceTranscription.android.ts`
-  or renames the function, the override breaks.
+- `grep -n "androidVoiceTranscriber" apps/mobile/src/features/voice-input/VoiceInputProvider.tsx apps/mobile/src/features/voice-input/elevenLabsTranscription.ts`
+  (the provider's `read` and the export). If upstream stops reading `localVoiceTranscriberAtom`,
+  move the hook to whatever replaces it.
 - `grep -n "recordAudioAndroid: true\|enableBackgroundRecording: true" apps/mobile/app.config.ts` (two hits).
 - `grep -n "recordingLimitSeconds\|releaseRecording(androidRecordings\|pruneSavedTranscripts(androidRecordings)" apps/mobile/src/features/voice-input/VoiceInputProvider.tsx`
   (all three still wired in), and
@@ -459,8 +464,7 @@ thread right away, before the server answers.
 
 Touch points:
 
-- `apps/mobile/src/components/ui/AppBar.types.ts`: `overflowOnly` on `AppBarAction`. Upstream's
-  Android header already honors it.
+- `overflowOnly` on `AppBarAction` is upstream's since November 3, 2026.
 - `apps/mobile/src/features/threads/ThreadHeader.tsx`: the `onArchiveThread` prop and action.
 - `apps/mobile/src/features/threads/ThreadRouteScreen.tsx`: wires
   `useOpenThreadArchiveAction(useWorkspaceListNavigation("threads"))`, only when the thread can
