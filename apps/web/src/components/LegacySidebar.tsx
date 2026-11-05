@@ -150,6 +150,7 @@ import {
   LegacySidebarTabSchema,
   LegacySidebarTabs,
   LegacySidebarWorkersList,
+  legacyThreadWorkerMenu,
   NewWorkerButton,
   type WorkerProjectIndex,
 } from "./LegacySidebarWorkers";
@@ -2196,6 +2197,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         AuthOrchestrationOperateScope,
       );
       const snoozeMenu = legacyThreadSnoozeMenu(thread);
+      const workerMenu = legacyThreadWorkerMenu(thread);
       const clicked = await api.contextMenu.show(
         [
           {
@@ -2208,6 +2210,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             ? [{ id: "new-thread-on-branch", label: `New thread on ${thread.branch}` }]
             : []),
           ...snoozeMenu.items,
+          ...workerMenu.items,
           { id: "rename", label: "Rename thread", disabled: !canOperateThread },
           ...(appAtomRegistry.get(canShareWithGuestAtom(thread.environmentId))
             ? [{ id: "share-guest", label: "Share with guest" }]
@@ -2230,6 +2233,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       );
 
       if (snoozeMenu.handle(clicked)) return;
+      if (workerMenu.handle(clicked)) return;
       if (clicked === "project-settings") {
         if (isMobile) setOpenMobile(false);
         void router.navigate({

@@ -771,6 +771,63 @@ Verify:
   `grep -n "primeClient" packages/client-runtime/src/providerClients.ts`.
 - With `prime-agent` installed, a Prime thread keeps its conversation across a server restart.
 
+### F18. Workers tab, Needs you and worker threads (web, server, client-runtime, contracts, mobile)
+
+Added November 5, 2026.
+
+What it does: a thread is either a normal thread (Projects) or a worker, chosen by the user. A
+worker is a thread with the upstream thread tag `worker` (`WORKER_THREAD_TAG`, `isWorkerThread`),
+so no schema or migration is involved. The legacy sidebar gets Projects and Workers tabs. Workers
+lists worker threads by project, then "Jobs in project threads" (scheduled tasks outside worker
+threads); jobs whose thread is archived and that won't run again hide behind "Show archived".
+A "Needs you" group at the top of Projects shows a worker that waits on the user (question,
+approval) or failed, a job whose last run failed (until "Mark done", kept in localStorage), and a
+job that would still run into an archived thread. Right-click a project thread for "Move to
+Workers", a worker for "Move to Projects"; archiving from Workers pauses the worker's jobs first.
+A worker's finished runs stay quiet: no browser notification, no phone card or completion alert
+(questions, approvals and failures still push). Clicking a worker whose thread is archived opens
+it with `?archived=true`, which lets the thread route show an archived (never a deleted) thread,
+with an "archived" composer banner and Unarchive. The Android/iOS app hides workers from its lists
+into a collapsed "Workers (N)" group (except ones that need the user) and offers the same move in
+the long-press menu.
+
+Fork-owned files:
+
+- Contracts: `packages/contracts/src/workerThreads.ts`.
+- Web: `apps/web/src/components/LegacySidebarWorkers.tsx`, `legacySidebarWorkers.logic.ts`
+  (+ test), `apps/web/src/components/chat/useArchivedThreadBanner.tsx`.
+- Server: `apps/server/src/relay/workerThreadAwareness.ts`.
+- Mobile: `apps/mobile/src/features/threads/workerThreads.ts`, `workerThreadGroup.ts` (+ test),
+  `use-worker-thread-group.ts`, `workerThreadTag.ts`.
+
+Touch points:
+
+- `packages/contracts/src/index.ts`: exports `workerThreads.ts`.
+- `packages/client-runtime/src/operations/commands.ts` (`setThreadTag`) and
+  `src/state/threadCommands.ts` (`setTag`): a client command for upstream's `thread.tag.set`.
+- `apps/web/src/components/LegacySidebar.tsx` (fork-owned copy): the tabs, Needs you and the
+  Workers list in `SidebarProjectsContent`, `workerProjects`, and `legacyThreadWorkerMenu` in the
+  thread context menu. `LegacySidebar.snooze.tsx` (F2) drops worker threads from the project
+  tree and Snoozed.
+- `apps/web/src/components/ThreadNotificationCoordinator.tsx`: no completion notification for a
+  worker.
+- `apps/web/src/threadRoutes.ts` (`allowArchived`, `validateThreadRouteSearch`, + test),
+  `apps/web/src/routes/_chat.$environmentId.$threadId.tsx` (`validateSearch`),
+  `apps/web/src/components/ThreadRouteView.tsx` (reads `archived`), `ChatView.tsx` (the banner).
+- `apps/server/src/relay/AgentAwarenessRelay.ts`: `quietWorkerAwarenessState` in the publish
+  snapshot and the startup catch-up, `thread.tags-updated` publishes, and a worker's finished run
+  doesn't alert after the tag is removed (+ tests). `ProjectionStore.ts`: the awareness snapshot
+  carries `tags` (+ test).
+- Mobile: `threadListV2.ts`, `thread-list-v2-items.tsx`, `projectThreadTree.ts` (one export),
+  `HomeScreen.tsx`, `ThreadNavigationSidebar.tsx`.
+
+Verify:
+
+- `vp test run apps/web/src/components/legacySidebarWorkers.logic.test.ts apps/web/src/threadRoutes.test.ts`
+- `vp test run apps/server/src/relay/AgentAwarenessRelay.test.ts apps/server/src/orchestration-v2/ProjectionStore.test.ts`
+- `vp test run apps/mobile/src/features/threads/workerThreadGroup.test.ts`
+- In the legacy sidebar, "Move to Workers" moves a thread to the Workers tab and back.
+
 ### C1. Nightly build and release workflow (CI)
 
 Fork-owned: `.github/workflows/custom-nightly-linux.yml` (`5bffb2ec49` through `f9bc6b8b22`,

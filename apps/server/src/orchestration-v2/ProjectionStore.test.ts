@@ -8403,3 +8403,61 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
     }),
   );
 });
+
+// Fork: the phone relay reads a thread's tags to keep worker threads quiet.
+it.effect("agent awareness snapshots carry thread tags", () =>
+  Effect.gen(function* () {
+    const store = yield* ProjectionStore.ProjectionStoreV2;
+    const now = yield* DateTime.now;
+    const create = Effect.fnUntraced(function* (id: string) {
+      const threadId = ThreadId.make(id);
+      const thread = {
+        createdBy: "user" as const,
+        creationSource: "web" as const,
+        id: threadId,
+        projectId: ProjectId.make("project:awareness-tags"),
+        title: `Title for ${id}`,
+        providerInstanceId,
+        modelSelection,
+        runtimeMode: "full-access" as const,
+        interactionMode: "default" as const,
+        branch: null,
+        worktreePath: null,
+        activeProviderThreadId: null,
+        lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+        forkedFrom: null,
+        createdAt: now,
+        updatedAt: now,
+        archivedAt: null,
+        settledOverride: null,
+        settledAt: null,
+        lastVisitedAt: null,
+        deletedAt: null,
+      };
+      yield* store.apply({
+        id: EventId.make(`event:${id}:created`),
+        type: "thread.created",
+        threadId,
+        occurredAt: now,
+        payload: thread,
+      });
+      return thread;
+    });
+    const tagged = yield* create("thread:awareness-tagged");
+    const untagged = yield* create("thread:awareness-untagged");
+    yield* store.apply({
+      id: EventId.make("event:thread:awareness-tagged:tags"),
+      type: "thread.tags-updated",
+      threadId: tagged.id,
+      occurredAt: now,
+      payload: { ...tagged, tags: ["worker"] },
+    });
+
+    assert.deepEqual((yield* store.getAgentAwarenessSnapshot(tagged.id)).threads[0]?.tags, [
+      "worker",
+    ]);
+    const listed = (yield* store.getAgentAwarenessSnapshot()).threads;
+    assert.deepEqual(listed.find((thread) => thread.id === tagged.id)?.tags, ["worker"]);
+    assert.isUndefined(listed.find((thread) => thread.id === untagged.id)?.tags);
+  }).pipe(Effect.provide(layerTest)),
+);

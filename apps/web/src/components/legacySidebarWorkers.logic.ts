@@ -71,6 +71,29 @@ export function resolveWorkerState(input: {
   return QUIET;
 }
 
+const ATTENTION_LABELS: ReadonlySet<ThreadStatusPill["label"]> = new Set([
+  "Pending Approval",
+  "Awaiting Input",
+  "Failed",
+]);
+
+/** A worker thread asks for the user when it waits on them or fails, or when one of its jobs does. */
+export function resolveWorkerThreadState(input: {
+  readonly threadPill: ThreadStatusPill | null;
+  readonly jobStates: readonly WorkerState[];
+}): WorkerState {
+  const { threadPill, jobStates } = input;
+  if (threadPill && ATTENTION_LABELS.has(threadPill.label)) {
+    return { ...QUIET, pill: threadPill, needsYou: true };
+  }
+  const failing = jobStates.find((state) => state.needsYou);
+  if (failing) return { ...failing, archived: false };
+  if (threadPill?.label === "Working" || threadPill?.label === "Connecting") {
+    return { ...QUIET, pill: threadPill };
+  }
+  return jobStates.find((state) => state.pill !== null) ?? QUIET;
+}
+
 export interface WorkerProjectGroup<T> {
   readonly projectKey: string;
   readonly workers: readonly T[];

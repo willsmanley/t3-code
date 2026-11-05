@@ -48,6 +48,7 @@ import * as DirectPush from "../notifications/DirectPush.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import { forkParked } from "../serverActivation.ts";
+import { makeWorkerRunMemory, quietWorkerAwarenessState } from "./workerThreadAwareness.ts";
 
 export class AgentAwarenessRelay extends Context.Service<
   AgentAwarenessRelay,
@@ -99,6 +100,8 @@ function shouldPublishAgentAwarenessEvent(
     case "runtime-request.updated":
     case "subagent.updated":
     case "provider-thread.updated":
+    // Fork: adding or removing the worker tag changes what phones show.
+    case "thread.tags-updated":
       return true;
     // Unsettling must not re-alert a dismissed result.
     case "thread.unsettled":
@@ -110,7 +113,6 @@ function shouldPublishAgentAwarenessEvent(
     case "thread.unpinned":
     case "thread.pin-reordered":
     case "thread.active-reordered":
-    case "thread.tags-updated":
     case "thread.visited":
     case "thread.marked-unread":
     case "thread.runtime-mode-updated":
@@ -312,11 +314,14 @@ function resolveAgentAwarenessRelayPublishSnapshot(input: {
   return {
     projectId: input.thread.value.projectId,
     state: sanitizeRelayAgentActivityState(
-      projectThreadAwarenessV2({
-        environmentId: input.environmentId,
-        project: input.project.value,
-        thread: input.thread.value,
-      }),
+      quietWorkerAwarenessState(
+        input.thread.value,
+        projectThreadAwarenessV2({
+          environmentId: input.environmentId,
+          project: input.project.value,
+          thread: input.thread.value,
+        }),
+      ),
     ),
     reason: "snapshot",
   };
@@ -342,11 +347,14 @@ export function resolveAgentAwarenessRelayActiveThreadIds(input: {
       if (!project) {
         return false;
       }
-      const state = projectThreadAwarenessV2({
-        environmentId: input.environmentId,
-        project,
+      const state = quietWorkerAwarenessState(
         thread,
-      });
+        projectThreadAwarenessV2({
+          environmentId: input.environmentId,
+          project,
+          thread,
+        }),
+      );
       return (
         state !== null &&
         (state.phase !== "completed" && state.phase !== "failed"
@@ -370,6 +378,7 @@ export const make = Effect.gen(function* () {
   const startedAt = (yield* DateTime.now).epochMilliseconds;
   const catchUpRequests = yield* Queue.dropping<void>(1);
   const publishedStateByThreadRef = yield* Ref.make(new Map<ThreadId, string>());
+  const workerRuns = makeWorkerRunMemory();
 
   const readSecretString = (name: string) =>
     secrets
@@ -526,6 +535,8 @@ export const make = Effect.gen(function* () {
       // Subagents and side chats have no relay rows to clear; per-event tombstones would needlessly redeliver user aggregates.
       return;
     }
+    if (threadShell === null) workerRuns.forget(threadId);
+    else workerRuns.observe(threadShell);
     const thread =
       threadShell === null || threadShell.archivedAt !== null
         ? Option.none<AgentAwarenessThread>()
@@ -544,7 +555,14 @@ export const make = Effect.gen(function* () {
       (snapshot.state?.phase === "completed" || snapshot.state?.phase === "failed") &&
       !hasLivePublishedState(publishedStateByThread, threadId)
     ) {
-      if (Option.isNone(thread) || !terminalWorkSinceStart(thread.value, startedAt)) return;
+      if (
+        Option.isNone(thread) ||
+        !terminalWorkSinceStart(thread.value, startedAt) ||
+        // Fork: a run seen while the thread was a worker finished quietly; keep it quiet.
+        (snapshot.state?.phase === "completed" && workerRuns.seenAsWorker(thread.value))
+      ) {
+        return;
+      }
     }
     if (
       publishedStateByThread.get(threadId) === publishIdentity &&

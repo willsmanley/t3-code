@@ -38,6 +38,7 @@ import type { ThreadStatusDotKind } from "./projectThreadTree";
 
 import { relativeTime } from "../../lib/time";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
+import { isShelvedWorkerThread, type ThreadListV2WorkersShelfListItem } from "./workerThreads";
 
 import {
   applyPendingThreadOrder,
@@ -325,6 +326,8 @@ export function getThreadListV2OrderedSection(input: {
   const queuedThreadKeys = input.queuedThreadKeys?.size ? input.queuedThreadKeys : undefined;
   const threads = input.threads.filter((thread) => {
     if (thread.archivedAt !== null || !isListedThreadLineage(thread.lineage)) return false;
+    // Fork: shelved workers sit outside the arranged sections.
+    if (isShelvedWorkerThread(thread)) return false;
     if (
       (input.settlementEnvironmentIds?.has(thread.environmentId) ?? true) &&
       thread.settledOverride === "settled" &&
@@ -463,6 +466,7 @@ export type ThreadListV2ListItem =
   | ThreadListV2WorkingShelfListItem
   | ThreadListV2SnoozedShelfListItem
   | ThreadListV2SettledShelfListItem
+  | ThreadListV2WorkersShelfListItem
   | ThreadListV2ProjectHeaderListItem
   | ThreadListV2ProjectMoreListItem;
 
@@ -475,6 +479,7 @@ export function isThreadListV2ListItem(value: {
     value.type === "v2-working-shelf" ||
     value.type === "v2-snoozed-shelf" ||
     value.type === "v2-settled-shelf" ||
+    value.type === "v2-workers-shelf" ||
     value.type === "v2-project" ||
     value.type === "v2-project-more"
   );
@@ -531,6 +536,12 @@ export function threadListV2ListItemsAreEqual(
         previous.count === item.count &&
         previous.expanded === item.expanded &&
         previous.disabled === item.disabled
+      );
+    case "v2-workers-shelf":
+      return (
+        previous.type === "v2-workers-shelf" &&
+        previous.count === item.count &&
+        previous.expanded === item.expanded
       );
     case "v2-project":
       return (

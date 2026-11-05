@@ -3,7 +3,11 @@ import { describe, expect, it } from "vite-plus/test";
 import type { ScheduledTask } from "@t3tools/contracts";
 
 import type { ThreadStatusPill } from "./Sidebar.logic";
-import { groupWorkersByProject, resolveWorkerState } from "./legacySidebarWorkers.logic";
+import {
+  groupWorkersByProject,
+  resolveWorkerState,
+  resolveWorkerThreadState,
+} from "./legacySidebarWorkers.logic";
 
 const pill = (label: ThreadStatusPill["label"]): ThreadStatusPill => ({
   label,
@@ -123,6 +127,38 @@ describe("resolveWorkerState", () => {
     });
     expect(state.needsYou).toBe(false);
     expect(state.pill?.label).toBe("Working");
+  });
+});
+
+describe("resolveWorkerThreadState", () => {
+  const quiet = { pill: null, needsYou: false, archived: false };
+  const failedJob = { pill: pill("Failed"), needsYou: true, archived: false };
+  const runningJob = { pill: pill("Working"), needsYou: false, archived: false };
+
+  it("stays quiet when its runs complete, even unseen", () => {
+    expect(resolveWorkerThreadState({ threadPill: pill("Completed"), jobStates: [quiet] })).toEqual(
+      quiet,
+    );
+  });
+
+  it("asks for the user when the thread waits on them or fails, or a job fails", () => {
+    for (const label of ["Awaiting Input", "Pending Approval", "Failed"] as const) {
+      expect(resolveWorkerThreadState({ threadPill: pill(label), jobStates: [] }).needsYou).toBe(
+        true,
+      );
+    }
+    expect(resolveWorkerThreadState({ threadPill: null, jobStates: [quiet, failedJob] })).toEqual(
+      failedJob,
+    );
+  });
+
+  it("shows work in progress without asking for attention", () => {
+    expect(
+      resolveWorkerThreadState({ threadPill: pill("Working"), jobStates: [] }).pill?.label,
+    ).toBe("Working");
+    expect(resolveWorkerThreadState({ threadPill: null, jobStates: [runningJob] })).toEqual(
+      runningJob,
+    );
   });
 });
 

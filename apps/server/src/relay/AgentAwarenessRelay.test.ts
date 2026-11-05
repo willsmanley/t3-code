@@ -11,10 +11,12 @@ import {
   ProjectId,
   ProviderInstanceId,
   RunId,
+  RuntimeRequestId,
   ThreadId,
   TurnItemId,
+  WORKER_THREAD_TAG,
 } from "@t3tools/contracts";
-import { RelayAgentActivityState } from "@t3tools/contracts/relay";
+import { RelayAgentActivityState, type RelayAgentAwarenessPhase } from "@t3tools/contracts/relay";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -136,6 +138,38 @@ describe("startup agent activity", () => {
       ],
     });
     assert.deepStrictEqual(ids, [THREAD_ID, newCompleted, newFailed]);
+  });
+
+  it("skips worker threads unless they need the user", () => {
+    const tags = [WORKER_THREAD_TAG];
+    const completedAt = DateTime.makeUnsafe("2026-09-04T12:00:01.000Z");
+    const asking = ThreadId.make("worker-asking");
+    const failed = ThreadId.make("worker-failed");
+    const ids = AgentAwarenessRelay.resolveAgentAwarenessRelayActiveThreadIds({
+      environmentId: EnvironmentId.make("relay-env"),
+      startedAt: DateTime.toEpochMillis(DateTime.makeUnsafe(NOW)),
+      projects: [{ id: PROJECT_ID, title: "Project" }],
+      threads: [
+        shell({ id: ThreadId.make("worker-running"), tags }),
+        shell({
+          id: ThreadId.make("worker-completed"),
+          tags,
+          status: "completed",
+          latestRunCompletedAt: completedAt,
+        }),
+        shell({
+          id: asking,
+          tags,
+          pendingRuntimeRequest: {
+            id: RuntimeRequestId.make("request:worker-asking"),
+            kind: "user_input",
+            createdAt: DateTime.makeUnsafe(NOW),
+          },
+        }),
+        shell({ id: failed, tags, status: "failed", latestRunCompletedAt: completedAt }),
+      ],
+    });
+    assert.deepStrictEqual(ids, [asking, failed]);
   });
 });
 
@@ -986,3 +1020,159 @@ it.effect("catches up after startup without polling after success", () =>
     assert.equal(publications[1]?.state?.threadId, THREAD_ID);
   }).pipe(Effect.scoped),
 );
+
+describe("worker threads", () => {
+  const WORKER_RUN_ID = RunId.make("run:worker");
+  const FINISHED_AT = DateTime.makeUnsafe(NOW);
+  const worker = (overrides: Partial<OrchestrationV2ThreadShell> = {}) =>
+    shell({ tags: [WORKER_THREAD_TAG], latestRunId: WORKER_RUN_ID, ...overrides });
+  const phases = (states: ReadonlyArray<RelayAgentActivityState | null>) =>
+    states.map((state) => state?.phase ?? null);
+  const settle = Effect.fnUntraced(function* (
+    relay: AgentAwarenessRelay.AgentAwarenessRelay["Service"],
+  ) {
+    yield* TestClock.adjust("5 seconds");
+    yield* relay.drain;
+  });
+
+  it.effect("keeps a worker's working and completed states off phones", () =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications, directPublications } = yield* makeTestRelay({
+        directPush: true,
+      });
+      yield* Ref.set(currentShell, worker());
+      yield* relay.publishThread(THREAD_ID);
+      yield* settle(relay);
+      yield* Ref.set(
+        currentShell,
+        worker({ status: "completed", latestRunCompletedAt: FINISHED_AT }),
+      );
+      yield* relay.publishThread(THREAD_ID);
+      yield* settle(relay);
+      // Only the one-time tombstone an archived thread also gets; no card, no completion.
+      assert.deepEqual(phases(publications.map((publication) => publication.state)), [null]);
+      assert.deepEqual(phases(directPublications), [null]);
+    }),
+  );
+
+  it.effect.each([
+    {
+      phase: "waiting_for_input",
+      overrides: {
+        pendingRuntimeRequest: {
+          id: RuntimeRequestId.make("request:worker-input"),
+          kind: "user_input",
+          createdAt: FINISHED_AT,
+        },
+      },
+    },
+    {
+      phase: "waiting_for_approval",
+      overrides: {
+        pendingRuntimeRequest: {
+          id: RuntimeRequestId.make("request:worker-approval"),
+          kind: "command",
+          createdAt: FINISHED_AT,
+        },
+      },
+    },
+    { phase: "failed", overrides: { status: "failed", latestRunCompletedAt: FINISHED_AT } },
+  ] satisfies ReadonlyArray<{
+    readonly phase: RelayAgentAwarenessPhase;
+    readonly overrides: Partial<OrchestrationV2ThreadShell>;
+  }>)("still publishes a worker's $phase state", ({ phase, overrides }) =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications, directPublications } = yield* makeTestRelay({
+        directPush: true,
+      });
+      yield* Ref.set(currentShell, worker(overrides));
+      yield* relay.publishThread(THREAD_ID);
+      assert.deepEqual(phases(publications.map((publication) => publication.state)), [phase]);
+      assert.deepEqual(phases(directPublications), [phase]);
+    }),
+  );
+
+  it.effect("clears a live card when its thread is tagged as a worker", () =>
+    Effect.gen(function* () {
+      const events = yield* Queue.unbounded<OrchestrationV2DomainEvent>();
+      const pulls = yield* Queue.unbounded<void>();
+      const { relay, currentShell, publications } = yield* makeTestRelay({
+        domainEvents: Stream.fromEffectRepeat(
+          Queue.offer(pulls, undefined).pipe(Effect.andThen(Queue.take(events))),
+        ),
+      });
+      yield* relay.start();
+      yield* Queue.take(pulls);
+      yield* relay.publishThread(THREAD_ID);
+      const tag = Effect.fnUntraced(function* (tags: ReadonlyArray<string>) {
+        const tagged = shell({ tags });
+        yield* Ref.set(currentShell, tagged);
+        yield* Queue.offer(events, {
+          id: EventId.make(`event:tags:${tags.join(",")}`),
+          type: "thread.tags-updated",
+          threadId: THREAD_ID,
+          occurredAt: yield* DateTime.now,
+          payload: { ...tagged, lastVisitedAt: null },
+        });
+        yield* Queue.take(pulls);
+        yield* settle(relay);
+      });
+
+      yield* tag(["errand"]);
+      assert.deepEqual(phases(publications.map((publication) => publication.state)), ["running"]);
+      yield* tag(["errand", WORKER_THREAD_TAG]);
+      assert.deepEqual(phases(publications.map((publication) => publication.state)), [
+        "running",
+        null,
+      ]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("drops a held completion when the thread becomes a worker during the hold", () =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications } = yield* makeTestRelay();
+      yield* relay.publishThread(THREAD_ID);
+      const finished = { status: "completed", latestRunCompletedAt: FINISHED_AT } as const;
+      yield* Ref.set(currentShell, shell({ ...finished, latestRunId: WORKER_RUN_ID }));
+      yield* relay.publishThread(THREAD_ID);
+      yield* Ref.set(currentShell, worker(finished));
+      yield* relay.publishThread(THREAD_ID);
+      yield* settle(relay);
+      yield* settle(relay);
+      assert.deepEqual(phases(publications.map((publication) => publication.state)), [
+        "running",
+        null,
+      ]);
+    }),
+  );
+
+  it.effect("does not alert a quietly finished run after the thread stops being a worker", () =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications } = yield* makeTestRelay();
+      yield* Ref.set(currentShell, worker());
+      yield* relay.publishThread(THREAD_ID);
+      yield* settle(relay);
+      const finished = { status: "completed", latestRunCompletedAt: FINISHED_AT } as const;
+      yield* Ref.set(currentShell, worker(finished));
+      yield* relay.publishThread(THREAD_ID);
+      yield* settle(relay);
+      yield* Ref.set(currentShell, shell({ ...finished, latestRunId: WORKER_RUN_ID }));
+      yield* relay.publishThread(THREAD_ID);
+      yield* settle(relay);
+      assert.deepEqual(phases(publications.map((publication) => publication.state)), [null]);
+
+      // Its next run is a normal run again: live card, then a completion alert.
+      const nextRun = RunId.make("run:after-worker");
+      yield* Ref.set(currentShell, shell({ latestRunId: nextRun }));
+      yield* relay.publishThread(THREAD_ID);
+      yield* Ref.set(currentShell, shell({ ...finished, latestRunId: nextRun }));
+      yield* relay.publishThread(THREAD_ID);
+      yield* settle(relay);
+      assert.deepEqual(phases(publications.map((publication) => publication.state)), [
+        null,
+        "running",
+        "completed",
+      ]);
+    }),
+  );
+});

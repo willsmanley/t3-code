@@ -219,7 +219,7 @@ export function buildProjectThreadTreeListItems(input: {
   return result;
 }
 
-function toTreeRow(row: ThreadListV2ThreadListItem): ThreadListV2ThreadListItem {
+export function toTreeRow(row: ThreadListV2ThreadListItem): ThreadListV2ThreadListItem {
   const thread = row.item.thread;
   // Tree rows always show the compact time beside the status dot; the flat
   // list hides it whenever a status label takes its place.

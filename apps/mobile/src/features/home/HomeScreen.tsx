@@ -66,8 +66,11 @@ import {
   ThreadListV2SettledShelfHeader,
   ThreadListV2ShowMoreRow,
   ThreadListV2SnoozedShelfHeader,
+  ThreadListV2WorkersShelfHeader,
   ThreadListV2WorkingShelfHeader,
 } from "../threads/thread-list-v2-items";
+import { useWorkerThreadGroup } from "../threads/use-worker-thread-group";
+import { withWorkerShelf } from "../threads/workerThreadGroup";
 import { useThreadRowProviderInstanceResolver } from "../threads/thread-provider-instance";
 import { useOpenThreadPullRequests } from "../threads/use-open-thread-pull-requests";
 import type { ThreadPrPresentation } from "../../state/thread-pr-presentation";
@@ -471,13 +474,25 @@ export function HomeScreen(props: HomeScreenProps) {
   } = listEnvironments;
   const resolveProviderInstance = useThreadRowProviderInstanceResolver(providersByEnvironmentId);
   const pendingOrder = usePendingThreadOrder();
+  const workerGroup = useWorkerThreadGroup({
+    threads: props.threads,
+    searchQuery: props.searchQuery,
+    environmentId: props.selectedEnvironmentId,
+    projectRefs: v2ScopedProjectGroup === null ? null : v2ScopedProjectGroup.projectRefs,
+    now,
+    settlementEnvironmentIds,
+    snoozeEnvironmentIds,
+    queuedThreadKeys,
+    selectedThreadKey,
+    layout: PROJECT_THREAD_TREE_ENABLED ? "tree" : "flat",
+  });
   const {
     layout: threadListV2Layout,
     items: flatThreadListV2Items,
     contentOnlyThreadKeys,
     olderSettledShelf,
   } = useThreadListV2({
-    threads: props.threads,
+    threads: workerGroup.listedThreads,
     pendingTasks: props.pendingTasks,
     environmentId: props.selectedEnvironmentId,
     projectRefs: v2ScopedProjectGroup === null ? null : v2ScopedProjectGroup.projectRefs,
@@ -500,7 +515,7 @@ export function HomeScreen(props: HomeScreenProps) {
     settledShelfExpanded: settledShelfExpanded || PROJECT_THREAD_TREE_ENABLED,
     selectedThreadKey,
   });
-  const threadListV2Items = PROJECT_THREAD_TREE_ENABLED
+  const groupedThreadListV2Items = PROJECT_THREAD_TREE_ENABLED
     ? buildProjectThreadTreeListItems({
         listItems: flatThreadListV2Items,
         projectGroups: new Map(
@@ -521,6 +536,7 @@ export function HomeScreen(props: HomeScreenProps) {
         preferencesLoading: !projectTree.loaded,
       })
     : flatThreadListV2Items;
+  const threadListV2Items = withWorkerShelf(groupedThreadListV2Items, workerGroup.shelfItems);
   useRememberProjectOrder(projectTree, projectTreeHeaderKeys(threadListV2Items));
   // The tree loads every older settled page by itself, so it offers only a retry.
   const showOlderSettledRow =
@@ -612,6 +628,15 @@ export function HomeScreen(props: HomeScreenProps) {
           disabled={item.disabled}
           expanded={item.expanded}
           onToggle={toggleSettledShelf}
+        />
+      );
+    }
+    if (item.type === "v2-workers-shelf") {
+      return (
+        <ThreadListV2WorkersShelfHeader
+          count={item.count}
+          expanded={item.expanded}
+          onToggle={workerGroup.toggleWorkersShelf}
         />
       );
     }

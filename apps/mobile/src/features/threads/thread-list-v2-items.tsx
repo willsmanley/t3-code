@@ -63,6 +63,8 @@ import { useSwipeRowDormant } from "../home/swipe-row-activation";
 import { ThreadSwipeable } from "../home/thread-swipe-actions";
 import { buildThreadTitleRegenerationMenuItems } from "./thread-title-regeneration-menu";
 import { canTurnThreadIntoProject, turnThreadIntoProject } from "./turnThreadIntoProject";
+import { WORKER_TAG_MENU_ACTION_ID, workerTagMenuAction } from "./workerThreads";
+import { toggleThreadWorkerTag } from "./workerThreadTag";
 import { threadCanArchive } from "../home/threadArchive";
 import {
   THREAD_LIST_V2_SETTLED_PAGE_COUNT,
@@ -267,12 +269,18 @@ type ThreadListV2ShelfHeaderProps = {
   readonly pane?: "screen" | "sidebar";
 };
 
-const SHELF_LABEL = { working: "Working", snoozed: "Snoozed", settled: "Settled" } as const;
+const SHELF_LABEL = {
+  working: "Working",
+  snoozed: "Snoozed",
+  settled: "Settled",
+  workers: "Workers",
+} as const;
 
 function ThreadListV2ShelfHeader(
   props: ThreadListV2ShelfHeaderProps & { readonly kind: keyof typeof SHELF_LABEL },
 ) {
   const label = SHELF_LABEL[props.kind];
+  const kind = props.kind === "workers" ? "worker" : props.kind;
   return (
     <ThreadListV2Section
       label={props.expanded ? label : `${label} (${props.count})`}
@@ -282,8 +290,8 @@ function ThreadListV2ShelfHeader(
         expanded: props.expanded,
         disabled: props.disabled,
         onToggle: props.onToggle,
-        accessibilityLabel: `${props.count} ${props.kind} ${props.count === 1 ? "thread" : "threads"}`,
-        accessibilityHint: `${props.expanded ? "Collapses" : "Expands"} the ${props.kind} threads.`,
+        accessibilityLabel: `${props.count} ${kind} ${props.count === 1 ? "thread" : "threads"}`,
+        accessibilityHint: `${props.expanded ? "Collapses" : "Expands"} the ${kind} threads.`,
       }}
     />
   );
@@ -305,6 +313,13 @@ export const ThreadListV2SettledShelfHeader = memo(function ThreadListV2SettledS
   props: ThreadListV2ShelfHeaderProps,
 ) {
   return <ThreadListV2ShelfHeader {...props} kind="settled" />;
+});
+
+// Fork: worker threads collapse into this shelf (see workerThreadGroup.ts).
+export const ThreadListV2WorkersShelfHeader = memo(function ThreadListV2WorkersShelfHeader(
+  props: ThreadListV2ShelfHeaderProps,
+) {
+  return <ThreadListV2ShelfHeader {...props} kind="workers" />;
 });
 
 export const ThreadListV2ShowMoreRow = memo(function ThreadListV2ShowMoreRow(props: {
@@ -901,6 +916,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     [props.autoSettleOptOutSupported, thread.autoSettleDisabledAt],
   );
   const canTurnIntoProject = canTurnThreadIntoProject(thread);
+  const workerTagAction = workerTagMenuAction(thread);
   const titleMenuItems = useMemo<MenuAction[]>(
     () => [
       { id: "rename", title: "Rename", image: "square.and.pencil" },
@@ -918,8 +934,15 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             } satisfies MenuAction,
           ]
         : []),
+      workerTagAction,
     ],
-    [canTurnIntoProject, props.titleRegenerationSupported, thread.runtime, isRegeneratingTitle],
+    [
+      canTurnIntoProject,
+      props.titleRegenerationSupported,
+      thread.runtime,
+      isRegeneratingTitle,
+      workerTagAction,
+    ],
   );
   const menuActions = useMemo<MenuAction[]>(() => {
     const nested = Platform.OS === "ios";
@@ -1024,6 +1047,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       if (nativeEvent.event === "rename") handleRename();
       if (nativeEvent.event === "regenerate-title") handleRegenerateTitle();
       if (nativeEvent.event === "turn-into-project") void turnThreadIntoProject(thread);
+      if (nativeEvent.event === WORKER_TAG_MENU_ACTION_ID) void toggleThreadWorkerTag(thread);
       if (nativeEvent.event === "copy-thread") {
         const target = threadChipCopyTarget(
           { environmentId: thread.environmentId, threadId: thread.id },

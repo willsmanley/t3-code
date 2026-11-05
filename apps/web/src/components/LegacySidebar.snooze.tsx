@@ -1,6 +1,7 @@
 import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
+  isWorkerThread,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import {
@@ -91,14 +92,18 @@ function useLegacySnoozePartition() {
   const now = useLegacySnoozeClock((state) => state.now);
   const serverConfigs = useServerConfigs();
   return <T extends EnvironmentThreadShell>(threads: readonly T[]) =>
-    partitionLegacySnoozedThreads(threads, {
-      now,
-      supportsSnooze: (environmentId: EnvironmentId) =>
-        serverConfigs.get(environmentId)?.environment.capabilities.threadSnooze === true,
-    });
+    // Worker threads live on the Workers tab, so they never reach the project tree or Snoozed.
+    partitionLegacySnoozedThreads(
+      threads.filter((thread) => !isWorkerThread(thread.source)),
+      {
+        now,
+        supportsSnooze: (environmentId: EnvironmentId) =>
+          serverConfigs.get(environmentId)?.environment.capabilities.threadSnooze === true,
+      },
+    );
 }
 
-/** Removes snoozed threads from a project tree until they wake. */
+/** Removes worker threads, and snoozed threads until they wake, from a project tree. */
 export function useWithoutLegacySnoozed() {
   const partition = useLegacySnoozePartition();
   return <T extends EnvironmentThreadShell>(threads: readonly T[]): T[] => partition(threads).awake;

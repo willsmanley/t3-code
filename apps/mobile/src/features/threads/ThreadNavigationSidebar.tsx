@@ -72,8 +72,11 @@ import {
   ThreadListV2SettledShelfHeader,
   ThreadListV2ShowMoreRow,
   ThreadListV2SnoozedShelfHeader,
+  ThreadListV2WorkersShelfHeader,
   ThreadListV2WorkingShelfHeader,
 } from "./thread-list-v2-items";
+import { useWorkerThreadGroup } from "./use-worker-thread-group";
+import { withWorkerShelf } from "./workerThreadGroup";
 import { useThreadRowProviderInstanceResolver } from "./thread-provider-instance";
 import {
   PROJECT_THREAD_TREE_ENABLED,
@@ -309,13 +312,25 @@ function ThreadNavigationSidebarPane(
   } = listEnvironments;
   const resolveProviderInstance = useThreadRowProviderInstanceResolver(providersByEnvironmentId);
   const pendingOrder = usePendingThreadOrder();
+  const workerGroup = useWorkerThreadGroup({
+    threads,
+    searchQuery: props.searchQuery,
+    environmentId: options.selectedEnvironmentId,
+    projectRefs: selectedProjectScope === null ? null : selectedProjectScope.projectRefs,
+    now,
+    settlementEnvironmentIds,
+    snoozeEnvironmentIds,
+    queuedThreadKeys,
+    selectedThreadKey: props.selectedThreadKey ?? null,
+    layout: PROJECT_THREAD_TREE_ENABLED ? "tree" : "flat",
+  });
   const {
     layout: threadListV2Layout,
     items: flatThreadListV2Items,
     contentOnlyThreadKeys,
     olderSettledShelf,
   } = useThreadListV2({
-    threads,
+    threads: workerGroup.listedThreads,
     pendingTasks,
     environmentId: options.selectedEnvironmentId,
     projectRefs: selectedProjectScope === null ? null : selectedProjectScope.projectRefs,
@@ -338,7 +353,7 @@ function ThreadNavigationSidebarPane(
     settledShelfExpanded: settledShelfExpanded || PROJECT_THREAD_TREE_ENABLED,
     selectedThreadKey: props.selectedThreadKey ?? null,
   });
-  const threadListV2Items = PROJECT_THREAD_TREE_ENABLED
+  const groupedThreadListV2Items = PROJECT_THREAD_TREE_ENABLED
     ? buildProjectThreadTreeListItems({
         listItems: flatThreadListV2Items,
         projectGroups: new Map(
@@ -359,6 +374,7 @@ function ThreadNavigationSidebarPane(
         preferencesLoading: !projectTree.loaded,
       })
     : flatThreadListV2Items;
+  const threadListV2Items = withWorkerShelf(groupedThreadListV2Items, workerGroup.shelfItems);
   useRememberProjectOrder(projectTree, projectTreeHeaderKeys(threadListV2Items));
   // The tree loads every older settled page by itself, so it offers only a retry.
   const showOlderSettledRow =
@@ -696,6 +712,15 @@ function ThreadNavigationSidebarPane(
               olderSettledShelf.retry();
               showMoreSettled();
             }}
+          />
+        );
+      case "v2-workers-shelf":
+        return (
+          <ThreadListV2WorkersShelfHeader
+            count={item.count}
+            expanded={item.expanded}
+            onToggle={workerGroup.toggleWorkersShelf}
+            pane="sidebar"
           />
         );
       case "v2-project":
