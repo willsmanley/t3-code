@@ -20,6 +20,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 
 import { useLocalStorage } from "../hooks/useLocalStorage";
+import { useThreadActions } from "../hooks/useThreadActions";
 import { readLocalApi } from "../localApi";
 import { cn } from "../lib/utils";
 import { useThreadShells } from "../state/entities";
@@ -353,6 +354,9 @@ function SidebarWorkerRow(props: {
   const remove = useAtomCommand(serverEnvironment.deleteScheduledTask, {
     label: "worker delete",
   });
+  const { unarchiveThread } = useThreadActions();
+  // Archived threads can't be opened, and the scheduler can't post into them either.
+  const threadArchived = task.threadId !== null && (thread === null || thread.archivedAt !== null);
 
   const reportFailure = <A, E>(result: AtomCommandResult<A, E>) => {
     if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
@@ -371,9 +375,10 @@ function SidebarWorkerRow(props: {
       search: { environmentId, taskId: task.id },
     });
   };
-  // A worker's runs land in its thread, so that is where its history lives.
+  // A worker's runs land in its thread, so that is where its history lives. Without an open
+  // thread, the worker's own settings are the useful place to go.
   const open = () => {
-    if (task.threadId === null) {
+    if (task.threadId === null || threadArchived) {
       openSettings();
       return;
     }
@@ -395,6 +400,9 @@ function SidebarWorkerRow(props: {
         task.enabled
           ? { id: "pause", label: "Pause", disabled: !canOperate }
           : { id: "resume", label: "Resume", disabled: !canOperate },
+        ...(threadArchived
+          ? [{ id: "unarchive", label: "Unarchive thread", disabled: !canOperate }]
+          : []),
         ...(canDismiss ? [{ id: "dismiss", label: "Mark done" }] : []),
         { id: "edit", label: "Edit worker" },
         {
@@ -409,6 +417,19 @@ function SidebarWorkerRow(props: {
     );
     if (clicked === "edit") return openSettings();
     if (clicked === "dismiss") return onDismiss(task);
+    if (clicked === "unarchive" && task.threadId !== null) {
+      const result = await unarchiveThread(scopeThreadRef(environmentId, task.threadId));
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not unarchive thread",
+            description: String(squashAtomCommandFailure(result)),
+          }),
+        );
+      }
+      return;
+    }
     if (clicked === "run-now") {
       reportFailure(await runNow({ environmentId, input: { id: task.id } }));
       return;
@@ -474,6 +495,7 @@ function SidebarWorkerRow(props: {
             />
             <TooltipPopup side="top">
               {scheduleLabel(task.schedule)}
+              {threadArchived ? " · Thread archived" : ""}
               {task.lastRunError ? ` · ${task.lastRunError}` : ""}
             </TooltipPopup>
           </Tooltip>
