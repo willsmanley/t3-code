@@ -35,6 +35,8 @@ export function resolveThreadRouteRenderState(input: {
   serverThreadDeleted: boolean;
   unlistedThreadDetail: EnvironmentThreadState;
   draftThreadExists: boolean;
+  /** The route was opened to view an archived thread, such as a worker's, so archive is no reason to leave. */
+  allowArchived?: boolean;
 }): ThreadRouteRenderState {
   if (input.draftThreadExists || (input.serverThreadExists && !input.serverThreadDeleted)) {
     return "ready";
@@ -50,7 +52,10 @@ export function resolveThreadRouteRenderState(input: {
   if (projection === null) {
     return "loading";
   }
-  return projection.thread.deletedAt !== null || projection.thread.archivedAt !== null
+  if (projection.thread.deletedAt !== null) {
+    return "missing";
+  }
+  return projection.thread.archivedAt !== null && input.allowArchived !== true
     ? "missing"
     : "ready";
 }
@@ -118,4 +123,11 @@ export function resolveActiveThreadRouteRef(
     return null;
   }
   return draftThread.promotedTo;
+}
+
+/** Search params of the server thread route. `archived` opens an archived thread instead of leaving it. */
+export function validateThreadRouteSearch(raw: Record<string, unknown>): { archived?: true } {
+  return raw.archived === true || raw.archived === "true" || raw.archived === 1
+    ? { archived: true }
+    : {};
 }

@@ -11,6 +11,7 @@ import {
   isThreadRouteSnapshotAuthoritative,
   resolveActiveThreadRouteRef,
   resolveThreadRouteRenderState,
+  validateThreadRouteSearch,
   resolveThreadRouteTarget,
 } from "./threadRoutes";
 
@@ -181,6 +182,37 @@ describe("threadRoutes", () => {
       ).toBe("missing");
     },
   );
+
+  it("opens an archived thread when the route asks for it, but never a deleted one", () => {
+    const projection = makeThreadProjectionFixture();
+    const removedAt = DateTime.makeUnsafe("2026-01-02T00:00:00Z");
+    const route = {
+      bootstrapComplete: isThreadRouteSnapshotAuthoritative("live"),
+      serverThreadExists: false,
+      serverThreadDeleted: false,
+      draftThreadExists: false,
+      allowArchived: true,
+    };
+    const detail = (thread: Partial<typeof projection.thread>) => ({
+      ...EMPTY_ENVIRONMENT_THREAD_STATE,
+      status: "live" as const,
+      data: Option.some({ ...projection, thread: { ...projection.thread, ...thread } }),
+    });
+    expect(
+      resolveThreadRouteRenderState({
+        ...route,
+        unlistedThreadDetail: detail({ archivedAt: removedAt }),
+      }),
+    ).toBe("ready");
+    expect(
+      resolveThreadRouteRenderState({
+        ...route,
+        unlistedThreadDetail: detail({ archivedAt: removedAt, deletedAt: removedAt }),
+      }),
+    ).toBe("missing");
+    expect(validateThreadRouteSearch({ archived: true })).toEqual({ archived: true });
+    expect(validateThreadRouteSearch({ archived: "yes" })).toEqual({});
+  });
 
   it("waits for the live shell before redirecting a deleted thread", () => {
     expect(

@@ -15,6 +15,7 @@ import {
 import { usePullRequestDraftThread } from "./chat/usePullRequestDraftThread";
 import { useComposerSelection } from "./chat/useComposerSelection";
 import { useProjectCloneBanner } from "./chat/useProjectCloneBanner";
+import { useArchivedThreadBanner } from "./chat/useArchivedThreadBanner";
 import { useAttachmentPreviewHandoff } from "./chat/useAttachmentPreviewHandoff";
 import {
   applyOptimisticUserMessagesAction,
@@ -1103,6 +1104,10 @@ export default function ChatView(props: ChatViewProps) {
   const activeProjectScripts = activeProject ? resolveProjectScripts(settings, activeProject) : [];
   const { projectCloneBannerItem, projectCloneSendBlockReason } =
     useProjectCloneBanner(activeProjectRef);
+  const archivedThreadBannerItem = useArchivedThreadBanner(
+    isServerThread ? routeThreadRef : null,
+    serverThread?.archivedAt != null,
+  );
   const activeProjectDefaultModelSelection =
     !isServerThread && draftFallback
       ? draftFallback.selection
@@ -2601,7 +2606,10 @@ export default function ChatView(props: ChatViewProps) {
         : [];
     const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];
     const usageLimitsItems = usageLimitsBanner === null ? [] : [usageLimitsBanner];
-    const projectCloneItems = projectCloneBannerItem === null ? [] : [projectCloneBannerItem];
+    const projectCloneItems = [
+      ...(archivedThreadBannerItem === null ? [] : [archivedThreadBannerItem]),
+      ...(projectCloneBannerItem === null ? [] : [projectCloneBannerItem]),
+    ];
     if (!localCheckoutBranchMismatch || !showBranchMismatchBanner || !activeBranchMismatchKey) {
       return [
         ...feedbackBannerItems,

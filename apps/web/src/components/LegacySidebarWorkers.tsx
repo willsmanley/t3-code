@@ -375,10 +375,9 @@ function SidebarWorkerRow(props: {
       search: { environmentId, taskId: task.id },
     });
   };
-  // A worker's runs land in its thread, so that is where its history lives. Without an open
-  // thread, the worker's own settings are the useful place to go.
+  // A worker's runs land in its thread, so that is where its history lives, archived or not.
   const open = () => {
-    if (task.threadId === null || threadArchived) {
+    if (task.threadId === null) {
       openSettings();
       return;
     }
@@ -386,6 +385,7 @@ function SidebarWorkerRow(props: {
     void navigate({
       to: "/$environmentId/$threadId",
       params: buildThreadRouteParams(scopeThreadRef(environmentId, task.threadId)),
+      search: threadArchived ? { archived: true } : {},
     });
   };
   const handleContextMenu = async (event: React.MouseEvent) => {

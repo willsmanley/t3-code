@@ -3,7 +3,7 @@ import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { parseThreadKey, threadKey } from "@t3tools/client-runtime/state/entities";
 import { visibilityParentKey } from "@t3tools/client-runtime/state/threads";
 import * as Option from "effect/Option";
-import { Navigate, useNavigate } from "@tanstack/react-router";
+import { Navigate, useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import ChatView from "./ChatView";
@@ -39,6 +39,8 @@ export function ThreadRouteView({
   background?: boolean;
 }) {
   const navigate = useNavigate();
+  const routeSearch = useSearch({ strict: false });
+  const allowArchived = target.kind === "server" && routeSearch.archived === true;
   const draftId = target.kind === "draft" ? target.draftId : null;
   const draftSession = useComposerDraftStore((store) =>
     draftId === null ? null : store.getDraftSession(draftId),
@@ -116,6 +118,7 @@ export function ThreadRouteView({
     serverThreadDeleted: serverThreadShell?.deletedAt != null,
     unlistedThreadDetail,
     draftThreadExists: draftThread !== null,
+    allowArchived,
   });
   const environmentHasAnyThreads = environmentThreadRefs.length > 0 || environmentHasDraftThreads;
 
