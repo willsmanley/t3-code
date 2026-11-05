@@ -24,6 +24,14 @@ Measurements in the hotspot table are from fork main `ea7c8bf901` and upstream `
   `effect/crypto/SecureRandom`, and fork tests provide `NodeCrypto.layer` next to
   `NodeServices.layer`. A `catchTags` handler for an error that can no longer happen left
   `undefined` in a layer's requirements and broke every CLI test's typecheck far from the cause.
+- **Upstream's error and typecheck rules.** Upstream `298cb24140` made errors `Schema.TaggedError`
+  and turned on the Effect rules `extendsNativeError`, `instanceOfSchema`, `globalDateInEffect` and
+  `effectFnOpportunity` as errors. Fork errors are `Schema.TaggedError` built with an object
+  (`new VoiceTranscriptionError({ code, message })`, `new ServerDictationRejected({ reason, message })`)
+  and checked with `Schema.is(X)`, not `instanceof`. Inside Effect code read time through `Clock`,
+  and in `it.effect` tests move time with `TestClock.adjust`. Since `95e53a54db` each package
+  typechecks with `effect-tsgo tsrs --noEmit` (fork packages too, such as `provider-prime`); run
+  `vp run -r typecheck`, because `check:changed` stops reporting at the first failing package.
 - **The lockfile.** A merged `pnpm-lock.yaml` with no text conflict can still disagree with itself
   (`ERR_PNPM_INCONSISTENT_PATCH_HASH` from `pnpm install --frozen-lockfile`). Take upstream's
   lockfile and run `pnpm install`, as the runbook says for a conflicted one.

@@ -104,10 +104,10 @@ async function readServerElevenLabsApiKey(
     reached = true;
   }
   if (!reached) {
-    throw new VoiceTranscriptionError(
-      "unavailable",
-      "Could not get the ElevenLabs key from the server.",
-    );
+    throw new VoiceTranscriptionError({
+      code: "unavailable",
+      message: "Could not get the ElevenLabs key from the server.",
+    });
   }
   return null;
 }

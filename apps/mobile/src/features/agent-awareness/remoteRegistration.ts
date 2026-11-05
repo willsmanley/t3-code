@@ -509,7 +509,7 @@ const registerDeviceWithDirectPush = Effect.fn("remoteRegistration.registerDevic
           }
         : null;
     const signature = registration ? registrationSignature(body) : "unregistered";
-    const now = Date.now();
+    const now = yield* Clock.currentTimeMillis;
     const due = environmentIds.filter((environmentId) => {
       const previous = directPushRegistrations.get(environmentId);
       return (

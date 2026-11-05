@@ -4,6 +4,7 @@ import { DIRECT_PUSH_NOTIFICATION_USER_ID, type EnvironmentId } from "@t3tools/c
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import type * as Exit from "effect/Exit";
+import * as TestClock from "effect/testing/TestClock";
 import * as Notifications from "expo-notifications";
 
 import { configureAndroidAgentNotifications } from "./androidNotifications";
@@ -186,7 +187,6 @@ describe("direct push registration", () => {
 
   it.effect("repeats an unchanged registration on foreground only after a minute", () =>
     Effect.gen(function* () {
-      using now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
       const { target, send } = makeTarget();
       setAgentAwarenessDirectPushTarget(target);
       yield* runQueuedRegistrations();
@@ -195,7 +195,7 @@ describe("direct push registration", () => {
       yield* runQueuedRegistrations();
       expect(send).toHaveBeenCalledTimes(1);
 
-      now.mockReturnValue(1_061_000);
+      yield* TestClock.adjust("61 seconds");
       foreground();
       yield* runQueuedRegistrations();
       expect(send).toHaveBeenCalledTimes(2);

@@ -231,8 +231,9 @@ export const make = Effect.fn("MobileStorage.make")(function* () {
       "",
     ),
     loadDirectPushPendingUnregisters,
-    saveDirectPushPendingUnregisters: (pending) =>
-      writeJson(DIRECT_PUSH_PENDING_UNREGISTERS_KEY, pending),
+    saveDirectPushPendingUnregisters: Effect.fn("MobileStorage.saveDirectPushPendingUnregisters")(
+      (pending) => writeJson(DIRECT_PUSH_PENDING_UNREGISTERS_KEY, pending),
+    ),
     loadRecentThreadShortcuts,
     saveRecentThreadShortcuts: Effect.fn("MobileStorage.saveRecentThreadShortcuts")((threads) =>
       writeJson(RECENT_THREAD_SHORTCUTS_KEY, { threads }),

@@ -1,4 +1,6 @@
 // @effect-diagnostics globalTimers:off globalDate:off - Upload pacing runs in client transcription, outside an Effect runtime.
+import * as Schema from "effect/Schema";
+
 import type { ElevenLabsRecordings } from "./elevenLabs.ts";
 import { saveTranscript } from "./savedRecordings.ts";
 import {
@@ -45,20 +47,17 @@ export type ServerDictationTransport = {
   }) => Promise<ServerDictationTranscribeResult>;
 };
 
-export class ServerDictationRejected extends Error {
-  readonly reason: string;
+export class ServerDictationRejected extends Schema.TaggedError<ServerDictationRejected>()(
+  "ServerDictationRejected",
+  { reason: Schema.String, message: Schema.String },
+) {}
 
-  constructor(reason: string, message: string) {
-    super(message);
-    this.name = "ServerDictationRejected";
-    this.reason = reason;
-  }
-}
-
-export class ServerDictationUnsupported extends Error {
-  constructor() {
-    super("This server cannot transcribe voice input.");
-    this.name = "ServerDictationUnsupported";
+export class ServerDictationUnsupported extends Schema.TaggedError<ServerDictationUnsupported>()(
+  "ServerDictationUnsupported",
+  {},
+) {
+  override get message(): string {
+    return "This server cannot transcribe voice input.";
   }
 }
 
@@ -97,7 +96,12 @@ function waitFor(milliseconds: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const onAbort = () => {
       clearTimeout(timer);
-      reject(new VoiceTranscriptionError("cancelled", "Voice transcription was cancelled."));
+      reject(
+        new VoiceTranscriptionError({
+          code: "cancelled",
+          message: "Voice transcription was cancelled.",
+        }),
+      );
     };
     const timer = setTimeout(() => {
       signal.removeEventListener("abort", onAbort);
@@ -114,12 +118,19 @@ function dictationIdFor(recordings: ElevenLabsRecordings, uri: string): string {
     .slice(0, 128);
 }
 
-class ServerDictationUnreachable extends Error {
-  constructor() {
-    super("Could not reach the server.");
-    this.name = "ServerDictationUnreachable";
+class ServerDictationUnreachable extends Schema.TaggedError<ServerDictationUnreachable>()(
+  "ServerDictationUnreachable",
+  {},
+) {
+  override get message(): string {
+    return "Could not reach the server.";
   }
 }
+
+const isVoiceTranscriptionError = Schema.is(VoiceTranscriptionError);
+const isServerDictationRejected = Schema.is(ServerDictationRejected);
+const isServerDictationUnsupported = Schema.is(ServerDictationUnsupported);
+const isServerDictationUnreachable = Schema.is(ServerDictationUnreachable);
 
 class ServerDictationUpload {
   private uri: string | null = null;
@@ -188,9 +199,9 @@ class ServerDictationUpload {
         if (incompleteRounds <= 3) continue;
       } catch (error) {
         if (
-          error instanceof VoiceTranscriptionError ||
-          error instanceof ServerDictationRejected ||
-          error instanceof ServerDictationUnsupported
+          isVoiceTranscriptionError(error) ||
+          isServerDictationRejected(error) ||
+          isServerDictationUnsupported(error)
         ) {
           throw error;
         }
@@ -259,17 +270,17 @@ export function createServerDictationTranscriber(options: {
 }): VoiceTranscriber {
   const { transport, recordings, fallback } = options;
   const transcribeWithFallback = async (uri: string, signal: AbortSignal, cause: Error) => {
-    const serverFailure = new VoiceTranscriptionError(
-      "transcription-failed",
-      `${cause.message} ${recordings.failureHint}`,
-    );
+    const serverFailure = new VoiceTranscriptionError({
+      code: "transcription-failed",
+      message: `${cause.message} ${recordings.failureHint}`,
+    });
     if (!fallback) throw serverFailure;
     let prepared;
     try {
       prepared = await fallback.prepare({ signal });
     } catch (error) {
       // No way around the server (say, no key on this device): its failure is the one to show.
-      if (error instanceof VoiceTranscriptionError && error.code === "unavailable") {
+      if (isVoiceTranscriptionError(error) && error.code === "unavailable") {
         throw serverFailure;
       }
       throw error;
@@ -282,7 +293,10 @@ export function createServerDictationTranscriber(options: {
       throwIfVoiceTranscriptionAborted(signal);
       if (!transport) {
         if (!fallback) {
-          throw new VoiceTranscriptionError("unavailable", recordings.missingKeyMessage);
+          throw new VoiceTranscriptionError({
+            code: "unavailable",
+            message: recordings.missingKeyMessage,
+          });
         }
         return fallback.prepare({ signal });
       }
@@ -298,17 +312,17 @@ export function createServerDictationTranscriber(options: {
             if (transcript.length > 0) await saveTranscript(recordings.storage, uri, transcript);
             return transcript;
           } catch (error) {
-            if (error instanceof VoiceTranscriptionError) throw error;
+            if (isVoiceTranscriptionError(error)) throw error;
             const fallsBack =
-              error instanceof ServerDictationUnsupported ||
-              error instanceof ServerDictationUnreachable ||
-              (error instanceof ServerDictationRejected &&
+              isServerDictationUnsupported(error) ||
+              isServerDictationUnreachable(error) ||
+              (isServerDictationRejected(error) &&
                 (error.reason === "missing-key" || error.reason === "unreachable"));
             if (fallsBack) return transcribeWithFallback(uri, transcribeSignal, error);
-            throw new VoiceTranscriptionError(
-              "transcription-failed",
-              `${error instanceof Error ? error.message : "Could not transcribe this recording."} ${recordings.failureHint}`,
-            );
+            throw new VoiceTranscriptionError({
+              code: "transcription-failed",
+              message: `${error instanceof Error ? error.message : "Could not transcribe this recording."} ${recordings.failureHint}`,
+            });
           } finally {
             if (activeUpload === upload) activeUpload = null;
           }

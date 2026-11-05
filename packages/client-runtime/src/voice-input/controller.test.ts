@@ -327,10 +327,10 @@ describe("VoiceInputController", () => {
       getTranscriber: () => ({
         prepare: async () =>
           preparedTranscription(async () => {
-            throw new VoiceTranscriptionError(
-              "transcription-failed",
-              "Could not reach the service. The recording is saved.",
-            );
+            throw new VoiceTranscriptionError({
+              code: "transcription-failed",
+              message: "Could not reach the service. The recording is saved.",
+            });
           }),
       }),
     });

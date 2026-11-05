@@ -110,7 +110,10 @@ describe("createServerDictationTranscriber", () => {
       {
         append: async ({ data }) => ({ receivedBytes: atob(data).length }),
         transcribe: async () => {
-          throw new ServerDictationRejected("out-of-credits", "ElevenLabs is out of credits.");
+          throw new ServerDictationRejected({
+            reason: "out-of-credits",
+            message: "ElevenLabs is out of credits.",
+          });
         },
       },
       fallback,

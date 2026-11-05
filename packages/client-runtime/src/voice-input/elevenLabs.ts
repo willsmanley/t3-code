@@ -35,10 +35,10 @@ async function transcribeWithElevenLabs(options: {
   const { upload, signal, wait = waitFor } = options;
   const delays = options.retryDelaysMs ?? RETRY_DELAYS_MS;
   const fail = (message: string) =>
-    new VoiceTranscriptionError(
-      "transcription-failed",
-      options.failureHint ? `${message} ${options.failureHint}` : message,
-    );
+    new VoiceTranscriptionError({
+      code: "transcription-failed",
+      message: options.failureHint ? `${message} ${options.failureHint}` : message,
+    });
   for (let attempt = 0; ; attempt += 1) {
     throwIfVoiceTranscriptionAborted(signal);
     let response: ElevenLabsUploadResponse | null = null;
@@ -156,7 +156,12 @@ async function requireApiKey(
 ): Promise<string> {
   const apiKey = await recordings.readApiKey();
   if (signal) throwIfVoiceTranscriptionAborted(signal);
-  if (!apiKey) throw new VoiceTranscriptionError("unavailable", recordings.missingKeyMessage);
+  if (!apiKey) {
+    throw new VoiceTranscriptionError({
+      code: "unavailable",
+      message: recordings.missingKeyMessage,
+    });
+  }
   return apiKey;
 }
 
@@ -185,7 +190,12 @@ function waitFor(milliseconds: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const onAbort = () => {
       clearTimeout(timer);
-      reject(new VoiceTranscriptionError("cancelled", "Voice transcription was cancelled."));
+      reject(
+        new VoiceTranscriptionError({
+          code: "cancelled",
+          message: "Voice transcription was cancelled.",
+        }),
+      );
     };
     const timer = setTimeout(() => {
       signal.removeEventListener("abort", onAbort);

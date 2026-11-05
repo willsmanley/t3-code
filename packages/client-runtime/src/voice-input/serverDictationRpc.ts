@@ -42,7 +42,7 @@ function classifyFailure(error: unknown): Error {
     const reason =
       typeof error === "object" && error !== null && "reason" in error ? String(error.reason) : "";
     const message = error instanceof Error ? error.message : "The server could not transcribe.";
-    return new ServerDictationRejected(reason, message);
+    return new ServerDictationRejected({ reason, message });
   }
   if (tag === "EnvironmentRpcUnavailableError") return new Error("The server is not connected.");
   if (
