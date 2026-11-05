@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import type { ScheduledTask } from "@t3tools/contracts";
+
 import type { ThreadStatusPill } from "./Sidebar.logic";
 import { groupWorkersByProject, resolveWorkerState } from "./legacySidebarWorkers.logic";
 
@@ -13,17 +15,24 @@ const pill = (label: ThreadStatusPill["label"]): ThreadStatusPill => ({
 const task = (
   lastRunStatus: "never" | "running" | "succeeded" | "failed",
   lastRunAt: string | null = "2026-10-24T15:00:00.000Z",
-) => ({ enabled: true, lastRunStatus, lastRunAt });
+) => ({
+  enabled: true,
+  lastRunStatus,
+  lastRunAt,
+  schedule: { type: "interval", everyMs: 3_600_000 } as ScheduledTask["schedule"],
+  nextRunAt: "2026-10-24T16:00:00.000Z" as string | null,
+});
 
 describe("resolveWorkerState", () => {
   it("keeps a worker quiet when its run completed, even unseen", () => {
     expect(
       resolveWorkerState({
         task: task("succeeded"),
+        threadClosed: false,
         threadPill: pill("Completed"),
         dismissedRunAt: null,
       }),
-    ).toEqual({ pill: null, needsYou: false });
+    ).toEqual({ pill: null, needsYou: false, archived: false });
   });
 
   it("brings questions, approvals and failures to the user", () => {
@@ -31,6 +40,7 @@ describe("resolveWorkerState", () => {
       expect(
         resolveWorkerState({
           task: task("succeeded"),
+          threadClosed: false,
           threadPill: pill(label),
           dismissedRunAt: null,
         }).needsYou,
@@ -41,24 +51,73 @@ describe("resolveWorkerState", () => {
   it("brings a failed scheduled run to the user until it is marked done", () => {
     const failed = task("failed");
     expect(
-      resolveWorkerState({ task: failed, threadPill: null, dismissedRunAt: null }).needsYou,
+      resolveWorkerState({
+        task: failed,
+        threadClosed: false,
+        threadPill: null,
+        dismissedRunAt: null,
+      }).needsYou,
     ).toBe(true);
     expect(
-      resolveWorkerState({ task: failed, threadPill: null, dismissedRunAt: failed.lastRunAt })
-        .needsYou,
+      resolveWorkerState({
+        task: failed,
+        threadClosed: false,
+        threadPill: null,
+        dismissedRunAt: failed.lastRunAt,
+      }).needsYou,
     ).toBe(false);
     expect(
       resolveWorkerState({
         task: task("failed", "2026-10-25T15:00:00.000Z"),
+        threadClosed: false,
         threadPill: null,
         dismissedRunAt: failed.lastRunAt,
       }).needsYou,
     ).toBe(true);
   });
 
+  it("hides a finished worker whose thread is archived, but flags one that would still run", () => {
+    const finished = { ...task("failed"), nextRunAt: null };
+    expect(
+      resolveWorkerState({
+        task: finished,
+        threadClosed: true,
+        threadPill: null,
+        dismissedRunAt: null,
+      }),
+    ).toEqual({ pill: null, needsYou: false, archived: true });
+    expect(
+      resolveWorkerState({
+        task: { ...task("succeeded"), enabled: false },
+        threadClosed: true,
+        threadPill: null,
+        dismissedRunAt: null,
+      }).archived,
+    ).toBe(true);
+    for (const live of [
+      task("succeeded"),
+      {
+        ...task("never"),
+        schedule: { type: "webhook" } as ScheduledTask["schedule"],
+        nextRunAt: null,
+      },
+    ]) {
+      const state = resolveWorkerState({
+        task: live,
+        threadClosed: true,
+        threadPill: null,
+        dismissedRunAt: live.lastRunAt,
+      });
+      expect(state.needsYou).toBe(true);
+      expect(state.archived).toBe(false);
+      expect(state.pill?.label).toBe("Failed");
+    }
+  });
+
   it("shows a running worker without asking for attention", () => {
     const state = resolveWorkerState({
       task: task("running"),
+      threadClosed: false,
       threadPill: null,
       dismissedRunAt: null,
     });

@@ -23,7 +23,7 @@ import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { readLocalApi } from "../localApi";
 import { cn } from "../lib/utils";
-import { useThreadShells } from "../state/entities";
+import { useAllEnvironmentShellsBootstrapped, useThreadShells } from "../state/entities";
 import { useEnvironments } from "../state/environments";
 import { useEnvironmentQuery } from "../state/query";
 import { serverEnvironment } from "../state/server";
@@ -65,6 +65,9 @@ export const LegacySidebarTabSchema = Schema.Literals(["projects", "workers"]);
 const DISMISSED_WORKER_RUNS_KEY = "t3code:worker-dismissed-runs:v1";
 const DismissedWorkerRunsSchema = Schema.Record(Schema.String, Schema.String);
 const NO_DISMISSED_RUNS: Record<string, string> = {};
+
+// Workers whose threads are archived and that won't run again stay out of the list unless shown.
+const SHOW_ARCHIVED_WORKERS_KEY = "t3code:workers-show-archived:v1";
 
 const NEEDS_YOU_GROUP_KEY = "needs-you";
 
@@ -145,6 +148,12 @@ interface LegacySidebarWorkersProps {
   readonly routeThreadKey: string | null;
 }
 
+interface EnvironmentWorkersProps extends LegacySidebarWorkersProps {
+  readonly environmentId: EnvironmentId;
+  readonly mode: "needs-you" | "all";
+  readonly showArchived: boolean;
+}
+
 /** Projects tab: the workers whose latest run needs the user. */
 export function LegacySidebarNeedsYou(props: LegacySidebarWorkersProps) {
   const environmentIds = useConnectedEnvironmentIds();
@@ -153,6 +162,7 @@ export function LegacySidebarNeedsYou(props: LegacySidebarWorkersProps) {
       key={environmentId}
       environmentId={environmentId}
       mode="needs-you"
+      showArchived={false}
       {...props}
     />
   ));
@@ -161,12 +171,36 @@ export function LegacySidebarNeedsYou(props: LegacySidebarWorkersProps) {
 /** Workers tab: every scheduled task, grouped by project. */
 export function LegacySidebarWorkersList(props: LegacySidebarWorkersProps) {
   const environmentIds = useConnectedEnvironmentIds();
+  const [showArchived, setShowArchived] = useLocalStorage(
+    SHOW_ARCHIVED_WORKERS_KEY,
+    false,
+    Schema.Boolean,
+  );
   if (environmentIds.length === 0) {
     return <div className="px-2 pt-4 text-center text-secondary-label text-xs">No workers yet</div>;
   }
-  return environmentIds.map((environmentId) => (
-    <EnvironmentWorkers key={environmentId} environmentId={environmentId} mode="all" {...props} />
-  ));
+  return (
+    <>
+      {environmentIds.map((environmentId) => (
+        <EnvironmentWorkers
+          key={environmentId}
+          environmentId={environmentId}
+          mode="all"
+          showArchived={showArchived}
+          {...props}
+        />
+      ))}
+      <button
+        type="button"
+        data-testid="workers-show-archived"
+        aria-pressed={showArchived}
+        className="mt-1 cursor-pointer px-2 py-1 text-left text-xs text-sidebar-muted-foreground/60 outline-hidden transition-colors hover:text-sidebar-foreground focus-visible:text-sidebar-foreground"
+        onClick={() => setShowArchived(!showArchived)}
+      >
+        {showArchived ? "Hide archived" : "Show archived"}
+      </button>
+    </>
+  );
 }
 
 function useConnectedEnvironmentIds(): EnvironmentId[] {
@@ -179,13 +213,10 @@ function useConnectedEnvironmentIds(): EnvironmentId[] {
     .map((environment) => environment.environmentId);
 }
 
-function EnvironmentWorkers(
-  props: LegacySidebarWorkersProps & {
-    environmentId: EnvironmentId;
-    mode: "needs-you" | "all";
-  },
-) {
-  const { environmentId, mode, projects, routeThreadKey } = props;
+function EnvironmentWorkers(props: EnvironmentWorkersProps) {
+  const { environmentId, mode, projects, routeThreadKey, showArchived } = props;
+  // Until the thread list loads, every worker would look like its thread was archived.
+  const shellsReady = useAllEnvironmentShellsBootstrapped();
   const tasksQuery = useEnvironmentQuery(
     serverEnvironment.scheduledTasksLive({ environmentId, input: {} }),
   );
@@ -198,7 +229,7 @@ function EnvironmentWorkers(
   );
   const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(() => new Set());
   const tasks = tasksQuery.data?.tasks;
-  if (!tasks) return null;
+  if (!tasks || !shellsReady) return null;
 
   const shellByKey = new Map(
     threadShells.map((shell) => [
@@ -229,6 +260,8 @@ function EnvironmentWorkers(
       thread,
       state: resolveWorkerState({
         task,
+        // Thread lists leave archived threads out, so a worker's missing thread is archived or gone.
+        threadClosed: task.threadId !== null && thread === null,
         threadPill,
         dismissedRunAt: dismissedRuns[task.id] ?? null,
       }),
@@ -278,15 +311,20 @@ function EnvironmentWorkers(
     );
   }
 
-  if (workers.length === 0) {
-    return <div className="px-2 pt-4 text-center text-secondary-label text-xs">No workers yet</div>;
+  const listed = showArchived ? workers : workers.filter((worker) => !worker.state.archived);
+  if (listed.length === 0) {
+    return (
+      <div className="px-2 pt-4 text-center text-secondary-label text-xs">
+        {workers.length === 0 ? "No workers yet" : "No active workers"}
+      </div>
+    );
   }
   const projectOf = (worker: WorkerEntry) =>
     projects.byScopedKey.get(
       scopedProjectKey(scopeProjectRef(worker.environmentId, worker.task.projectId)),
     );
   const groups = groupWorkersByProject(
-    workers,
+    listed,
     (worker) => projectOf(worker)?.projectKey ?? `unknown:${worker.task.projectId}`,
     projects.order,
   );
@@ -357,6 +395,7 @@ function SidebarWorkerRow(props: {
   const { unarchiveThread } = useThreadActions();
   // Archived threads can't be opened, and the scheduler can't post into them either.
   const threadArchived = task.threadId !== null && (thread === null || thread.archivedAt !== null);
+  const brokenByArchive = threadArchived && state.needsYou;
 
   const reportFailure = <A, E>(result: AtomCommandResult<A, E>) => {
     if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
@@ -393,7 +432,7 @@ function SidebarWorkerRow(props: {
     const api = readLocalApi();
     if (!api) return;
     const canOperate = readEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
-    const canDismiss = state.needsYou && task.lastRunStatus === "failed";
+    const canDismiss = state.needsYou && task.lastRunStatus === "failed" && !threadArchived;
     const clicked = await api.contextMenu.show(
       [
         { id: "run-now", label: "Run now", disabled: !canOperate },
@@ -495,7 +534,11 @@ function SidebarWorkerRow(props: {
             />
             <TooltipPopup side="top">
               {scheduleLabel(task.schedule)}
-              {threadArchived ? " · Thread archived" : ""}
+              {brokenByArchive
+                ? " · Can't run: its thread is archived"
+                : threadArchived
+                  ? " · Thread archived"
+                  : ""}
               {task.lastRunError ? ` · ${task.lastRunError}` : ""}
             </TooltipPopup>
           </Tooltip>

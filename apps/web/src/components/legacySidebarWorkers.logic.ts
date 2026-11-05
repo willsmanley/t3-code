@@ -23,35 +23,52 @@ export interface WorkerState {
   readonly pill: ThreadStatusPill | null;
   /** Whether the worker belongs in Projects' "Needs you" group. */
   readonly needsYou: boolean;
+  /** Its thread is archived and it won't run again, so the Workers tab hides it by default. */
+  readonly archived: boolean;
 }
 
+/** Whether a worker will still run: on, and either scheduled ahead or waiting for a webhook. */
+function isWorkerLive(task: Pick<ScheduledTask, "enabled" | "schedule" | "nextRunAt">) {
+  return task.enabled && (task.schedule.type === "webhook" || task.nextRunAt !== null);
+}
+
+const QUIET: WorkerState = { pill: null, needsYou: false, archived: false };
+
 /**
- * A worker stays quiet unless a run needs the user. Approvals, questions and
- * failures always do; a run that merely completed does not, so a scheduled
- * check that found nothing never lights up the sidebar.
+ * Quiet unless a run needs the user: approvals, questions and failures do, a completed run doesn't.
+ * A worker whose thread is archived can't post anywhere: broken if it would still run, else archived.
  */
 export function resolveWorkerState(input: {
-  readonly task: Pick<ScheduledTask, "enabled" | "lastRunStatus" | "lastRunAt">;
+  readonly task: Pick<
+    ScheduledTask,
+    "enabled" | "lastRunStatus" | "lastRunAt" | "schedule" | "nextRunAt"
+  >;
+  readonly threadClosed: boolean;
   readonly threadPill: ThreadStatusPill | null;
   readonly dismissedRunAt: string | null;
 }): WorkerState {
-  const { task, threadPill, dismissedRunAt } = input;
+  const { task, threadClosed, threadPill, dismissedRunAt } = input;
+  if (threadClosed) {
+    return isWorkerLive(task)
+      ? { pill: FAILED_WORKER_PILL, needsYou: true, archived: false }
+      : { ...QUIET, archived: true };
+  }
   if (threadPill?.label === "Pending Approval" || threadPill?.label === "Awaiting Input") {
-    return { pill: threadPill, needsYou: true };
+    return { ...QUIET, pill: threadPill, needsYou: true };
   }
   if (threadPill?.label === "Failed") {
-    return { pill: threadPill, needsYou: true };
+    return { ...QUIET, pill: threadPill, needsYou: true };
   }
   if (threadPill?.label === "Working" || threadPill?.label === "Connecting") {
-    return { pill: threadPill, needsYou: false };
+    return { ...QUIET, pill: threadPill };
   }
   if (task.lastRunStatus === "running") {
-    return { pill: RUNNING_WORKER_PILL, needsYou: false };
+    return { ...QUIET, pill: RUNNING_WORKER_PILL };
   }
   if (task.lastRunStatus === "failed" && task.lastRunAt !== dismissedRunAt) {
-    return { pill: FAILED_WORKER_PILL, needsYou: true };
+    return { ...QUIET, pill: FAILED_WORKER_PILL, needsYou: true };
   }
-  return { pill: null, needsYou: false };
+  return QUIET;
 }
 
 export interface WorkerProjectGroup<T> {
