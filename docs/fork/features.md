@@ -971,6 +971,15 @@ Verify:
 - Guess at the exact command:
   `APP_VARIANT=preview T3CODE_ANDROID_PACKAGE=com.example.check pnpm --dir apps/mobile exec expo config --type public | grep com.example.check`.
 
+### C5. Mac desktop app built on the Mac (desktop build)
+
+Added November 6, 2026.
+
+The nightly release has no macOS build. `scripts/fork/mac-desktop-build.sh <version>` builds an
+unsigned Apple Silicon app on the Mac from the release's commit at the release's version, so it
+matches the Hostkey server. The script's header covers getting the source onto the Mac and
+installing the app. Fork-owned file: `scripts/fork/mac-desktop-build.sh`.
+
 ### Already upstream or lost (no fork diff left)
 
 - Follow-ups steer the running turn by default (`c2d2a543ff`): upstream did the same in #24718. Drop it.
