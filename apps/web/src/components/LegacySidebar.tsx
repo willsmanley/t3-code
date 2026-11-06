@@ -768,14 +768,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   </span>
                 }
               />
-              <TooltipPopup side="top">{thread.title}</TooltipPopup>
+              <TooltipPopup side="top">
+                {thread.title}
+                {/* The project shows on hover only, so titles keep the row's width. */}
+                {projectName ? (
+                  <span className="text-secondary-label"> · {projectName}</span>
+                ) : null}
+              </TooltipPopup>
             </Tooltip>
           )}
-          {projectName && renamingThreadKey !== threadKey ? (
-            <span className="max-w-[40%] shrink truncate text-3xs text-secondary-label">
-              {projectName}
-            </span>
-          ) : null}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
           {canOperatePreview && discoveredPorts.length > 0 && (

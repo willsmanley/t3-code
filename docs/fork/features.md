@@ -888,8 +888,8 @@ device's) list after them by name. Folder names are trimmed, one line, at most 5
 - Command palette: "Move to folder…" for the open thread (pick a folder, or type a new name) and
   "New folder".
 - Workers tab: worker threads are grouped by the same folders, with the same menu.
-- Thread traversal and the Cmd+1–9 jump hints follow the folders as shown. Rows in a folder that
-  mixes projects show the project name in muted text.
+- Thread traversal and the Cmd+1–9 jump hints follow the folders as shown. In a folder that mixes
+  projects, a row's title tooltip adds the project name (the row itself shows only the title).
 
 Limits: rename and delete retag only loaded threads, so an archived thread keeps its old folder
 tag and brings that folder back when unarchived. The sidebar's project sort setting no longer
