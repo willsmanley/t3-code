@@ -9,20 +9,23 @@ import { uuidv4 } from "../../lib/uuid";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { environmentThreadShells, threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { waitForThreadShellReady } from "../threads/threadForkNavigation";
 import { FORK_CONVERSATION_FAILURE_TITLE, forkThreadFromLatestStable } from "./thread-fork";
 import { checkThreadOperationPermission } from "./useThreadListActions";
 
-// Matches web: a fork over a relay can take a few seconds to stream back.
+// Matches web: a fork over a relay can take a few seconds to stream back. Upstream's
+// waitForThreadShell gives up after two seconds, so this keeps its own poll.
 const FORKED_THREAD_SHELL_WAIT_MS = 5_000;
+const FORKED_THREAD_SHELL_POLL_MS = 40;
 
 async function waitForForkedThreadShell(environmentId: EnvironmentId, threadId: ThreadId) {
   const atom = environmentThreadShells.threadShellAtom(scopeThreadRef(environmentId, threadId));
-  const arrived = await waitForThreadShellReady({
-    read: () => appAtomRegistry.get(atom) !== null,
-    timeoutMs: FORKED_THREAD_SHELL_WAIT_MS,
-  });
-  return arrived ? appAtomRegistry.get(atom) : null;
+  const deadline = Date.now() + FORKED_THREAD_SHELL_WAIT_MS;
+  while (appAtomRegistry.get(atom) === null && Date.now() < deadline) {
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, Math.min(FORKED_THREAD_SHELL_POLL_MS, deadline - Date.now()));
+    });
+  }
+  return appAtomRegistry.get(atom);
 }
 
 export function useThreadForkAction(openThread: (thread: EnvironmentThreadShell) => void) {

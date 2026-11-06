@@ -6,7 +6,7 @@ import { useLinkTo, useNavigation } from "@react-navigation/native";
 import { uuidv4 } from "../../lib/uuid";
 import { useProjects } from "../../state/entities";
 import { useWorkspaceState } from "../../state/workspace";
-import { selectWorkspaceDetail } from "../workspace/workspace-detail-selection";
+import { selectWorkspaceDetail } from "../layout/workspace/workspace-detail-selection";
 import { requestAssistantDictation } from "./assistantDictation";
 import { assistantDraftParams, isAssistantLaunchUrl } from "./assistantLaunch";
 
