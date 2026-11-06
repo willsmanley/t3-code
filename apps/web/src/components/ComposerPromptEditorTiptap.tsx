@@ -177,6 +177,8 @@ export interface ComposerPromptEditorProps {
   ) => void;
   onVisibleSelectionChange?: () => void;
   onCommandKeyDown?: (key: string, event: KeyboardEvent, isTaskItem?: boolean) => boolean;
+  /** True when an app shortcut is bound to the key, so the editor leaves it to that shortcut. */
+  isAppShortcut?: (event: KeyboardEvent) => boolean;
   onPageScrollKeyDown?: (key: "PageUp" | "PageDown") => void;
   onPageScrollKeyUp?: (key: string) => void;
   onPageScrollRelease?: () => void;
@@ -879,6 +881,7 @@ function ComposerPromptEditorTiptapInner(
     onChange,
     onVisibleSelectionChange,
     onCommandKeyDown,
+    isAppShortcut,
     onPageScrollKeyDown,
     onPageScrollKeyUp,
     onPageScrollRelease,
@@ -905,6 +908,7 @@ function ComposerPromptEditorTiptapInner(
     onChange,
     onVisibleSelectionChange,
     onCommandKeyDown,
+    isAppShortcut,
     isPathQueryActive,
     importContextFragment,
   }));
@@ -1062,6 +1066,8 @@ function ComposerPromptEditorTiptapInner(
             !event.ctrlKey &&
             !event.isComposing
           ) {
+            // A rebound Cmd+arrow (such as thread switching) goes to the app, not the caret.
+            if (readCallbacks().isAppShortcut?.(event)) return false;
             const selection = window.getSelection();
             if (
               selection?.anchorNode &&

@@ -842,6 +842,28 @@ Verify:
 - `vp test run apps/mobile/src/features/threads/workerThreadGroup.test.ts`
 - In the legacy sidebar, "Move to Workers" moves a thread to the Workers tab and back.
 
+### F19. Rebound Cmd+arrow shortcuts work from the composer (web/desktop, Mac)
+
+Added November 6, 2026.
+
+What it does: on a Mac the composer takes Cmd+Up/Down (start or end of the message) and
+Cmd+Left/Right (start or end of the line) and stops the key there. When a keybinding is bound to
+one of those keys, such as `mod+arrowup` for `thread.previous`, the composer now leaves the key to
+the app, so the shortcut works while typing. Unbound, the keys move the caret as before.
+
+Touch points:
+
+- `apps/web/src/components/ComposerPromptEditorTiptap.tsx`: the `isAppShortcut` prop, in
+  `readCallbacks`, checked at the top of the Mac boundary branch in `handleKeyDown`.
+- `apps/web/src/components/chat/ChatComposer.tsx`: `isAppShortcutStable` (resolves the key with
+  `composerFocus`) passed to the editor.
+
+Verify:
+
+- `vp run --filter ./apps/web typecheck`
+- With `{ "key": "mod+arrowup", "command": "thread.previous" }` in `keybindings.json`, Cmd+Up in
+  the composer switches threads; with no such binding it moves the caret to the start.
+
 ### C1. Nightly build and release workflow (CI)
 
 Fork-owned: `.github/workflows/custom-nightly-linux.yml` (`5bffb2ec49` through `f9bc6b8b22`,

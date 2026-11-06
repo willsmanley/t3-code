@@ -146,7 +146,7 @@ import { useDictationSubmissionShortcut } from "../../speech/useDictationSubmiss
 import { useEnvironmentSpeechInput } from "../../speech/useEnvironmentSpeechInput";
 import { ComposerSpeechButton, ComposerSpeechRecordingPill } from "./ComposerSpeechButton";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
-import { shortcutLabelForCommand } from "../../keybindings";
+import { resolveShortcutCommand, shortcutLabelForCommand } from "../../keybindings";
 import {
   type TerminalContextDraft,
   type TerminalContextSelection,
@@ -2650,6 +2650,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     });
 
   const onComposerCommandKeyStable = useStableCallback(onComposerCommandKey);
+  const isAppShortcutStable = useStableCallback(
+    (event: KeyboardEvent) =>
+      resolveShortcutCommand(event, keybindings, { context: { composerFocus: true } }) !== null,
+  );
   const isPathQueryActiveStable = useStableCallback(
     () => resolveActiveComposerTrigger().trigger?.kind === "path",
   );
@@ -3556,6 +3560,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     className={cn(showMobilePendingAnswerActions && "max-sm:pb-12")}
                     onChange={onPromptChangeStable}
                     onCommandKeyDown={onComposerCommandKeyStable}
+                    isAppShortcut={isAppShortcutStable}
                     onPageScrollKeyDown={onPageScrollKeyDown}
                     onPageScrollKeyUp={onPageScrollKeyUp}
                     onPageScrollRelease={onPageScrollRelease}
