@@ -422,8 +422,14 @@ Touch points:
 - `apps/mobile/src/lib/audioSession.ts`: an `allowsBackgroundRecording` parameter.
 - `packages/client-runtime/src/voice-input/controller.ts`: a `recordingLimitSeconds` dependency;
   passes `VoiceTranscriptionError` messages through (+ `controller.test.ts`).
-- `apps/mobile/src/features/settings/SettingsMicrophoneRouteScreen.tsx`: renders
-  `<VoiceTranscriptionSettings>` on Android.
+- `apps/mobile/src/features/settings/SettingsVoiceRouteScreen.tsx` (upstream's Settings → Voice,
+  which replaced the Microphone page on November 6, 2026): renders `<VoiceTranscriptionSettings>`
+  on Android above upstream's "Transcribe on" picker, and on Android the "This device" choice says
+  audio goes to the thread's server or ElevenLabs.
+- `VoiceInputProvider.tsx` also builds the Android recorder with `new AudioModule.AudioRecorder`
+  (plain AAC) instead of upstream's `createVoiceRecorder`, whose live recorder writes raw PCM that
+  the ElevenLabs/server upload and kept recordings can't use. Upstream's "Transcribe on:
+  environment" choice still works on Android but rejects recordings over 5 minutes.
 - `apps/mobile/app.config.ts`: expo-audio `recordAudioAndroid: true` and
   `enableBackgroundRecording: true`. (Upstream now lists Settings → Microphone on Android and no
   longer turns off the image picker's microphone permission, so those fork edits are gone.)
@@ -455,8 +461,9 @@ Touch points:
 - `apps/mobile/src/features/threads/thread-list-v2-items.tsx`: `FORK_CONVERSATION_MENU_ACTION`,
   the handler line and the `onForkThread` prop.
 - `apps/mobile/src/features/home/useThreadListActions.ts`: exports `checkThreadOperationPermission`.
-- Depends on F3's `threadEnvironment.forkFromLatestStable` (client-runtime) and upstream's
-  `waitForThreadShellReady`.
+- Depends on F3's `threadEnvironment.forkFromLatestStable` (client-runtime).
+  `apps/mobile/src/features/home/useThreadForkAction.ts` waits up to 5 seconds for the new thread
+  itself, since upstream replaced `waitForThreadShellReady` with a 2-second `waitForThreadShell`.
 
 Verify:
 
@@ -473,11 +480,12 @@ thread right away, before the server answers.
 Touch points:
 
 - `overflowOnly` on `AppBarAction` is upstream's since November 3, 2026.
-- `apps/mobile/src/features/threads/ThreadHeader.tsx`: the `onArchiveThread` prop and action.
+- `apps/mobile/src/features/threads/ThreadHeader.tsx`: the `onArchiveThread` prop; the action is
+  pushed onto upstream's single AppBar `actions` list with `overflowOnly`, Android only.
 - `apps/mobile/src/features/threads/ThreadRouteScreen.tsx`: wires
   `useOpenThreadArchiveAction(useWorkspaceListNavigation("threads"))`, only when the thread can
   be changed, isn't being created and isn't archived.
-- `apps/mobile/src/features/workspace/useAndroidWorkspaceNavigation.ts`: exports
+- `apps/mobile/src/features/layout/workspace/useAndroidWorkspaceNavigation.ts`: exports
   `useWorkspaceListNavigation`, which upstream keeps private.
 - `apps/mobile/src/features/home/useThreadListActions.ts`: `useOpenThreadArchiveAction`
   (+ `useThreadListActions.test.ts`).
@@ -544,7 +552,8 @@ and opens the draft, `assistantDictation.ts`, which starts recording in that dra
 Touch points:
 
 - `apps/mobile/app.config.ts`: the plugin line and `extra.assistantProjectRoot`.
-- `apps/mobile/src/Stack.tsx`: `useAssistantLaunch()` next to `useAppShortcuts(props.state)`.
+- `apps/mobile/src/Stack.tsx`: `useAssistantLaunch()` in `RootStackLayout`.
+  `useAssistantLaunch.ts` imports from `features/layout/workspace/`.
 - `apps/mobile/src/lib/appLinking.ts`: `shouldHandleAppLink` ignores the assist link, so the
   router doesn't open NotFound for it.
 - `apps/mobile/src/features/threads/ThreadComposer.tsx`: `useAssistantDictation(...)` right after
@@ -567,6 +576,16 @@ Verify:
 ### F14. Voice input on web and desktop through ElevenLabs (web/desktop)
 
 Added October 30, 2026.
+
+Upstream added its own web and desktop voice input on November 6, 2026 (`b8dce83214`,
+`a9a1b8c4be`): a local speech model on a chosen environment, off until **Settings → Voice → Send
+microphone audio to** names one, with its own button (`ComposerSpeechButton`, `useEnvironmentSpeechInput`,
+**Composer: Dictation** `mod+shift+d`). The fork's ElevenLabs mic stays and both can show at once
+when a device opts in. ChatComposer combines them (`voiceInputBusy || speechInput.freezesEditor`,
+and the send-disabled reason). `apps/web/src/speech/useEnvironmentSpeechInput.ts` wraps
+`controller.stop()` so upstream's `stop` still resolves `void` (the fork's resolves whether the
+transcript landed, F16). `Space` in `EVENT_CODE_SHORTCUT_KEYS` now lives in
+`packages/shared/src/keybindingMatching.ts`.
 
 What it does: the composer gets a mic button beside send. It records with the browser's
 `MediaRecorder` and transcribes with the same ElevenLabs Scribe call as Android (F8), through
@@ -638,9 +657,9 @@ Added October 31, 2026.
 What it does: coming back to the app after a while shows the saved thread list and messages at
 once and catches up quietly.
 
-- After more than 10 seconds in the background, the old connection gets one second to answer
-  before it is replaced (upstream waits up to 3 seconds, or 2.5 seconds of silence on a remote
-  route such as T3 Connect). A phone's socket is usually dead by then.
+- The faster check of the old connection after a long time away is upstream's since November 6,
+  2026 (`LONG_RESUME_PROBE_TIMEOUT`, 1.5 seconds); the fork's 1-second version and its test were
+  dropped.
 - With saved threads on screen, "Syncing threads...", "Reconnecting to ..." and "Syncing
   messages..." wait 4 seconds before they show (upstream: 0.8 and 0.4 seconds). Offline, errors and
   an empty list still show at once.
@@ -649,9 +668,6 @@ Fork-owned files: `apps/mobile/src/features/home/workspace-connection-status-del
 
 Touch points:
 
-- `packages/client-runtime/src/connection/supervisor.ts`: `LONG_RESUME_PROBE_TIMEOUT` and its use
-  for `application-active-long` in `probeTimeoutFor` (+ two tests in `supervisor.test.ts`: one new,
-  one changed from 2999 to 999 ms). This affects iOS as well.
 - `apps/mobile/src/features/home/WorkspaceConnectionTitle.tsx`:
   `workspaceConnectionStatusShowDelayMs(state)` replaces `STATUS_SHOW_DELAY_MS`.
 - `apps/mobile/src/features/threads/ThreadDetailScreen.tsx`: `CATCH_UP_SHOW_DELAY_MS` as the third
@@ -659,11 +675,9 @@ Touch points:
 
 Verify:
 
-- `vp test run apps/mobile/src/features/home/workspace-connection-status-delay.test.ts packages/client-runtime/src/connection/supervisor.test.ts`
-- `grep -n "LONG_RESUME_PROBE_TIMEOUT" packages/client-runtime/src/connection/supervisor.ts` (two hits),
-  `grep -n "workspaceConnectionStatusShowDelayMs" apps/mobile/src/features/home/WorkspaceConnectionTitle.tsx`
+- `vp test run apps/mobile/src/features/home/workspace-connection-status-delay.test.ts`
+- `grep -n "workspaceConnectionStatusShowDelayMs" apps/mobile/src/features/home/WorkspaceConnectionTitle.tsx`
   and `grep -n "CATCH_UP_SHOW_DELAY_MS" apps/mobile/src/features/threads/ThreadDetailScreen.tsx`.
-- If upstream retunes the resume check, keep its structure and only shorten the long-resume wait.
 
 ### F16. Dictation streams to the server, and ✓ sends the message (all clients)
 
