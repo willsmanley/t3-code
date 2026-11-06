@@ -1,8 +1,6 @@
-import type { ThreadSortInput } from "@t3tools/client-runtime/state/thread-sort";
 import type { ContextMenuItem } from "@t3tools/contracts";
-import type { SidebarProjectSortOrder } from "@t3tools/contracts/settings";
 
-import { sortScopedProjectsForSidebar, type ThreadStatusPill } from "./Sidebar.logic";
+import type { ThreadStatusPill } from "./Sidebar.logic";
 
 // Fork (F1): helpers only the project-tree sidebar uses, kept here after
 // upstream removed them from `Sidebar.logic.ts` with that sidebar.
@@ -105,29 +103,4 @@ export function resolveProjectStatusIndicator(
   }
 
   return highestPriorityStatus;
-}
-
-/** Upstream's scoped project sort, with every project and thread in one scope. */
-export function sortProjectsForSidebar<
-  TProject extends {
-    id: string;
-    title: string;
-    createdAt?: string | undefined;
-    updatedAt?: string | undefined;
-  },
-  TThread extends ThreadSortInput & { projectId: string },
->(
-  projects: readonly TProject[],
-  threads: readonly TThread[],
-  sortOrder: SidebarProjectSortOrder,
-): TProject[] {
-  const projectById = new Map(projects.map((project) => [project.id, project]));
-  return sortScopedProjectsForSidebar(
-    projects.map((project) => ({ ...project, environmentId: "" })),
-    threads.map((thread) => ({ ...thread, environmentId: "", archivedAt: null })),
-    sortOrder,
-  ).flatMap((project) => {
-    const original = projectById.get(project.id);
-    return original === undefined ? [] : [original];
-  });
 }

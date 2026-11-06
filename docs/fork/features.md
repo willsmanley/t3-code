@@ -63,16 +63,15 @@ Commits `d3187229ad`, `29237dd70b`, `9a37a396d9`, `8ca12e915d`, `2015876939`; re
 fork-owned file on October 30, 2026, after upstream deleted it (`4e4d4ba395`).
 
 What it does: desktop (Electron), and web preview builds made with `VITE_T3CODE_LEGACY_SIDEBAR=1`,
-always use the project-tree ("legacy") sidebar, with projects in manual order. The sidebar is also
-lighter: no project favicons, no remote-environment icons or labels, a small status dot in a fixed
+always use the project-tree ("legacy") sidebar; since F20 it lists folders instead of projects.
+The sidebar is also lighter: no project favicons, no remote-environment icons or labels, a small status dot in a fixed
 column left of the title, and short timestamps like "5m". Elsewhere upstream's sidebars apply,
 including the Labs "boring sidebar".
 
 Fork-owned files: `apps/web/src/components/LegacySidebar.tsx` (upstream's last copy plus the fork's
 changes), `apps/web/src/components/LegacySidebar.logic.ts` (+ test; helpers upstream removed from
-`Sidebar.logic.ts`, including `archiveSelectedThreadEntries`, `resolveProjectStatusIndicator` and
-`sortProjectsForSidebar`, which upstream deleted as unused on November 1, 2026; the project sort
-wraps upstream's `sortScopedProjectsForSidebar`).
+`Sidebar.logic.ts`, including `archiveSelectedThreadEntries` and `resolveProjectStatusIndicator`;
+the project sort went away with F20).
 
 Touch points:
 
@@ -91,24 +90,22 @@ Touch points:
   ("Show more" threshold) that upstream removed.
 - `apps/web/package.json`, `pnpm-lock.yaml`: keeps `@formkit/auto-animate`.
 - Inside `LegacySidebar.tsx`: no `ProjectFavicon` or `EnvironmentMachineIcon`, `ThreadStatusLabel
-  compact` in a left column, `<RelativeTime compact>`, `sidebarProjectSortOrder` forced to
-  `"manual"` on Electron.
+  compact` in a left column, `<RelativeTime compact>`.
 
 When upstream changes an API the file uses, fix the file; don't merge upstream's sidebar into it.
 
 Verify (no tests cover the look):
 
 - `grep -n "isElectron || forceLegacySidebar" apps/web/src/components/AppSidebarLayout.tsx apps/web/src/shortcuts/chatRouteCommands.ts` (one hit each).
-- `grep -n 'isElectron ? "manual"' apps/web/src/components/LegacySidebar.tsx` (one hit).
 - `grep -n "ProjectFavicon\|EnvironmentMachineIcon" apps/web/src/components/LegacySidebar.tsx` (no hits).
-- Look at the desktop nightly: project tree, small dots, compact times.
+- Look at the desktop nightly: folder tree, small dots, compact times.
 
 ### F2. Snooze threads from the project sidebar (web/desktop)
 
 Commit `83c5b5df96`.
 
 What it does: the project sidebar's thread menu and multi-select menu can snooze and unsnooze.
-Snoozed threads leave their project and appear in a "Snoozed" section at the bottom.
+Snoozed threads leave their folder (F20) and appear in a "Snoozed" section at the bottom.
 
 Fork-owned files: `apps/web/src/components/LegacySidebar.snooze.tsx`,
 `LegacySidebar.snooze.logic.ts`, `LegacySidebar.snooze.logic.test.ts`.
@@ -123,7 +120,7 @@ Verify:
 
 - `vp test run apps/web/src/components/LegacySidebar.snooze.logic.test.ts`
 - `grep -c "LegacySnoozedSection\|useWithoutLegacySnoozed\|legacyThreadSnoozeMenu\|legacyBulkSnoozeMenu\|useProvideLegacySnoozeActions" apps/web/src/components/LegacySidebar.tsx`
-  (12 today; fewer means a hook was dropped).
+  (11 today; fewer means a hook was dropped).
 
 ### F3. "Fork conversation" and "Copy provider session ID" in thread menus (web/desktop)
 
@@ -792,7 +789,7 @@ Added November 5, 2026.
 What it does: a thread is either a normal thread (Projects) or a worker, chosen by the user. A
 worker is a thread with the upstream thread tag `worker` (`WORKER_THREAD_TAG`, `isWorkerThread`),
 so no schema or migration is involved. The legacy sidebar gets Projects and Workers tabs. Workers
-lists worker threads by project, then "Jobs in project threads" (scheduled tasks outside worker
+lists worker threads by folder (F20), then "Jobs in project threads" (scheduled tasks outside worker
 threads); jobs whose thread is archived and that won't run again hide behind "Show archived".
 A "Needs you" group at the top of Projects shows a worker that waits on the user (question,
 approval) or failed, a job whose last run failed (until "Mark done", kept in localStorage), and a
@@ -863,6 +860,68 @@ Verify:
 - `vp run --filter ./apps/web typecheck`
 - With `{ "key": "mod+arrowup", "command": "thread.previous" }` in `keybindings.json`, Cmd+Up in
   the composer switches threads; with no such binding it moves the caret to the start.
+
+### F20. Folders replace projects in the legacy sidebar (web/desktop)
+
+Added November 6, 2026.
+
+What it does: the legacy sidebar's Projects tab lists folders, then Unfiled, instead of projects.
+A folder only labels threads; it never changes where a thread's agent runs. A thread is in folder
+`X` when it has the upstream thread tag `folder:X` (set with F18's `thread.tag.set` client
+command), so no server, schema or migration is involved and archiving keeps the folder. Moving a
+thread adds the new tag before removing old ones, and the newest folder tag wins. Folder order,
+empty folders, collapse state and the folder a draft was started in are per device, in
+localStorage (`t3code:legacy-sidebar-folders:v1`); folders known only from thread tags (another
+device's) list after them by name. Folder names are trimmed, one line, at most 56 characters.
+
+- Drag folder headers to reorder them; drag a thread row (or the selection) onto a folder, or
+  onto Unfiled to take it out of its folder.
+- Thread menu and multi-select menu: "Move to folder ›" (folders, "New folder…") and "Remove from
+  folder". Folder header (right-click or "…"): Rename (retags its threads; a taken name merges)
+  and Delete folder (threads go to Unfiled, confirmed when not empty). The tab header's folder
+  button makes a folder; "Add project" lives in the command palette.
+- A folder's new-thread button starts a draft in the project of the folder's most recently
+  active thread (else the open thread's, else the first project). The draft's thread is filed in
+  the folder once it exists, when the first message is sent. Other new threads start Unfiled.
+- Until a folder exists, Unfiled offers "Make a folder for each project": one folder per
+  project, in project order and named after it, with each listed thread filed under its project.
+- Command palette: "Move to folder…" for the open thread (pick a folder, or type a new name) and
+  "New folder".
+- Workers tab: worker threads are grouped by the same folders, with the same menu.
+- Thread traversal and the Cmd+1–9 jump hints follow the folders as shown. Rows in a folder that
+  mixes projects show the project name in muted text.
+
+Limits: rename and delete retag only loaded threads, so an archived thread keeps its old folder
+tag and brings that folder back when unarchived. The sidebar's project sort setting no longer
+applies here; the thread sort and "Visible threads" count still do.
+
+Fork-owned files: `apps/web/src/components/legacySidebarFolders.logic.ts` (+ test),
+`legacySidebarFolders.store.ts` (the per-device store, tag writes, per-folder thread atoms),
+`LegacySidebarFolders.tsx` (dialogs, menus, palette items, the host that files sent drafts).
+
+Touch points:
+
+- `apps/web/src/components/LegacySidebar.tsx` (fork-owned, F1): `SidebarFolderItem`,
+  `SidebarFolderThreadList`, `useLegacySidebarThreads` (groups and traversal keys through
+  `resolveGroupPanel`), draggable `SidebarThreadRow`, `SortableFolderItem`, `UnfiledDropTarget`,
+  the thread `DragOverlay`, `startThreadInFolder`. The project rename, grouping and remove dialogs
+  and the project sort menu are gone from this sidebar (they remain in project settings).
+- `apps/web/src/components/LegacySidebarWorkers.tsx` and `legacySidebarWorkers.logic.ts` (F18):
+  worker threads grouped with `groupWorkers` by folder; `legacyThreadFolderMenu` in the worker
+  thread menu.
+- `apps/web/src/components/CommandPalette.tsx`: one line pushing `legacyFolderPaletteItems(...)`.
+- `apps/web/src/components/AppSidebarLayout.tsx`: mounts `LegacySidebarFoldersHost` beside the
+  sidebar when `isElectron || forceLegacySidebar`, so dialogs and draft filing work while a
+  phone-width sidebar is closed.
+
+Verify:
+
+- `vp test run apps/web/src/components/legacySidebarFolders.logic.test.ts apps/web/src/components/legacySidebarWorkers.logic.test.ts`
+- `grep -n "legacyFolderPaletteItems\|LegacySidebarFoldersHost" apps/web/src/components/CommandPalette.tsx apps/web/src/components/AppSidebarLayout.tsx`
+  (two hits each).
+- In the desktop app: make a folder, drag a thread onto it and back to Unfiled, start a thread
+  with the folder's new-thread button and send a message (it lands in the folder), and move a
+  thread with "Move to folder…" from the command palette.
 
 ### C1. Nightly build and release workflow (CI)
 

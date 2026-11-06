@@ -4,7 +4,7 @@ import type { ScheduledTask } from "@t3tools/contracts";
 
 import type { ThreadStatusPill } from "./Sidebar.logic";
 import {
-  groupWorkersByProject,
+  groupWorkers,
   resolveWorkerState,
   resolveWorkerThreadState,
 } from "./legacySidebarWorkers.logic";
@@ -162,9 +162,9 @@ describe("resolveWorkerThreadState", () => {
   });
 });
 
-describe("groupWorkersByProject", () => {
+describe("groupWorkers", () => {
   it("follows sidebar project order and puts unknown projects last", () => {
-    const groups = groupWorkersByProject(
+    const groups = groupWorkers(
       [
         { id: "a", project: "unknown" },
         { id: "b", project: "personal" },
@@ -174,7 +174,7 @@ describe("groupWorkersByProject", () => {
       (worker) => worker.project,
       ["code", "personal"],
     );
-    expect(groups.map((group) => [group.projectKey, group.workers.map((w) => w.id)])).toEqual([
+    expect(groups.map((group) => [group.key, group.workers.map((w) => w.id)])).toEqual([
       ["code", ["c"]],
       ["personal", ["b", "d"]],
       ["unknown", ["a"]],

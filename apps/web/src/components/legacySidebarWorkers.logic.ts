@@ -94,29 +94,29 @@ export function resolveWorkerThreadState(input: {
   return jobStates.find((state) => state.pill !== null) ?? QUIET;
 }
 
-export interface WorkerProjectGroup<T> {
-  readonly projectKey: string;
+export interface WorkerGroup<T> {
+  readonly key: string;
   readonly workers: readonly T[];
 }
 
-/** Groups workers under their projects in sidebar order; unknown projects go last. */
-export function groupWorkersByProject<T>(
+/** Groups workers by key (a folder or a project) in sidebar order; unknown keys go last. */
+export function groupWorkers<T>(
   workers: readonly T[],
-  projectKeyOf: (worker: T) => string,
-  projectOrder: readonly string[],
-): WorkerProjectGroup<T>[] {
-  const byProject = new Map<string, T[]>();
+  keyOf: (worker: T) => string,
+  order: readonly string[],
+): WorkerGroup<T>[] {
+  const byKey = new Map<string, T[]>();
   for (const worker of workers) {
-    const key = projectKeyOf(worker);
-    const group = byProject.get(key);
+    const key = keyOf(worker);
+    const group = byKey.get(key);
     if (group) group.push(worker);
-    else byProject.set(key, [worker]);
+    else byKey.set(key, [worker]);
   }
-  const rank = new Map(projectOrder.map((key, index) => [key, index] as const));
-  return [...byProject.entries()]
+  const rank = new Map(order.map((key, index) => [key, index] as const));
+  return [...byKey.entries()]
     .toSorted(
       ([left], [right]) =>
         (rank.get(left) ?? Number.MAX_SAFE_INTEGER) - (rank.get(right) ?? Number.MAX_SAFE_INTEGER),
     )
-    .map(([projectKey, groupWorkers]) => ({ projectKey, workers: groupWorkers }));
+    .map(([key, groupWorkers]) => ({ key, workers: groupWorkers }));
 }

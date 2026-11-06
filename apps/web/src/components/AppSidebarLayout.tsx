@@ -40,6 +40,7 @@ import {
 import { BackgroundThreadAnnouncer } from "./BackgroundThreadAnnouncer";
 import { HistorySwipeNavigation } from "./HistorySwipeNavigation";
 import LegacyThreadSidebar from "./LegacySidebar";
+import { LegacySidebarFoldersHost } from "./LegacySidebarFolders";
 import ThreadSidebar from "./Sidebar";
 import { SidebarBrandWidthProbe } from "./sidebar/SidebarChrome";
 import { isAppModalPage } from "./sidebar/mainAppLocation";
@@ -480,6 +481,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         </Sidebar>
         {children}
         <BackgroundThreadAnnouncer />
+        {isElectron || forceLegacySidebar ? <LegacySidebarFoldersHost /> : null}
         <SidebarControl />
         {isElectron ? <HistorySwipeNavigation /> : null}
       </SidebarProvider>

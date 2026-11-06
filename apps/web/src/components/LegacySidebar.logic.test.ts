@@ -1,10 +1,6 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import {
-  archiveSelectedThreadEntries,
-  resolveProjectStatusIndicator,
-  sortProjectsForSidebar,
-} from "./LegacySidebar.logic";
+import { archiveSelectedThreadEntries, resolveProjectStatusIndicator } from "./LegacySidebar.logic";
 
 describe("archiveSelectedThreadEntries", () => {
   const entries = [{ threadKey: "one" }, { threadKey: "two" }, { threadKey: "three" }] as const;
@@ -69,20 +65,5 @@ describe("resolveProjectStatusIndicator", () => {
         waiting,
       ]),
     ).toMatchObject({ label: "Waiting" });
-  });
-});
-
-describe("sortProjectsForSidebar", () => {
-  const older = { id: "project-1", title: "Older", createdAt: "2026-03-01T00:00:00.000Z" };
-  const newer = { id: "project-2", title: "Newer", createdAt: "2026-03-09T00:00:00.000Z" };
-
-  it("keeps the manual order and returns the same project objects", () => {
-    const sorted = sortProjectsForSidebar([older, newer], [], "manual");
-    expect(sorted).toEqual([older, newer]);
-    expect(sorted[0]).toBe(older);
-  });
-
-  it("puts the newest project first when sorting by creation time", () => {
-    expect(sortProjectsForSidebar([older, newer], [], "created_at")).toEqual([newer, older]);
   });
 });

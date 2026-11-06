@@ -49,12 +49,14 @@ import {
 import { resolveThreadLastVisitedAt, resolveThreadStatusPill } from "./Sidebar.logic";
 import { ThreadStatusLabel } from "./ThreadStatusIndicators";
 import {
-  groupWorkersByProject,
+  groupWorkers,
   type LegacySidebarTab,
   resolveWorkerState,
   resolveWorkerThreadState,
   type WorkerState,
 } from "./legacySidebarWorkers.logic";
+import { legacyThreadFolderMenu } from "./LegacySidebarFolders";
+import { folderOfThread, useFolderOrder } from "./legacySidebarFolders.store";
 import { Button } from "./ui/button";
 import {
   SidebarMenu,
@@ -79,6 +81,8 @@ const NO_DISMISSED_RUNS: Record<string, string> = {};
 const SHOW_ARCHIVED_WORKERS_KEY = "t3code:workers-show-archived:v1";
 
 const PROJECT_THREAD_JOBS_GROUP_KEY = "project-thread-jobs";
+// Not a folder name: folder names are never empty.
+const UNFILED_WORKERS_KEY = "";
 
 function toastFailure(title: string, error: unknown) {
   toastManager.add(stackedThreadToast({ type: "error", title, description: String(error) }));
@@ -248,7 +252,7 @@ export function LegacySidebarNeedsYou(props: LegacySidebarWorkersProps) {
   ));
 }
 
-/** Workers tab: worker threads by project, then the jobs that run in project threads. */
+/** Workers tab: worker threads by folder, then the jobs that run in project threads. */
 export function LegacySidebarWorkersList(props: LegacySidebarWorkersProps) {
   const environmentIds = useConnectedEnvironmentIds();
   const [showArchived, setShowArchived] = useLocalStorage(
@@ -308,6 +312,7 @@ function EnvironmentWorkers(props: EnvironmentWorkersProps) {
     DismissedWorkerRunsSchema,
   );
   const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(() => new Set());
+  const folderOrder = useFolderOrder();
   const tasks = tasksQuery.data?.tasks;
   if (!tasks || !shellsReady) return null;
 
@@ -439,16 +444,15 @@ function EnvironmentWorkers(props: EnvironmentWorkersProps) {
       </div>
     );
   }
-  const projectOf = (projectId: ProjectId) =>
-    projects.byScopedKey.get(scopedProjectKey(scopeProjectRef(environmentId, projectId)));
   const projectKeyOf = (projectId: ProjectId) =>
-    projectOf(projectId)?.projectKey ?? `unknown:${projectId}`;
-  const threadGroups = groupWorkersByProject(
+    projects.byScopedKey.get(scopedProjectKey(scopeProjectRef(environmentId, projectId)))
+      ?.projectKey ?? `unknown:${projectId}`;
+  const threadGroups = groupWorkers(
     workerThreads,
-    (worker) => projectKeyOf(worker.thread.projectId),
-    projects.order,
+    (worker) => folderOfThread(worker.thread) ?? UNFILED_WORKERS_KEY,
+    folderOrder,
   );
-  const orderedJobs = groupWorkersByProject(
+  const orderedJobs = groupWorkers(
     listedJobs,
     (worker) => projectKeyOf(worker.task.projectId),
     projects.order,
@@ -457,10 +461,10 @@ function EnvironmentWorkers(props: EnvironmentWorkersProps) {
     <SidebarMenu>
       {threadGroups.map((group) => (
         <WorkerGroup
-          key={group.projectKey}
-          name={projectOf(group.workers[0]!.thread.projectId)?.displayName ?? "Other"}
-          expanded={!collapsedGroups.has(group.projectKey)}
-          onToggle={() => toggleGroup(group.projectKey)}
+          key={`folder:${group.key}`}
+          name={group.key === UNFILED_WORKERS_KEY ? "Unfiled" : group.key}
+          expanded={!collapsedGroups.has(`folder:${group.key}`)}
+          onToggle={() => toggleGroup(`folder:${group.key}`)}
         >
           {renderThreadRows(group.workers)}
         </WorkerGroup>
@@ -709,9 +713,11 @@ function SidebarWorkerThreadRow(props: {
     if (!api) return;
     const canOperate = readEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
     const jobsLabel = tasks.length === 1 ? "" : " jobs";
+    const folderMenu = legacyThreadFolderMenu([thread]);
     const clicked = await api.contextMenu.show(
       [
         { id: "move-to-projects", label: "Move to Projects", disabled: !canOperate },
+        ...folderMenu.items,
         ...(onlyTask ? [{ id: "run-now", label: "Run now", disabled: !canOperate }] : []),
         ...(tasks.length === 0
           ? []
@@ -730,6 +736,7 @@ function SidebarWorkerThreadRow(props: {
       await setWorkerThread(threadRef, false);
       return;
     }
+    if (folderMenu.handle(clicked)) return;
     if (clicked === "edit") return openSettings();
     if (clicked === "dismiss") {
       for (const job of failedJobs) onDismiss(job.task);
