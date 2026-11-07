@@ -105,9 +105,9 @@ interface ProjectGroup {
 }
 
 /**
- * Regroups the flat list under project headers, like the desktop tree. Pass items built with every
- * shelf expanded and no settled limit. `projectGroups` maps environment projects to the logical
- * project sharing a header. Projects follow `projectOrder`; unlisted ones go first, newest first.
+ * Regroups the flat list under project headers. Pass items built with the settled shelf open and
+ * no settled limit; snoozed threads go to the Snoozed shelf after the projects. `projectGroups`
+ * maps environment projects to a shared header; `projectOrder` ranks them, unlisted first.
  */
 export function buildProjectThreadTreeListItems(input: {
   readonly listItems: ReadonlyArray<ThreadListV2ListItem>;
@@ -119,13 +119,23 @@ export function buildProjectThreadTreeListItems(input: {
   readonly preferencesLoading?: boolean;
 }): ThreadListV2ListItem[] {
   const pending: ThreadListV2ListItem[] = [];
+  const snoozedShelf: ThreadListV2ListItem[] = [];
   const groups = new Map<string, ProjectGroup>();
   for (const entry of input.listItems) {
     if (entry.type === "v2-pending") {
       pending.push(entry);
       continue;
     }
+    if (entry.type === "v2-snoozed-shelf") {
+      snoozedShelf.push(entry);
+      continue;
+    }
     if (entry.type !== "v2-thread") continue;
+    // Search lists snoozed matches without the shelf; those keep their project.
+    if (entry.item.snoozed && snoozedShelf.length > 0) {
+      snoozedShelf.push(toTreeRow(entry));
+      continue;
+    }
     const thread = entry.item.thread;
     const scopedKey = scopedProjectKey(thread.environmentId, thread.projectId);
     const projectGroup = input.projectGroups.get(scopedKey);
@@ -216,6 +226,7 @@ export function buildProjectThreadTreeListItems(input: {
       result.push(more);
     }
   }
+  result.push(...snoozedShelf);
   return result;
 }
 

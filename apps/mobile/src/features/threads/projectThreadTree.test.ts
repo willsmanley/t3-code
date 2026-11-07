@@ -53,14 +53,16 @@ function buildTree(
     readonly selectedThreadKey?: string;
     readonly groups?: typeof projectGroups;
     readonly projectOrder?: ReadonlyArray<string>;
+    readonly snoozedShelfExpanded?: boolean;
   } = {},
 ): ThreadListV2ListItem[] {
+  const snoozedShelfExpanded = options.snoozedShelfExpanded ?? true;
   const layout = buildThreadListV2Items({
     threads,
     environmentId: null,
     searchQuery: "",
     now: NOW,
-    snoozedShelfExpanded: true,
+    snoozedShelfExpanded,
     settledShelfExpanded: true,
   });
   return buildProjectThreadTreeListItems({
@@ -68,7 +70,7 @@ function buildTree(
       items: layout.items,
       pendingTasks: [],
       snoozedCount: layout.snoozedCount,
-      snoozedShelfExpanded: true,
+      snoozedShelfExpanded,
       snoozedShelfHeaderIndex: layout.snoozedShelfHeaderIndex,
       settledCount: layout.settledCount,
       settledShelfExpanded: true,
@@ -113,6 +115,28 @@ describe("buildProjectThreadTreeListItems", () => {
       "# API",
       "api-settled",
       "api-old",
+    ]);
+  });
+
+  it("moves snoozed threads out of their projects to a Snoozed section after them", () => {
+    const wakeAt = (minutes: number) => new Date(BASE_MS + minutes * 60_000).toISOString();
+    const threads = [
+      makeThread("api-active", api, 10),
+      makeThread("api-snoozed", api, 5, { snoozedUntil: wakeAt(60) }),
+      makeThread("web-snoozed", web, 1, { snoozedUntil: wakeAt(120) }),
+    ];
+
+    expect(outline(buildTree(threads, { snoozedShelfExpanded: false }))).toEqual([
+      "# API",
+      "api-active",
+      "v2-snoozed-shelf",
+    ]);
+    expect(outline(buildTree(threads))).toEqual([
+      "# API",
+      "api-active",
+      "v2-snoozed-shelf",
+      "api-snoozed",
+      "web-snoozed",
     ]);
   });
 

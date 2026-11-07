@@ -304,15 +304,15 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
     pinReorderEnvironmentIds,
     activeReorderEnvironmentIds,
     queuedThreadKeys,
-    // The project tree keeps settled and snoozed threads in their project, so it reads the list
-    // with every shelf open and every older settled page, and caps each project instead.
+    // The project tree keeps settled threads in their project, so it reads the list with the
+    // settled shelf open and every older settled page, and caps each project instead.
     settledLimit: PROJECT_THREAD_TREE_ENABLED ? Number.POSITIVE_INFINITY : settledVisibleCount,
     now,
     pendingOrder,
     shelfPreferencesLoaded,
     workingShelfEnabled: workingShelfEnabled && !PROJECT_THREAD_TREE_ENABLED,
     workingShelfExpanded,
-    snoozedShelfExpanded: snoozedShelfExpanded || PROJECT_THREAD_TREE_ENABLED,
+    snoozedShelfExpanded,
     settledShelfExpanded: settledShelfExpanded || PROJECT_THREAD_TREE_ENABLED,
     selectedThreadKey: props.selectedThreadKey ?? null,
   });

@@ -352,8 +352,10 @@ Commits `a7e6c56c58`, `4a160a79eb`, `ad1ed9c813`, `dbeb30f38d`.
 What it does: on Android, the home list and the tablet sidebar group threads under collapsible
 project headers, like the desktop sidebar. Rows are one line: status icon, title, time. Each
 project shows a few threads and a "show more" row. Each header has New thread, Move up / Move
-down and Arrange (a sheet to reorder every project), and the app remembers the order. iOS keeps
-upstream's flat list (`PROJECT_THREAD_TREE_ENABLED = Platform.OS === "android"`).
+down and Arrange (a sheet to reorder every project), and the app remembers the order. Snoozed
+threads leave their projects for a Snoozed row at the bottom, closed unless the user opens it
+(search still finds them in place). iOS keeps upstream's flat list
+(`PROJECT_THREAD_TREE_ENABLED = Platform.OS === "android"`).
 
 Fork-owned files: `apps/mobile/src/features/threads/projectThreadTree.ts` (+ test),
 `project-thread-tree-items.tsx`, `use-project-thread-tree-state.ts`, `ProjectArrangementSheet.tsx`.
@@ -361,8 +363,8 @@ Fork-owned files: `apps/mobile/src/features/threads/projectThreadTree.ts` (+ tes
 Touch points:
 
 - `apps/mobile/src/features/home/HomeScreen.tsx`: imports; `useProjectThreadTreeState()`;
-  overrides the `useThreadListV2` inputs when the tree is on (`settledLimit` infinite, shelves
-  open, working shelf off); `buildProjectThreadTreeListItems(...)`; `useRememberProjectOrder`;
+  overrides the `useThreadListV2` inputs when the tree is on (`settledLimit` infinite, settled
+  shelf open, working shelf off); `buildProjectThreadTreeListItems(...)`; `useRememberProjectOrder`;
   renders the `v2-project` and `v2-project-more` items; `layout="tree"` on rows;
   `<ProjectArrangementSheet>`; "older settled" row logic.
 - `apps/mobile/src/features/threads/ThreadNavigationSidebar.tsx`: nearly the same block.
