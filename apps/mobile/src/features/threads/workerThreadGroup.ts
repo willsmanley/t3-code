@@ -3,7 +3,7 @@ import { effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import { getThreadSortTimestamp } from "@t3tools/client-runtime/state/thread-sort";
 import { isListedThreadLineage, type EnvironmentId, type ProjectId } from "@t3tools/contracts";
 
-import { toTreeRow } from "./projectThreadTree";
+import { groupWorkerRowsByFolder, toTreeRow } from "./projectThreadTree";
 import {
   buildThreadListV2ListItems,
   resolveThreadListV2WokeAt,
@@ -33,7 +33,8 @@ export function partitionWorkerThreads(
 
 /**
  * The Workers shelf header and its rows, newest activity first. Collapsed, it shows only the
- * selected thread, like the other shelves. Tree rows get the project tree's time label.
+ * selected thread, like the other shelves. Tree rows get the tree's time label and, with
+ * `folders`, sit under folder headers (F20).
  */
 export function buildWorkerShelfListItems(input: {
   readonly workers: ReadonlyArray<EnvironmentThreadShell>;
@@ -52,6 +53,10 @@ export function buildWorkerShelfListItems(input: {
   readonly expanded: boolean;
   readonly selectedThreadKey?: string | null;
   readonly layout: "flat" | "tree";
+  readonly folders?: {
+    readonly order: ReadonlyArray<string>;
+    readonly collapsedGroupKeys: ReadonlySet<string>;
+  };
 }): ThreadListV2ListItem[] {
   const projectKeys = input.projectRefs
     ? new Set(input.projectRefs.map((ref) => `${ref.environmentId}:${ref.projectId}`))
@@ -111,11 +116,17 @@ export function buildWorkerShelfListItems(input: {
     count: workers.length,
     expanded: input.expanded,
   };
+  if (input.layout === "flat") return [header, ...rows];
+  const treeRows = rows.map((row) => (row.type === "v2-thread" ? toTreeRow(row) : row));
+  if (!input.expanded || input.folders === undefined) return [header, ...treeRows];
   return [
     header,
-    ...(input.layout === "tree"
-      ? rows.map((row) => (row.type === "v2-thread" ? toTreeRow(row) : row))
-      : rows),
+    ...groupWorkerRowsByFolder({
+      rows: treeRows,
+      folderOrder: input.folders.order,
+      collapsedGroupKeys: input.folders.collapsedGroupKeys,
+      selectedThreadKey: input.selectedThreadKey ?? null,
+    }),
   ];
 }
 

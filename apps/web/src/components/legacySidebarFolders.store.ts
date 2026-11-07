@@ -26,7 +26,7 @@ import {
   orderFolders,
   planFolderTagChange,
   renameFolderInList,
-} from "./legacySidebarFolders.logic";
+} from "@t3tools/client-runtime/thread-folders";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 
 interface PendingDraftFolder {

@@ -73,6 +73,7 @@ import {
   resolveSelectableModelSelection,
 } from "../../lib/modelOptions";
 import { enqueueThreadOutboxMessage } from "../../state/thread-outbox";
+import { fileSentDraftInFolder } from "./threadFolderActions";
 import {
   useRemoteConnections,
   useRemoteEnvironmentRuntime,
@@ -662,6 +663,7 @@ export function NewTaskDraftScreen(props: {
       );
       return null;
     }
+    fileSentDraftInFolder(currentRoute.params, message.environmentId, message.threadId);
     promptInputRef.current?.blur();
     navigation.dispatch(
       CommonActions.setParams(

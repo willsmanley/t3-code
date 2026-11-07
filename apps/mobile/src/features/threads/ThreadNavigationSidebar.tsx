@@ -63,17 +63,8 @@ import {
 import { useWorkerThreadGroup } from "./use-worker-thread-group";
 import { withWorkerShelf } from "./workerThreadGroup";
 import { useThreadRowProviderInstanceResolver } from "./thread-provider-instance";
-import {
-  PROJECT_THREAD_TREE_ENABLED,
-  ProjectThreadTreeHeader,
-  ProjectThreadTreeMoreRow,
-} from "./project-thread-tree-items";
-import { ProjectArrangementSheet } from "./ProjectArrangementSheet";
-import { buildProjectThreadTreeListItems, projectTreeHeaderKeys } from "./projectThreadTree";
-import {
-  useProjectThreadTreeState,
-  useRememberProjectOrder,
-} from "./use-project-thread-tree-state";
+import { PROJECT_THREAD_TREE_ENABLED } from "./project-thread-tree-items";
+import { useThreadFolderTree } from "./thread-folder-tree";
 import type { ThreadPrPresentation } from "../../state/thread-pr-presentation";
 import { ThreadPrDemandProvider } from "../../state/thread-pr-demand";
 import {
@@ -102,7 +93,7 @@ interface ThreadNavigationSidebarProps {
   readonly onOpenSettings: () => void;
   readonly onOpenEnvironmentSettings: () => void;
   readonly onNewThreadOnBranch: (thread: EnvironmentThreadShell) => void;
-  readonly onNewThreadInProject: (project: EnvironmentProject) => void;
+  readonly onNewThreadInProject: (project: EnvironmentProject, requestId?: string) => void;
   readonly onOpenPendingTask: (pendingTask: PendingNewTask) => void;
   readonly onSearchQueryChange: (query: string) => void;
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void;
@@ -258,7 +249,15 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
     toggleSnoozedShelf,
     toggleWorkingShelf,
   } = useThreadListV2ShelfPreferences();
-  const projectTree = useProjectThreadTreeState();
+  const folderTree = useThreadFolderTree({
+    projects,
+    projectGroupingMode: options.projectGroupingMode,
+    selectedThreadKey: props.selectedThreadKey ?? null,
+    searching: props.searchQuery.trim().length > 0,
+    filtered: selectedProjectScope !== null || options.selectedEnvironmentId !== null,
+    pane: "sidebar",
+    onNewThreadInProject: props.onNewThreadInProject,
+  });
   const now = useThreadListNow(threads);
   const listEnvironments = useAtomValue(threadListEnvironmentsAtom);
   const {
@@ -286,6 +285,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
     queuedThreadKeys,
     selectedThreadKey: props.selectedThreadKey ?? null,
     layout: PROJECT_THREAD_TREE_ENABLED ? "tree" : "flat",
+    folderOrder: PROJECT_THREAD_TREE_ENABLED ? folderTree.folderOrder : null,
   });
   const {
     layout: threadListV2Layout,
@@ -317,28 +317,9 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
     selectedThreadKey: props.selectedThreadKey ?? null,
   });
   const groupedThreadListV2Items = PROJECT_THREAD_TREE_ENABLED
-    ? buildProjectThreadTreeListItems({
-        listItems: flatThreadListV2Items,
-        projectGroups: new Map(
-          projectScopes.flatMap((scope) =>
-            scope.projectRefs.map(
-              (projectRef) =>
-                [
-                  scopedProjectKey(projectRef.environmentId, projectRef.projectId),
-                  { key: scope.key, title: scope.title },
-                ] as const,
-            ),
-          ),
-        ),
-        collapsedProjectKeys: projectTree.collapsedProjectKeys,
-        expandedProjectKeys: projectTree.expandedProjectKeys,
-        projectOrder: projectTree.projectOrder,
-        selectedThreadKey: props.selectedThreadKey ?? null,
-        preferencesLoading: !projectTree.loaded,
-      })
+    ? folderTree.groupListItems(flatThreadListV2Items)
     : flatThreadListV2Items;
   const threadListV2Items = withWorkerShelf(groupedThreadListV2Items, workerGroup.shelfItems);
-  useRememberProjectOrder(projectTree, projectTreeHeaderKeys(threadListV2Items));
   // The tree loads every older settled page by itself, so it offers only a retry.
   const showOlderSettledRow =
     threadListV2Layout.hiddenSettledCount > 0 &&
@@ -589,42 +570,10 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
             pane="sidebar"
           />
         );
-      case "v2-project":
-        return (
-          <ProjectThreadTreeHeader
-            title={item.title}
-            threadCount={item.threadCount}
-            collapsed={item.collapsed}
-            status={item.status}
-            canMoveUp={item.previousProjectKey !== null}
-            canMoveDown={item.nextProjectKey !== null}
-            disabled={item.disabled}
-            pane="sidebar"
-            onToggle={() => projectTree.toggleProjectCollapsed(item.projectKey)}
-            onNewThread={() => {
-              const project = projectByKey.get(item.newThreadProjectKey);
-              if (project) props.onNewThreadInProject(project);
-            }}
-            onMove={(direction) => {
-              const targetKey = direction === "up" ? item.previousProjectKey : item.nextProjectKey;
-              if (targetKey === null) return;
-              projectTree.moveProject(item.projectKey, {
-                targetKey,
-                placement: direction === "up" ? "before" : "after",
-              });
-            }}
-            onArrange={projectTree.openProjectArrangement}
-          />
-        );
-      case "v2-project-more":
-        return (
-          <ProjectThreadTreeMoreRow
-            hiddenCount={item.hiddenCount}
-            expanded={item.expanded}
-            pane="sidebar"
-            onToggle={() => projectTree.toggleProjectExpanded(item.projectKey)}
-          />
-        );
+      case "v2-folder":
+      case "v2-folder-more":
+      case "v2-worker-folder":
+        return folderTree.renderItem(item, workerGroup.toggleWorkerFolder);
     }
   };
   const header = (
@@ -772,15 +721,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
       </View>
       {header}
       <ThreadUndoNotice visible={props.visible} />
-      {projectTree.arrangingProjects ? (
-        <ProjectArrangementSheet
-          projects={listItems.flatMap((item) =>
-            item.type === "v2-project" ? [{ key: item.projectKey, title: item.title }] : [],
-          )}
-          onMove={projectTree.moveProject}
-          onClose={projectTree.closeProjectArrangement}
-        />
-      ) : null}
+      {folderTree.arrangementSheet}
     </View>
   );
 }

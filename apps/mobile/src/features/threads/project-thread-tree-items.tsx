@@ -9,8 +9,8 @@ import { cn } from "../../lib/cn";
 import type { ThreadStatusDotKind } from "./projectThreadTree";
 
 /**
- * The fork's Android build lists threads under project headers with status
- * dots, matching the desktop project tree. Other builds keep the flat list.
+ * The fork's Android build lists threads under folder headers (F20) with status
+ * dots, matching the desktop sidebar. Other builds keep the flat list.
  */
 export const PROJECT_THREAD_TREE_ENABLED = Platform.OS === "android";
 
@@ -66,119 +66,262 @@ export function ThreadStatusIcon(props: { readonly kind: ThreadStatusDotKind }) 
   );
 }
 
-export const ProjectThreadTreeHeader = memo(function ProjectThreadTreeHeader(props: {
-  readonly title: string;
+const FOLDER_HEADER_ACTIONS = [
+  "rename",
+  "delete",
+  "new-folder",
+  "arrange",
+  "move-up",
+  "move-down",
+  "folder-per-project",
+] as const;
+export type ThreadFolderHeaderAction = (typeof FOLDER_HEADER_ACTIONS)[number];
+
+function isFolderHeaderAction(id: string): id is ThreadFolderHeaderAction {
+  return (FOLDER_HEADER_ACTIONS as ReadonlyArray<string>).includes(id);
+}
+
+function TreeIconButton(props: {
+  readonly icon: AppSymbolName;
+  readonly label: string;
+  readonly tint: string;
+  readonly disabled?: boolean;
+  readonly onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={props.label}
+      className="ml-1 p-2"
+      disabled={props.disabled}
+      hitSlop={6}
+      onPress={props.onPress}
+      style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+    >
+      <SymbolView name={props.icon} size={16} tintColorClassName={props.tint} type="monochrome" />
+    </Pressable>
+  );
+}
+
+/** Fork (F20): a folder header in the thread tree; `folder` null is Unfiled. */
+export const ThreadFolderHeader = memo(function ThreadFolderHeader(props: {
+  readonly folder: string | null;
   readonly threadCount: number;
   readonly collapsed: boolean;
   readonly status: ThreadStatusDotKind | null;
   readonly canMoveUp: boolean;
   readonly canMoveDown: boolean;
+  readonly canArrange: boolean;
+  readonly offerFolderPerProject: boolean;
   readonly disabled?: boolean;
   readonly pane?: "screen" | "sidebar";
   readonly onToggle: () => void;
   readonly onNewThread: () => void;
-  readonly onMove: (direction: "up" | "down") => void;
-  readonly onArrange: () => void;
+  readonly onAction: (action: ThreadFolderHeaderAction) => void;
 }) {
   const sidebarPane = props.pane === "sidebar";
   const iconTint = sidebarPane ? "accent-drawer-foreground-muted" : "accent-icon-muted";
+  const unfiled = props.folder === null;
+  const title = props.folder ?? "Unfiled";
   const menuActions: MenuAction[] = [
-    { id: "arrange", title: "Arrange projects…", image: "line.3.horizontal" },
-    {
-      id: "move-up",
-      title: "Move up",
-      image: "arrow.up",
-      attributes: { disabled: !props.canMoveUp },
-    },
-    {
-      id: "move-down",
-      title: "Move down",
-      image: "arrow.down",
-      attributes: { disabled: !props.canMoveDown },
-    },
+    ...(unfiled ? [] : [{ id: "rename", title: "Rename…", image: "pencil" } satisfies MenuAction]),
+    { id: "new-folder", title: "New folder…", image: "folder.badge.plus" },
+    ...(props.offerFolderPerProject
+      ? [
+          {
+            id: "folder-per-project",
+            title: "Make a folder for each project",
+            image: "folder",
+          } satisfies MenuAction,
+        ]
+      : []),
+    ...(props.canArrange
+      ? [
+          {
+            id: "arrange",
+            title: "Arrange folders…",
+            image: "line.3.horizontal",
+          } satisfies MenuAction,
+        ]
+      : []),
+    ...(unfiled
+      ? []
+      : [
+          {
+            id: "move-up",
+            title: "Move up",
+            image: "arrow.up",
+            attributes: { disabled: !props.canMoveUp },
+          } satisfies MenuAction,
+          {
+            id: "move-down",
+            title: "Move down",
+            image: "arrow.down",
+            attributes: { disabled: !props.canMoveDown },
+          } satisfies MenuAction,
+          {
+            id: "delete",
+            title: "Delete folder",
+            image: "trash",
+            attributes: { destructive: true },
+          } satisfies MenuAction,
+        ]),
   ];
+  const act = (id: string) => {
+    const action = menuActions.find((candidate) => candidate.id === id);
+    if (props.disabled || action === undefined || action.attributes?.disabled === true) return;
+    if (isFolderHeaderAction(id)) props.onAction(id);
+  };
   return (
-    <View className={cn("mt-3 flex-row items-center", sidebarPane ? "pr-1.5" : "pr-3")}>
-      <Menu
-        actions={menuActions}
-        className="min-w-0 flex-1"
-        onPressAction={({ nativeEvent }) => {
-          if (props.disabled) return;
-          if (nativeEvent.event === "arrange") props.onArrange();
-          if (nativeEvent.event === "move-up" && props.canMoveUp) props.onMove("up");
-          if (nativeEvent.event === "move-down" && props.canMoveDown) props.onMove("down");
-        }}
-        shouldOpenOnLongPress
-      >
+    <View>
+      <View className={cn("mt-3 flex-row items-center", sidebarPane ? "pr-1.5" : "pr-3")}>
+        <Menu
+          actions={menuActions}
+          className="min-w-0 flex-1"
+          onPressAction={({ nativeEvent }) => act(nativeEvent.event)}
+          shouldOpenOnLongPress
+        >
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${title}, ${props.threadCount} ${props.threadCount === 1 ? "thread" : "threads"}`}
+            accessibilityHint={`${props.collapsed ? "Shows" : "Hides"} this folder's threads. Long press for folder options.`}
+            accessibilityState={{ disabled: props.disabled, expanded: !props.collapsed }}
+            accessibilityActions={menuActions.flatMap((action) =>
+              action.id !== undefined && action.attributes?.disabled !== true
+                ? [{ name: action.id, label: action.title }]
+                : [],
+            )}
+            onAccessibilityAction={({ nativeEvent }) => act(nativeEvent.actionName)}
+            className={cn(
+              "min-w-0 flex-1 flex-row items-center gap-2 py-1.5",
+              sidebarPane ? "pl-3" : "pl-5",
+            )}
+            disabled={props.disabled}
+            onPress={props.onToggle}
+            style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+          >
+            <View className="w-3 items-center">
+              <SymbolView
+                name={props.collapsed ? "chevron.right" : "chevron.down"}
+                size={12}
+                tintColorClassName={iconTint}
+                type="monochrome"
+              />
+            </View>
+            <Text
+              className={cn(
+                "min-w-0 flex-1 text-sm font-t3-medium",
+                sidebarPane
+                  ? "text-drawer-foreground-muted"
+                  : unfiled
+                    ? "text-foreground-muted"
+                    : "text-foreground-secondary",
+              )}
+              numberOfLines={1}
+            >
+              {title}
+            </Text>
+            {props.collapsed && props.status !== null ? (
+              <ThreadStatusIcon kind={props.status} />
+            ) : null}
+            {props.collapsed ? (
+              <Text className="text-xs tabular-nums text-foreground-muted">
+                {props.threadCount}
+              </Text>
+            ) : null}
+          </Pressable>
+        </Menu>
+        {unfiled ? (
+          <TreeIconButton
+            icon="folder.badge.plus"
+            label="New folder"
+            tint={iconTint}
+            disabled={props.disabled}
+            onPress={() => act("new-folder")}
+          />
+        ) : null}
+        <TreeIconButton
+          icon="square.and.pencil"
+          label={`New thread in ${title}`}
+          tint={iconTint}
+          onPress={props.onNewThread}
+        />
+      </View>
+      {props.offerFolderPerProject && !props.collapsed ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${props.title}, ${props.threadCount} ${props.threadCount === 1 ? "thread" : "threads"}`}
-          accessibilityHint={`${props.collapsed ? "Shows" : "Hides"} this project's threads. Long press to reorder projects.`}
-          accessibilityState={{ disabled: props.disabled, expanded: !props.collapsed }}
-          accessibilityActions={[
-            { name: "arrange", label: "Arrange projects" },
-            ...(props.canMoveUp ? [{ name: "move-up", label: "Move up" }] : []),
-            ...(props.canMoveDown ? [{ name: "move-down", label: "Move down" }] : []),
-          ]}
-          onAccessibilityAction={({ nativeEvent }) => {
-            if (props.disabled) return;
-            if (nativeEvent.actionName === "arrange") props.onArrange();
-            if (nativeEvent.actionName === "move-up") props.onMove("up");
-            if (nativeEvent.actionName === "move-down") props.onMove("down");
-          }}
           className={cn(
-            "min-w-0 flex-1 flex-row items-center gap-2 py-1.5",
-            sidebarPane ? "pl-3" : "pl-5",
+            "flex-row items-center gap-2 py-2",
+            sidebarPane ? "pl-8 pr-3" : "pl-10 pr-5",
           )}
           disabled={props.disabled}
-          onPress={props.onToggle}
+          onPress={() => act("folder-per-project")}
           style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
         >
-          <View className="w-3 items-center">
-            <SymbolView
-              name={props.collapsed ? "chevron.right" : "chevron.down"}
-              size={12}
-              tintColorClassName={iconTint}
-              type="monochrome"
-            />
-          </View>
+          <SymbolView
+            name="folder.badge.plus"
+            size={14}
+            tintColorClassName={iconTint}
+            type="monochrome"
+          />
           <Text
             className={cn(
-              "min-w-0 flex-1 text-sm font-t3-medium",
-              sidebarPane ? "text-drawer-foreground-muted" : "text-foreground-secondary",
+              "text-xs font-t3-medium",
+              sidebarPane ? "text-drawer-foreground-muted" : "text-foreground-muted",
             )}
-            numberOfLines={1}
           >
-            {props.title}
+            Make a folder for each project
           </Text>
-          {props.collapsed && props.status !== null ? (
-            <ThreadStatusIcon kind={props.status} />
-          ) : null}
-          {props.collapsed ? (
-            <Text className="text-xs tabular-nums text-foreground-muted">{props.threadCount}</Text>
-          ) : null}
         </Pressable>
-      </Menu>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`New thread in ${props.title}`}
-        className="ml-1 p-2"
-        hitSlop={6}
-        onPress={props.onNewThread}
-        style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
-      >
-        <SymbolView
-          name="square.and.pencil"
-          size={16}
-          tintColorClassName={iconTint}
-          type="monochrome"
-        />
-      </Pressable>
+      ) : null}
     </View>
   );
 });
 
-export const ProjectThreadTreeMoreRow = memo(function ProjectThreadTreeMoreRow(props: {
+/** Fork (F20): a folder inside the Workers shelf. */
+export const WorkerFolderHeader = memo(function WorkerFolderHeader(props: {
+  readonly folder: string | null;
+  readonly count: number;
+  readonly collapsed: boolean;
+  readonly pane?: "screen" | "sidebar";
+  readonly onToggle: () => void;
+}) {
+  const sidebarPane = props.pane === "sidebar";
+  const title = props.folder ?? "Unfiled";
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${title}, ${props.count} ${props.count === 1 ? "worker" : "workers"}`}
+      accessibilityState={{ expanded: !props.collapsed }}
+      className={cn("flex-row items-center gap-2 py-1.5", sidebarPane ? "pl-6 pr-3" : "pl-8 pr-5")}
+      onPress={props.onToggle}
+      style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+    >
+      <View className="w-3 items-center">
+        <SymbolView
+          name={props.collapsed ? "chevron.right" : "chevron.down"}
+          size={10}
+          tintColorClassName={sidebarPane ? "accent-drawer-foreground-muted" : "accent-icon-muted"}
+          type="monochrome"
+        />
+      </View>
+      <Text
+        className={cn(
+          "min-w-0 flex-1 text-xs font-t3-medium",
+          sidebarPane ? "text-drawer-foreground-muted" : "text-foreground-muted",
+        )}
+        numberOfLines={1}
+      >
+        {title}
+      </Text>
+      {props.collapsed ? (
+        <Text className="text-xs tabular-nums text-foreground-muted">{props.count}</Text>
+      ) : null}
+    </Pressable>
+  );
+});
+
+export const ThreadTreeMoreRow = memo(function ThreadTreeMoreRow(props: {
   readonly hiddenCount: number;
   readonly expanded: boolean;
   readonly pane?: "screen" | "sidebar";

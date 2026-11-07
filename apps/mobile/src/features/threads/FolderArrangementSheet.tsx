@@ -7,22 +7,17 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
 import { SheetHeader } from "../../components/ui/SheetHeader";
-import type { ProjectMove } from "./projectThreadTree";
+import type { FolderMove } from "./projectThreadTree";
 import { threadDragGapOffset } from "./threadDragGap";
 
 const ROW_HEIGHT = 56;
 const EDGE_SCROLL_ZONE = 48;
 
-interface ArrangedProject {
-  readonly key: string;
-  readonly title: string;
-}
-
 interface Drag {
-  readonly key: string;
+  readonly folder: string;
   readonly startY: number;
   translation: number;
-  target: ProjectMove | null;
+  target: FolderMove | null;
 }
 
 function ArrangementRow(props: {
@@ -119,14 +114,14 @@ function DragHandle(
   );
 }
 
-/** Drag projects into the order the Android project tree keeps. */
-export function ProjectArrangementSheet(props: {
-  readonly projects: ReadonlyArray<ArrangedProject>;
-  readonly onMove: (projectKey: string, move: ProjectMove) => void;
+/** Fork (F20): drag folders into the order the Android thread tree keeps on this device. */
+export function FolderArrangementSheet(props: {
+  readonly folders: ReadonlyArray<string>;
+  readonly onMove: (folder: string, move: FolderMove) => void;
   readonly onClose: () => void;
 }) {
-  const { projects } = props;
-  const list = useRef<FlatList<ArrangedProject>>(null);
+  const { folders } = props;
+  const list = useRef<FlatList<string>>(null);
   const geometry = useRef({ height: 0, offset: 0 });
   const drag = useRef<Drag | null>(null);
   const frame = useRef<number | null>(null);
@@ -139,7 +134,7 @@ export function ProjectArrangementSheet(props: {
     drag.current = null;
     setPreview(null);
   }
-  const orderVersion = projects.map((project) => project.key).join("\n");
+  const orderVersion = folders.join("\n");
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a saved move ends the drag and its pending animation frame
   useEffect(() => {
     // oxlint-disable-next-line react/exhaustive-effect-dependencies, react/set-state-in-effect -- A saved move cancels the drag and clears its preview; stop only touches refs and state setters.
@@ -155,43 +150,42 @@ export function ProjectArrangementSheet(props: {
 
   function update(translation: number) {
     const current = drag.current;
-    if (current === null || projects.length === 0) return;
+    if (current === null || folders.length === 0) return;
     current.translation = translation;
     const { height, offset } = geometry.current;
     const y = current.startY + translation;
     translateY.setValue(Math.max(0, Math.min(height - ROW_HEIGHT, y - ROW_HEIGHT / 2)));
     const contentY = Math.max(0, y + offset);
-    const index = Math.min(projects.length - 1, Math.floor(contentY / ROW_HEIGHT));
-    const row = projects[index]!;
-    const target: ProjectMove | null =
-      row.key === current.key || y < 0 || y > height
+    const index = Math.min(folders.length - 1, Math.floor(contentY / ROW_HEIGHT));
+    const row = folders[index]!;
+    const target: FolderMove | null =
+      row === current.folder || y < 0 || y > height
         ? null
         : {
-            targetKey: row.key,
+            target: row,
             placement: contentY < index * ROW_HEIGHT + ROW_HEIGHT / 2 ? "before" : "after",
           };
     const previous = current.target;
     const changed =
       previous === null || target === null
         ? previous !== target
-        : previous.targetKey !== target.targetKey || previous.placement !== target.placement;
+        : previous.target !== target.target || previous.placement !== target.placement;
     if (changed) {
       current.target = target;
       setPreview({ ...current });
     }
   }
 
-  function start(project: ArrangedProject, index: number) {
+  function start(folder: string, index: number) {
     if (drag.current !== null) return;
     drag.current = {
-      key: project.key,
+      folder,
       startY: index * ROW_HEIGHT + ROW_HEIGHT / 2 - geometry.current.offset,
       translation: 0,
       target: null,
     };
     setPreview({ ...drag.current });
     update(0);
-    // oxlint-disable-next-line react/purity -- runs in an event handler (oxc#27309)
     let last = performance.now();
     // Scrolls while a dragged row is held near the top or bottom edge.
     const tick = () => {
@@ -208,7 +202,7 @@ export function ProjectArrangementSheet(props: {
           : y > bounds.height - EDGE_SCROLL_ZONE
             ? Math.min(1, (y - bounds.height + EDGE_SCROLL_ZONE) / EDGE_SCROLL_ZONE)
             : 0;
-      const maximum = Math.max(0, projects.length * ROW_HEIGHT - bounds.height);
+      const maximum = Math.max(0, folders.length * ROW_HEIGHT - bounds.height);
       const offset = Math.max(0, Math.min(maximum, bounds.offset + speed * dt * 0.5));
       if (offset !== bounds.offset) {
         bounds.offset = offset;
@@ -222,19 +216,17 @@ export function ProjectArrangementSheet(props: {
 
   function end(cancelled: boolean) {
     const current = drag.current;
-    if (!cancelled && current?.target) props.onMove(current.key, current.target);
+    if (!cancelled && current?.target) props.onMove(current.folder, current.target);
     stop();
   }
 
-  const sourceIndex = preview ? projects.findIndex((project) => project.key === preview.key) : -1;
-  const targetIndex = preview?.target
-    ? projects.findIndex((project) => project.key === preview.target?.targetKey)
-    : -1;
+  const sourceIndex = preview ? folders.indexOf(preview.folder) : -1;
+  const targetIndex = preview?.target ? folders.indexOf(preview.target.target) : -1;
   const insertionOffset =
     targetIndex === -1
       ? sourceIndex * ROW_HEIGHT
       : targetIndex * ROW_HEIGHT + (preview?.target?.placement === "after" ? ROW_HEIGHT : 0);
-  const draggedTitle = sourceIndex === -1 ? null : projects[sourceIndex]!.title;
+  const draggedTitle = sourceIndex === -1 ? null : folders[sourceIndex]!;
 
   return (
     <Modal
@@ -250,12 +242,12 @@ export function ProjectArrangementSheet(props: {
             <SafeAreaView style={{ flex: 1 }}>
               <SheetHeader
                 presentation="inline"
-                title="Arrange projects"
+                title="Arrange folders"
                 onClose={props.onClose}
-                accessibilityLabel="Close arrange projects"
+                accessibilityLabel="Close arrange folders"
               />
               <Text className="px-5 pb-3 text-sm text-foreground-muted">
-                Drag to reorder. Projects stay in this order.
+                Drag to reorder. Folders stay in this order on this device.
               </Text>
               <View
                 onLayout={(event) => {
@@ -266,9 +258,9 @@ export function ProjectArrangementSheet(props: {
               >
                 <FlatList
                   ref={list}
-                  data={projects}
+                  data={folders}
                   extraData={preview}
-                  keyExtractor={(project) => project.key}
+                  keyExtractor={(folder) => folder}
                   scrollEnabled={preview === null}
                   removeClippedSubviews={false}
                   onScroll={(event) => {
@@ -296,20 +288,20 @@ export function ProjectArrangementSheet(props: {
                       }
                     >
                       <Text numberOfLines={1} className="flex-1 text-base">
-                        {item.title}
+                        {item}
                       </Text>
                       <DragHandle
-                        title={item.title}
+                        title={item}
                         canMoveUp={index > 0}
-                        canMoveDown={index < projects.length - 1}
+                        canMoveDown={index < folders.length - 1}
                         onStart={() => start(item, index)}
                         onMove={update}
                         onEnd={end}
                         onStep={(direction) => {
-                          const neighbour = projects[direction === "up" ? index - 1 : index + 1];
+                          const neighbour = folders[direction === "up" ? index - 1 : index + 1];
                           if (neighbour === undefined) return;
-                          props.onMove(item.key, {
-                            targetKey: neighbour.key,
+                          props.onMove(item, {
+                            target: neighbour,
                             placement: direction === "up" ? "before" : "after",
                           });
                         }}

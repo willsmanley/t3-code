@@ -81,20 +81,9 @@ import {
   type ThreadListV2ListItem,
 } from "../threads/threadListV2";
 import { useThreadListV2ShelfPreferences } from "../threads/use-thread-list-v2-shelf-preferences";
-import {
-  PROJECT_THREAD_TREE_ENABLED,
-  ProjectThreadTreeHeader,
-  ProjectThreadTreeMoreRow,
-} from "../threads/project-thread-tree-items";
-import { ProjectArrangementSheet } from "../threads/ProjectArrangementSheet";
-import {
-  buildProjectThreadTreeListItems,
-  projectTreeHeaderKeys,
-} from "../threads/projectThreadTree";
-import {
-  useProjectThreadTreeState,
-  useRememberProjectOrder,
-} from "../threads/use-project-thread-tree-state";
+import { PROJECT_THREAD_TREE_ENABLED } from "../threads/project-thread-tree-items";
+import { useThreadFolderTree } from "../threads/thread-folder-tree";
+import { isThreadFolderTreeListItem } from "../threads/threadFolderListItems";
 import type { HomeListFilterMenuEnvironment } from "./home-list-filter-menu";
 import {
   buildHomeProjectScopes,
@@ -153,7 +142,7 @@ interface HomeScreenProps {
   readonly onSelectPendingTask: (pendingTask: PendingNewTask) => void;
   readonly onDeletePendingTask: (pendingTask: PendingNewTask) => void;
   readonly onNewThreadOnBranch: (thread: EnvironmentThreadShell) => void;
-  readonly onNewThreadInProject: (project: EnvironmentProject) => void;
+  readonly onNewThreadInProject: (project: EnvironmentProject, requestId?: string) => void;
 }
 
 const ESTIMATED_THREAD_LIST_V2_ROW_HEIGHT = 72;
@@ -458,7 +447,15 @@ export function HomeScreen(props: HomeScreenProps) {
     toggleSnoozedShelf,
     toggleWorkingShelf,
   } = useThreadListV2ShelfPreferences();
-  const projectTree = useProjectThreadTreeState();
+  const folderTree = useThreadFolderTree({
+    projects: props.projects,
+    projectGroupingMode,
+    selectedThreadKey,
+    searching: hasSearchQuery,
+    filtered: v2ScopedProjectGroup !== null || selectedEnvironmentId !== null,
+    pane: sidebarSurface ? "sidebar" : "screen",
+    onNewThreadInProject: props.onNewThreadInProject,
+  });
   const now = useThreadListNow(props.threads);
   const listEnvironments = useAtomValue(threadListEnvironmentsAtom);
   const {
@@ -486,6 +483,7 @@ export function HomeScreen(props: HomeScreenProps) {
     queuedThreadKeys,
     selectedThreadKey,
     layout: PROJECT_THREAD_TREE_ENABLED ? "tree" : "flat",
+    folderOrder: PROJECT_THREAD_TREE_ENABLED ? folderTree.folderOrder : null,
   });
   const {
     layout: threadListV2Layout,
@@ -517,28 +515,9 @@ export function HomeScreen(props: HomeScreenProps) {
     selectedThreadKey,
   });
   const groupedThreadListV2Items = PROJECT_THREAD_TREE_ENABLED
-    ? buildProjectThreadTreeListItems({
-        listItems: flatThreadListV2Items,
-        projectGroups: new Map(
-          projectScopes.flatMap((scope) =>
-            scope.projectRefs.map(
-              (projectRef) =>
-                [
-                  scopedProjectKey(projectRef.environmentId, projectRef.projectId),
-                  { key: scope.key, title: scope.title },
-                ] as const,
-            ),
-          ),
-        ),
-        collapsedProjectKeys: projectTree.collapsedProjectKeys,
-        expandedProjectKeys: projectTree.expandedProjectKeys,
-        projectOrder: projectTree.projectOrder,
-        selectedThreadKey,
-        preferencesLoading: !projectTree.loaded,
-      })
+    ? folderTree.groupListItems(flatThreadListV2Items)
     : flatThreadListV2Items;
   const threadListV2Items = withWorkerShelf(groupedThreadListV2Items, workerGroup.shelfItems);
-  useRememberProjectOrder(projectTree, projectTreeHeaderKeys(threadListV2Items));
   // The tree loads every older settled page by itself, so it offers only a retry.
   const showOlderSettledRow =
     threadListV2Layout.hiddenSettledCount > 0 &&
@@ -641,43 +620,8 @@ export function HomeScreen(props: HomeScreenProps) {
         />
       );
     }
-    if (item.type === "v2-project") {
-      return (
-        <ProjectThreadTreeHeader
-          title={item.title}
-          threadCount={item.threadCount}
-          collapsed={item.collapsed}
-          status={item.status}
-          canMoveUp={item.previousProjectKey !== null}
-          canMoveDown={item.nextProjectKey !== null}
-          disabled={item.disabled}
-          pane={sidebarSurface ? "sidebar" : "screen"}
-          onToggle={() => projectTree.toggleProjectCollapsed(item.projectKey)}
-          onNewThread={() => {
-            const project = projectByKey.get(item.newThreadProjectKey);
-            if (project) props.onNewThreadInProject(project);
-          }}
-          onMove={(direction) => {
-            const targetKey = direction === "up" ? item.previousProjectKey : item.nextProjectKey;
-            if (targetKey === null) return;
-            projectTree.moveProject(item.projectKey, {
-              targetKey,
-              placement: direction === "up" ? "before" : "after",
-            });
-          }}
-          onArrange={projectTree.openProjectArrangement}
-        />
-      );
-    }
-    if (item.type === "v2-project-more") {
-      return (
-        <ProjectThreadTreeMoreRow
-          hiddenCount={item.hiddenCount}
-          expanded={item.expanded}
-          pane={sidebarSurface ? "sidebar" : "screen"}
-          onToggle={() => projectTree.toggleProjectExpanded(item.projectKey)}
-        />
-      );
+    if (isThreadFolderTreeListItem(item)) {
+      return folderTree.renderItem(item, workerGroup.toggleWorkerFolder);
     }
     const thread = item.item.thread;
     return (
@@ -973,15 +917,7 @@ export function HomeScreen(props: HomeScreenProps) {
           </SwipeableScrollGateProvider>
         </View>
       </ScreenContent>
-      {projectTree.arrangingProjects ? (
-        <ProjectArrangementSheet
-          projects={threadListV2Items.flatMap((item) =>
-            item.type === "v2-project" ? [{ key: item.projectKey, title: item.title }] : [],
-          )}
-          onMove={projectTree.moveProject}
-          onClose={projectTree.closeProjectArrangement}
-        />
-      ) : null}
+      {folderTree.arrangementSheet}
     </View>
   );
 }

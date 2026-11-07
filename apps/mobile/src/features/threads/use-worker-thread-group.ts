@@ -4,6 +4,7 @@ import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
 import { useMemo } from "react";
 
+import { folderGroupKey } from "./threadFolderListItems";
 import { threadListV2LayoutTime } from "./threadListV2";
 import { buildWorkerShelfListItems, partitionWorkerThreads } from "./workerThreadGroup";
 
@@ -11,6 +12,12 @@ import { buildWorkerShelfListItems, partitionWorkerThreads } from "./workerThrea
 const workersShelfExpandedAtom = Atom.make(false).pipe(
   Atom.keepAlive,
   Atom.withLabel("mobile:thread-list:workers-shelf-expanded"),
+);
+
+/** Folders closed inside the Workers shelf, for the session, like the desktop Workers tab (F20). */
+const collapsedWorkerFoldersAtom = Atom.make<ReadonlySet<string>>(new Set<string>()).pipe(
+  Atom.keepAlive,
+  Atom.withLabel("mobile:thread-list:workers-shelf-collapsed-folders"),
 );
 
 /**
@@ -31,8 +38,11 @@ export function useWorkerThreadGroup(input: {
   readonly queuedThreadKeys: ReadonlySet<string>;
   readonly selectedThreadKey: string | null;
   readonly layout: "flat" | "tree";
+  /** Groups the shelf's rows by folder in this order (tree layout only). */
+  readonly folderOrder: ReadonlyArray<string> | null;
 }) {
   const [expanded, setExpanded] = useAtom(workersShelfExpandedAtom);
+  const [collapsedFolders, setCollapsedFolders] = useAtom(collapsedWorkerFoldersAtom);
   const { threads, searchQuery } = input;
   const { listed, workers } = useMemo(
     () => partitionWorkerThreads(threads, searchQuery),
@@ -57,6 +67,9 @@ export function useWorkerThreadGroup(input: {
         expanded,
         selectedThreadKey: input.selectedThreadKey,
         layout: input.layout,
+        ...(input.folderOrder === null
+          ? {}
+          : { folders: { order: input.folderOrder, collapsedGroupKeys: collapsedFolders } }),
       }),
     [
       workers,
@@ -70,11 +83,21 @@ export function useWorkerThreadGroup(input: {
       expanded,
       input.selectedThreadKey,
       input.layout,
+      input.folderOrder,
+      collapsedFolders,
     ],
   );
   return {
     listedThreads: listed,
     shelfItems,
     toggleWorkersShelf: () => setExpanded((current) => !current),
+    toggleWorkerFolder: (folder: string | null) =>
+      setCollapsedFolders((current) => {
+        const key = folderGroupKey(folder);
+        const next = new Set(current);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        return next;
+      }),
   } as const;
 }

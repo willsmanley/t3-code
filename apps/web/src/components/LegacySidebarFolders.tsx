@@ -6,6 +6,7 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+import { folderNameProblem, planFolderPerProject } from "@t3tools/client-runtime/thread-folders";
 import { AuthOrchestrationOperateScope, type ContextMenuItem } from "@t3tools/contracts";
 import { CheckIcon, FolderIcon, FolderInputIcon, FolderPlusIcon, InboxIcon } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -18,7 +19,6 @@ import { readThreadShells, useThreadShells } from "../state/entities";
 import { readEnvironmentScope } from "../state/session";
 import type { SidebarProjectSnapshot } from "../sidebarProjectGrouping";
 import { type CommandPaletteActionItem, ITEM_ICON_CLASS } from "./CommandPalette.logic";
-import { folderNameProblem, planFolderPerProject } from "./legacySidebarFolders.logic";
 import {
   addFolders,
   deleteFolder,

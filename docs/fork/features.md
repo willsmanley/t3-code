@@ -345,41 +345,36 @@ Verify:
 - `ls infra/relay/src/agentActivity/{agentActivityAggregate,agentActivityAlerts,agentActivityPayloads,fcmPayloads}.ts`
   should fail. If upstream edited or re-created one of these, port the change to `packages/shared/src/`.
 
-### F7. Android thread list grouped by project (mobile, Android only)
+### F7. Android thread list as a tree (mobile, Android only)
 
 Commits `a7e6c56c58`, `4a160a79eb`, `ad1ed9c813`, `dbeb30f38d`.
 
 What it does: on Android, the home list and the tablet sidebar group threads under collapsible
-project headers, like the desktop sidebar. Rows are one line: status icon, title, time. Each
-project shows a few threads and a "show more" row. Each header has New thread, Move up / Move
-down and Arrange (a sheet to reorder every project), and the app remembers the order. Snoozed
-threads leave their projects for a Snoozed row at the bottom, closed unless the user opens it
-(search still finds them in place). iOS keeps upstream's flat list
+headers, like the desktop sidebar. The headers were projects; since F20 they are folders, then
+Unfiled. Rows are one line: status icon, title, time. Each group shows a few threads and a "show
+more" row. Snoozed threads leave their groups for a Snoozed row at the bottom, closed unless the
+user opens it (search still finds them in place). iOS keeps upstream's flat list
 (`PROJECT_THREAD_TREE_ENABLED = Platform.OS === "android"`).
 
 Fork-owned files: `apps/mobile/src/features/threads/projectThreadTree.ts` (+ test),
-`project-thread-tree-items.tsx`, `use-project-thread-tree-state.ts`, `ProjectArrangementSheet.tsx`.
+`project-thread-tree-items.tsx`; the folder files are listed under F20.
 
 Touch points:
 
-- `apps/mobile/src/features/home/HomeScreen.tsx`: imports; `useProjectThreadTreeState()`;
-  overrides the `useThreadListV2` inputs when the tree is on (`settledLimit` infinite, settled
-  shelf open, working shelf off); `buildProjectThreadTreeListItems(...)`; `useRememberProjectOrder`;
-  renders the `v2-project` and `v2-project-more` items; `layout="tree"` on rows;
-  `<ProjectArrangementSheet>`; "older settled" row logic.
+- `apps/mobile/src/features/home/HomeScreen.tsx`: overrides the `useThreadListV2` inputs when the
+  tree is on (`settledLimit` infinite, settled shelf open, working shelf off); `layout="tree"` on
+  rows; "older settled" row logic. The grouping itself is F20's `useThreadFolderTree`.
 - `apps/mobile/src/features/threads/ThreadNavigationSidebar.tsx`: nearly the same block.
 - `apps/mobile/src/features/threads/thread-list-v2-items.tsx`: a `layout?: "flat" | "tree"` prop
   and the one-line tree row JSX (`treeContent`).
-- `apps/mobile/src/features/threads/threadListV2.ts`: `ThreadListV2ProjectHeaderListItem` and
-  `ThreadListV2ProjectMoreListItem` in the union, `isThreadListV2ListItem`, equality cases.
-- `apps/mobile/src/persistence/mobile-preferences.ts`: the `projectOrder` preference and its
-  sanitizing.
+- `apps/mobile/src/features/threads/threadListV2.ts`: the tree's items in the union
+  (`ThreadFolderTreeListItem`), `isThreadListV2ListItem`, equality cases.
 
 Verify:
 
 - `vp test run apps/mobile/src/features/threads/projectThreadTree.test.ts`
 - `grep -c "PROJECT_THREAD_TREE_ENABLED" apps/mobile/src/features/home/HomeScreen.tsx apps/mobile/src/features/threads/ThreadNavigationSidebar.tsx` (6 or more each).
-- `grep -n 'case "v2-project"' apps/mobile/src/features/threads/threadListV2.ts` (one hit).
+- `grep -n 'case "v2-folder"' apps/mobile/src/features/threads/threadListV2.ts` (one hit).
 
 ### F8. Voice input on Android through ElevenLabs (mobile, Android only)
 
@@ -809,8 +804,8 @@ A worker's finished runs stay quiet: no browser notification, no phone card or c
 (questions, approvals and failures still push). Clicking a worker whose thread is archived opens
 it with `?archived=true`, which lets the thread route show an archived (never a deleted) thread,
 with an "archived" composer banner and Unarchive. The Android/iOS app hides workers from its lists
-into a collapsed "Workers (N)" group (except ones that need the user) and offers the same move in
-the long-press menu.
+into a collapsed "Workers (N)" group (except ones that need the user; on Android the open group
+lists workers by folder, F20) and offers the same move in the long-press menu.
 
 Fork-owned files:
 
@@ -871,9 +866,9 @@ Verify:
 - With `{ "key": "mod+arrowup", "command": "thread.previous" }` in `keybindings.json`, Cmd+Up in
   the composer switches threads; with no such binding it moves the caret to the start.
 
-### F20. Folders replace projects in the legacy sidebar (web/desktop)
+### F20. Folders replace projects in the legacy sidebar and the phone app (web/desktop, client-runtime, mobile)
 
-Added November 6, 2026.
+Added November 6, 2026; the phone app November 7, 2026.
 
 What it does: the legacy sidebar's Projects tab lists folders, then Unfiled, instead of projects.
 A folder only labels threads; it never changes where a thread's agent runs. A thread is in folder
@@ -901,13 +896,44 @@ device's) list after them by name. Folder names are trimmed, one line, at most 5
 - Thread traversal and the Cmd+1–9 jump hints follow the folders as shown. In a folder that mixes
   projects, a row's title tooltip adds the project name (the row itself shows only the title).
 
+Phone app (Android tree, F7): the home list and the tablet sidebar group threads by the same
+folders, then Unfiled, and the open Workers group (F18) lists workers by folder too (those
+sub-groups collapse for the session). Folder order, empty folders, collapse state and folders
+picked for unsent drafts are this device's, in the app preferences (`threadFolders`,
+`collapsedThreadFolders`, `unfiledThreadsCollapsed`, `pendingThreadFolders`). Search opens every
+folder and lists only folders with matches; a project or environment filter hides empty folders.
+
+- Thread long-press: "Move to folder ›" (folders, the current one checked, "New folder…") and
+  "Remove from folder", on iOS too.
+- Folder header: tap collapses; long-press offers Rename…, New folder…, Arrange folders… (a
+  drag sheet), Move up / Move down and Delete folder (confirmed when not empty). Unfiled's
+  long-press offers New folder… and Arrange; its folder button makes a folder.
+- A header's new-thread button opens a draft in the project of the folder's most recently active
+  thread (else the first project). The draft's route `requestId` keys the pending folder;
+  `NewTaskDraftScreen` reports the sent thread, and the thread is tagged once it shows up.
+- Until a folder exists, Unfiled offers "Make a folder for each project" (confirmed).
+
 Limits: rename and delete retag only loaded threads, so an archived thread keeps its old folder
 tag and brings that folder back when unarchived. The sidebar's project sort setting no longer
-applies here; the thread sort and "Visible threads" count still do.
+applies here; the thread sort and "Visible threads" count still do. The phone has no folder
+drag and drop; iOS keeps the flat list, so its menu moves threads into folders it doesn't show.
 
-Fork-owned files: `apps/web/src/components/legacySidebarFolders.logic.ts` (+ test),
-`legacySidebarFolders.store.ts` (the per-device store, tag writes, per-folder thread atoms),
-`LegacySidebarFolders.tsx` (dialogs, menus, palette items, the host that files sent drafts).
+Fork-owned files:
+
+- Shared rules (tag prefix, parsing, name checks, grouping, ordering, rename merge, the
+  folder-per-project plan, the new-thread project): `packages/client-runtime/src/threadFolders.ts`
+  (+ test), exported as `@t3tools/client-runtime/thread-folders`. Hermes has no
+  `Array#toSorted`, so keep it out of this file.
+- Web: `apps/web/src/components/legacySidebarFolders.logic.ts` (+ test; only the row windowing,
+  `resolveGroupPanel`), `legacySidebarFolders.store.ts` (the per-device store, tag writes,
+  per-folder thread atoms), `LegacySidebarFolders.tsx` (dialogs, menus, palette items, the host
+  that files sent drafts).
+- Mobile: `apps/mobile/src/features/threads/threadFolderActions.ts` (folder order atom, tag
+  writes, prompts, draft filing, the row menu), `threadFolderListItems.ts` (the tree's list
+  items), `thread-folder-tree.tsx` (grouping, headers and actions for both lists),
+  `use-thread-folders.ts`, `FolderArrangementSheet.tsx`, `projectThreadTree.ts` (+ test;
+  `buildFolderThreadTreeListItems`, `groupWorkerRowsByFolder`), `project-thread-tree-items.tsx`
+  (`ThreadFolderHeader`, `WorkerFolderHeader`), `apps/mobile/src/persistence/thread-folder-preferences.ts`.
 
 Touch points:
 
@@ -923,15 +949,38 @@ Touch points:
 - `apps/web/src/components/AppSidebarLayout.tsx`: mounts `LegacySidebarFoldersHost` beside the
   sidebar when `isElectron || forceLegacySidebar`, so dialogs and draft filing work while a
   phone-width sidebar is closed.
+- `packages/client-runtime/package.json`: the `./thread-folders` export.
+- `apps/mobile/src/features/home/HomeScreen.tsx` and `threads/ThreadNavigationSidebar.tsx`:
+  `useThreadFolderTree(...)`, `folderTree.groupListItems(...)` in place of the project grouping,
+  `folderTree.renderItem(...)` for the folder items, `folderTree.arrangementSheet`, and
+  `folderOrder` passed to `useWorkerThreadGroup`; `onNewThreadInProject` takes an optional
+  `requestId`.
+- `apps/mobile/src/features/home/HomeRouteScreen.tsx` and
+  `layout/workspace/WorkspaceThreadSidebar.tsx`: `onNewThreadInProject` uses the given `requestId`.
+- `apps/mobile/src/features/threads/NewTaskDraftScreen.tsx`: one `fileSentDraftInFolder(...)`
+  call after the outbox accepts the first message.
+- `apps/mobile/src/features/threads/thread-list-v2-items.tsx`: `useThreadFolderMenu(thread)` in
+  the row's menu items and event handler.
+- `apps/mobile/src/features/threads/use-worker-thread-group.ts` and `workerThreadGroup.ts` (F18):
+  `folderOrder` input, session-collapsed worker folders, `toggleWorkerFolder`.
+- `apps/mobile/src/persistence/mobile-preferences.ts`: `Preferences extends
+  ThreadFolderPreferences` and one `sanitizeThreadFolderPreferences(parsed)` spread.
 
 Verify:
 
-- `vp test run apps/web/src/components/legacySidebarFolders.logic.test.ts apps/web/src/components/legacySidebarWorkers.logic.test.ts`
+- `vp test run packages/client-runtime/src/threadFolders.test.ts apps/web/src/components/legacySidebarFolders.logic.test.ts apps/web/src/components/legacySidebarWorkers.logic.test.ts`
+- `vp test run apps/mobile/src/features/threads/projectThreadTree.test.ts apps/mobile/src/features/threads/workerThreadGroup.test.ts`
 - `grep -n "legacyFolderPaletteItems\|LegacySidebarFoldersHost" apps/web/src/components/CommandPalette.tsx apps/web/src/components/AppSidebarLayout.tsx`
   (two hits each).
+- `grep -c "useThreadFolderTree\|folderTree\." apps/mobile/src/features/home/HomeScreen.tsx apps/mobile/src/features/threads/ThreadNavigationSidebar.tsx`
+  (5 or more each), and `grep -n fileSentDraftInFolder apps/mobile/src/features/threads/NewTaskDraftScreen.tsx` (two hits).
 - In the desktop app: make a folder, drag a thread onto it and back to Unfiled, start a thread
   with the folder's new-thread button and send a message (it lands in the folder), and move a
   thread with "Move to folder…" from the command palette.
+- In the Android app: long-press a thread, Move to folder › New folder…, and see it under that
+  folder (and in the desktop sidebar); long-press the folder header to rename, arrange and
+  delete it; start a thread from the folder's new-thread button and send it (it lands in the
+  folder); open Workers and see workers under their folders.
 
 ### C1. Nightly build and release workflow (CI)
 
@@ -1102,29 +1151,21 @@ The goal for each item: fork logic in a fork-owned file, and only an import plus
 left in the upstream file. Order is by risk, with related items grouped. "Guess" marks ideas that
 need a quick try before you rely on them.
 
-1. **Project tree in `HomeScreen.tsx` and `ThreadNavigationSidebar.tsx` (#4 and #6, 236 lines,
-   31 upstream commits each, both pending).** The two files carry nearly the same block. Add
-   `apps/mobile/src/features/threads/useProjectThreadTreeList.tsx` with:
-   - `projectTreeListInputs(input)`, which applies the tree overrides (`settledLimit`, working
-     shelf off, shelves open). The call becomes `useThreadListV2(projectTreeListInputs({...}))`.
-   - `useProjectThreadTreeList({ flatItems, projectScopes, selectedThreadKey, hiddenSettledCount, olderSettledShelf, settledShelfExpanded, onNewThreadInProject, pane })`,
-     returning `{ items, showOlderSettledRow, rowLayout, renderTreeItem, arrangementSheet }`. It
-     holds `useProjectThreadTreeState`, `buildProjectThreadTreeListItems`,
-     `useRememberProjectOrder`, the header and "more" row JSX, and the arrangement sheet.
-
-   Each upstream file then keeps about six one-line hooks: the import, the hook call, one line in
-   `renderItem` (`const tree = renderTreeItem(item); if (tree) return tree;`),
-   `layout={rowLayout}`, `{arrangementSheet}`, and the `showOlderSettledRow` use. Guess: React
-   Compiler rules may prefer a `<ProjectThreadTreeItem>` component to a render function.
+1. **Thread tree in `HomeScreen.tsx` and `ThreadNavigationSidebar.tsx` (#4 and #6, 31
+   upstream commits each).** F20 moved the grouping, header JSX and arrangement sheet into
+   `useThreadFolderTree` (`thread-folder-tree.tsx`). What is left is the tree's overrides of the
+   `useThreadListV2` inputs (`settledLimit`, working shelf off, shelves open) and the
+   `showOlderSettledRow` rule; a `threadTreeListInputs(input)` helper there would leave each file
+   with the import, the hook call, one `renderItem` line, `layout={rowLayout}` and
+   `{folderTree.arrangementSheet}`.
 
 2. **`thread-list-v2-items.tsx` (#8) and `threadListV2.ts` (#18).**
    - Move `treeContent` and its `RowPressable` wrapper into `ProjectThreadTreeRow` in
      `project-thread-tree-items.tsx`. `ThreadListV2Row` keeps one branch:
      `props.layout === "tree" ? <ProjectThreadTreeRow ... /> : ...`.
    - Move `FORK_CONVERSATION_MENU_ACTION` into `home/thread-fork.ts`.
-   - Move the two list-item interfaces and their equality checks into `projectThreadTree.ts` and
-     export `projectTreeListItemsAreEqual`. `threadListV2.ts` keeps the two union members and one
-     delegating `case`.
+   - Done in F20: the tree's list items and their equality live in `threadFolderListItems.ts`;
+     `threadListV2.ts` keeps one union member and one delegating `case` group.
 
    About 8 lines are left in each file.
 

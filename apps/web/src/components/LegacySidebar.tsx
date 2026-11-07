@@ -151,8 +151,8 @@ import {
   chooseFolderThreadProject,
   groupByFolder,
   moveFolder,
-  resolveGroupPanel,
-} from "./legacySidebarFolders.logic";
+} from "@t3tools/client-runtime/thread-folders";
+import { resolveGroupPanel } from "./legacySidebarFolders.logic";
 import {
   folderOfThread,
   moveThreadsToFolder,

@@ -65,6 +65,7 @@ import { buildThreadTitleRegenerationMenuItems } from "./thread-title-regenerati
 import { canTurnThreadIntoProject, turnThreadIntoProject } from "./turnThreadIntoProject";
 import { WORKER_TAG_MENU_ACTION_ID, workerTagMenuAction } from "./workerThreads";
 import { toggleThreadWorkerTag } from "./workerThreadTag";
+import { useThreadFolderMenu } from "./use-thread-folders";
 import { threadCanArchive } from "../home/threadArchive";
 import {
   THREAD_LIST_V2_SETTLED_PAGE_COUNT,
@@ -917,6 +918,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   );
   const canTurnIntoProject = canTurnThreadIntoProject(thread);
   const workerTagAction = workerTagMenuAction(thread);
+  const folderMenu = useThreadFolderMenu(thread);
   const titleMenuItems = useMemo<MenuAction[]>(
     () => [
       { id: "rename", title: "Rename", image: "square.and.pencil" },
@@ -935,6 +937,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           ]
         : []),
       workerTagAction,
+      ...folderMenu.actions,
     ],
     [
       canTurnIntoProject,
@@ -942,6 +945,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       thread.runtime,
       isRegeneratingTitle,
       workerTagAction,
+      folderMenu.actions,
     ],
   );
   const menuActions = useMemo<MenuAction[]>(() => {
@@ -1048,6 +1052,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       if (nativeEvent.event === "regenerate-title") handleRegenerateTitle();
       if (nativeEvent.event === "turn-into-project") void turnThreadIntoProject(thread);
       if (nativeEvent.event === WORKER_TAG_MENU_ACTION_ID) void toggleThreadWorkerTag(thread);
+      if (folderMenu.handle(nativeEvent.event)) return;
       if (nativeEvent.event === "copy-thread") {
         const target = threadChipCopyTarget(
           { environmentId: thread.environmentId, threadId: thread.id },
@@ -1084,6 +1089,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       onForkThread,
       onNewThreadOnBranch,
       thread,
+      folderMenu,
       handleArchive,
       handleDelete,
       handleRegenerateTitle,

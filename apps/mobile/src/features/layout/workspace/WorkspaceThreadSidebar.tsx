@@ -64,10 +64,10 @@ export function WorkspaceThreadSidebar() {
       selectedThreadKey={selectedThread}
       onOpenSettings={() => openWorkspaceTab("settings")}
       onOpenEnvironmentSettings={() => openSettings(navigation, "SettingsEnvironments")}
-      onNewThreadInProject={(project: EnvironmentProject) =>
+      onNewThreadInProject={(project: EnvironmentProject, requestId = uuidv4()) =>
         selectThreadRoute({
           draft: {
-            requestId: uuidv4(),
+            requestId,
             environmentId: String(project.environmentId),
             projectId: String(project.id),
             title: project.title,

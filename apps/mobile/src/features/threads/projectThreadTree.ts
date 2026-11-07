@@ -1,14 +1,23 @@
 import { getThreadSortTimestamp } from "@t3tools/client-runtime/state/thread-sort";
+import {
+  chooseFolderThreadProject,
+  folderOfTags,
+  groupByFolder,
+} from "@t3tools/client-runtime/thread-folders";
 
 import { relativeTime } from "../../lib/time";
 import { scopedProjectKey } from "../../lib/scopedEntities";
+import {
+  folderGroupKey,
+  type ThreadListV2FolderHeaderListItem,
+  type ThreadListV2FolderMoreListItem,
+  type ThreadListV2WorkerFolderListItem,
+} from "./threadFolderListItems";
 import {
   resolveThreadListV2Status,
   threadHasUnseenCompletion,
   type ThreadListV2Item,
   type ThreadListV2ListItem,
-  type ThreadListV2ProjectHeaderListItem,
-  type ThreadListV2ProjectMoreListItem,
   type ThreadListV2ThreadListItem,
 } from "./threadListV2";
 
@@ -56,71 +65,74 @@ function mostUrgentDot(
   return DOT_PRIORITY[candidate] < DOT_PRIORITY[current] ? candidate : current;
 }
 
-/** Places a project just before or after another one. */
-export interface ProjectMove {
-  readonly targetKey: string;
+/** Places a folder just before or after another one. */
+export interface FolderMove {
+  readonly target: string;
   readonly placement: "before" | "after";
 }
 
-/** The saved order with the projects it has not seen yet in front, in the given order. */
-export function mergeProjectOrder(
-  savedOrder: ReadonlyArray<string>,
-  projectKeys: ReadonlyArray<string>,
+/** Moves a folder next to another; folders not in `order` leave it unchanged. */
+export function moveFolderNextTo(
+  order: ReadonlyArray<string>,
+  folder: string,
+  move: FolderMove,
 ): string[] {
-  const known = new Set(savedOrder);
-  return [...new Set(projectKeys.filter((key) => !known.has(key))), ...savedOrder];
-}
-
-/**
- * Moves a project next to another in the saved order. Projects hidden by a
- * filter or a disconnected environment keep their place among the rest.
- */
-export function applyProjectMove(
-  savedOrder: ReadonlyArray<string>,
-  projectKey: string,
-  move: ProjectMove,
-): string[] {
-  const order = mergeProjectOrder(savedOrder, [projectKey, move.targetKey]);
-  if (projectKey === move.targetKey) return order;
-  const next = order.filter((key) => key !== projectKey);
-  const targetIndex = next.indexOf(move.targetKey);
-  next.splice(move.placement === "before" ? targetIndex : targetIndex + 1, 0, projectKey);
+  if (folder === move.target || !order.includes(folder)) return [...order];
+  const next = order.filter((name) => name !== folder);
+  const targetIndex = next.indexOf(move.target);
+  if (targetIndex < 0) return [...order];
+  next.splice(move.placement === "before" ? targetIndex : targetIndex + 1, 0, folder);
   return next;
 }
 
-export function projectTreeHeaderKeys(
-  items: ReadonlyArray<{ readonly type: string; readonly projectKey?: string }>,
-): string[] {
-  return items.flatMap((item) =>
-    item.type === "v2-project" && item.projectKey !== undefined ? [item.projectKey] : [],
-  );
+function sortTreeRows(
+  rows: ReadonlyArray<ThreadListV2ThreadListItem>,
+): ThreadListV2ThreadListItem[] {
+  // Pinned threads keep their arranged order at the top; the rest follow the
+  // desktop tree's most-recent-first order.
+  const pinned = rows.filter((row) => row.item.pinned);
+  const rest = rows
+    .filter((row) => !row.item.pinned)
+    .map((row) => ({ row, activity: getThreadSortTimestamp(row.item.thread, "updated_at") }))
+    .sort((left, right) => right.activity - left.activity)
+    .map(({ row }) => row);
+  return [...pinned, ...rest];
 }
 
-interface ProjectGroup {
-  readonly projectKey: string;
-  readonly title: string;
-  readonly rows: ThreadListV2ThreadListItem[];
-  latestActivity: number;
-  newThreadProjectKey: string;
+function rowThreadKey(row: ThreadListV2ThreadListItem): string {
+  return `${row.item.thread.environmentId}:${row.item.thread.id}`;
+}
+
+function newThreadProjectKey(rows: ReadonlyArray<ThreadListV2ThreadListItem>): string | null {
+  return chooseFolderThreadProject({
+    folderThreads: rows.map(({ item: { thread } }) => ({
+      project: scopedProjectKey(thread.environmentId, thread.projectId),
+      activeAt: thread.latestUserMessageAt ?? thread.updatedAt,
+    })),
+    current: null,
+    first: null,
+  });
 }
 
 /**
- * Regroups the flat list under project headers. Pass items built with the settled shelf open and
- * no settled limit; snoozed threads go to the Snoozed shelf after the projects. `projectGroups`
- * maps environment projects to a shared header; `projectOrder` ranks them, unlisted first.
+ * Regroups the flat list under folder headers, in `folderOrder`, then Unfiled. Pass items built
+ * with the settled shelf open and no settled limit; snoozed threads go to the Snoozed shelf after
+ * the folders. Empty folders, Unfiled included, show only with `showEmptyFolders`.
  */
-export function buildProjectThreadTreeListItems(input: {
+export function buildFolderThreadTreeListItems(input: {
   readonly listItems: ReadonlyArray<ThreadListV2ListItem>;
-  readonly projectGroups: ReadonlyMap<string, { readonly key: string; readonly title: string }>;
-  readonly collapsedProjectKeys: ReadonlySet<string>;
-  readonly expandedProjectKeys: ReadonlySet<string>;
-  readonly projectOrder?: ReadonlyArray<string>;
+  readonly folderOrder: ReadonlyArray<string>;
+  /** Folder group keys (see `folderGroupKey`) that are collapsed. */
+  readonly collapsedGroupKeys: ReadonlySet<string>;
+  /** Folder group keys whose "Show more" is open. */
+  readonly expandedGroupKeys: ReadonlySet<string>;
+  readonly showEmptyFolders: boolean;
   readonly selectedThreadKey?: string | null;
   readonly preferencesLoading?: boolean;
 }): ThreadListV2ListItem[] {
   const pending: ThreadListV2ListItem[] = [];
   const snoozedShelf: ThreadListV2ListItem[] = [];
-  const groups = new Map<string, ProjectGroup>();
+  const threadRows: ThreadListV2ThreadListItem[] = [];
   for (const entry of input.listItems) {
     if (entry.type === "v2-pending") {
       pending.push(entry);
@@ -131,32 +143,12 @@ export function buildProjectThreadTreeListItems(input: {
       continue;
     }
     if (entry.type !== "v2-thread") continue;
-    // Search lists snoozed matches without the shelf; those keep their project.
+    // Search lists snoozed matches without the shelf; those keep their folder.
     if (entry.item.snoozed && snoozedShelf.length > 0) {
       snoozedShelf.push(toTreeRow(entry));
       continue;
     }
-    const thread = entry.item.thread;
-    const scopedKey = scopedProjectKey(thread.environmentId, thread.projectId);
-    const projectGroup = input.projectGroups.get(scopedKey);
-    const projectKey = projectGroup?.key ?? scopedKey;
-    const activity = getThreadSortTimestamp(thread, "updated_at");
-    const group = groups.get(projectKey);
-    if (group === undefined) {
-      groups.set(projectKey, {
-        projectKey,
-        title: projectGroup?.title ?? "Project",
-        rows: [entry],
-        latestActivity: activity,
-        newThreadProjectKey: scopedKey,
-      });
-    } else {
-      group.rows.push(entry);
-      if (activity > group.latestActivity) {
-        group.latestActivity = activity;
-        group.newThreadProjectKey = scopedKey;
-      }
-    }
+    threadRows.push(entry);
   }
 
   const result: ThreadListV2ListItem[] = pending.map((entry) =>
@@ -164,62 +156,64 @@ export function buildProjectThreadTreeListItems(input: {
       ? { ...entry, showTrailingDivider: false }
       : entry,
   );
-  const rankByProjectKey = new Map(input.projectOrder?.map((key, index) => [key, index]));
-  const orderedGroups = [...groups.values()].sort(
-    (left, right) =>
-      (rankByProjectKey.get(left.projectKey) ?? -1) -
-        (rankByProjectKey.get(right.projectKey) ?? -1) ||
-      right.latestActivity - left.latestActivity ||
-      (left.projectKey < right.projectKey ? -1 : left.projectKey > right.projectKey ? 1 : 0),
+  const grouped = groupByFolder(
+    threadRows,
+    (row) => folderOfTags(row.item.thread.source.tags),
+    input.folderOrder,
   );
-  for (const [groupIndex, group] of orderedGroups.entries()) {
-    // Pinned threads keep their arranged order at the top; the rest follow the
-    // desktop tree's most-recent-first order.
-    const pinned = group.rows.filter((row) => row.item.pinned);
-    const rest = group.rows
-      .filter((row) => !row.item.pinned)
-      .map((row) => ({ row, activity: getThreadSortTimestamp(row.item.thread, "updated_at") }))
-      .sort((left, right) => right.activity - left.activity)
-      .map(({ row }) => row);
-    const rows = [...pinned, ...rest];
-    const collapsed = input.collapsedProjectKeys.has(group.projectKey);
-    const expanded = input.expandedProjectKeys.has(group.projectKey);
+  const folders = grouped.folders.filter(
+    (group) => input.showEmptyFolders || group.threads.length > 0,
+  );
+  const groups = [
+    ...folders.map((group) => ({ folder: group.folder as string | null, rows: group.threads })),
+    ...(input.showEmptyFolders || grouped.unfiled.length > 0
+      ? [{ folder: null, rows: grouped.unfiled }]
+      : []),
+  ];
+  for (const [groupIndex, group] of groups.entries()) {
+    const groupKey = folderGroupKey(group.folder);
+    const rows = sortTreeRows(group.rows);
+    const collapsed = input.collapsedGroupKeys.has(groupKey);
+    const expanded = input.expandedGroupKeys.has(groupKey);
     let status: ThreadStatusDotKind | null = null;
     for (const row of rows) status = mostUrgentDot(status, resolveThreadStatusDot(row.item));
-    const header: ThreadListV2ProjectHeaderListItem = {
-      type: "v2-project",
-      key: `v2-project:${group.projectKey}`,
-      projectKey: group.projectKey,
-      title: group.title,
+    const header: ThreadListV2FolderHeaderListItem = {
+      type: "v2-folder",
+      key: `v2-folder:${groupKey}`,
+      folder: group.folder,
       threadCount: rows.length,
       collapsed,
       status: collapsed ? status : null,
-      newThreadProjectKey: group.newThreadProjectKey,
-      previousProjectKey: orderedGroups[groupIndex - 1]?.projectKey ?? null,
-      nextProjectKey: orderedGroups[groupIndex + 1]?.projectKey ?? null,
+      newThreadProjectKey: newThreadProjectKey(rows),
+      previousFolder: group.folder === null ? null : (folders[groupIndex - 1]?.folder ?? null),
+      nextFolder: group.folder === null ? null : (folders[groupIndex + 1]?.folder ?? null),
+      canArrange: input.folderOrder.length > 1,
+      offerFolderPerProject:
+        group.folder === null &&
+        input.folderOrder.length === 0 &&
+        input.preferencesLoading !== true,
       disabled: input.preferencesLoading === true,
     };
     result.push(header);
-    if (collapsed) continue;
 
-    const preview = expanded ? rows : rows.slice(0, PROJECT_THREAD_TREE_PREVIEW_COUNT);
     const selected =
       input.selectedThreadKey == null
         ? undefined
-        : rows
-            .slice(preview.length)
-            .find(
-              (row) =>
-                `${row.item.thread.environmentId}:${row.item.thread.id}` ===
-                input.selectedThreadKey,
-            );
-    const visible = selected === undefined ? preview : [...preview, selected];
+        : rows.find((row) => rowThreadKey(row) === input.selectedThreadKey);
+    if (collapsed) {
+      // A collapsed folder keeps the open thread in view, like the desktop sidebar.
+      if (selected !== undefined) result.push(toTreeRow(selected));
+      continue;
+    }
+    const preview = expanded ? rows : rows.slice(0, PROJECT_THREAD_TREE_PREVIEW_COUNT);
+    const visible =
+      selected === undefined || preview.includes(selected) ? preview : [...preview, selected];
     for (const row of visible) result.push(toTreeRow(row));
     if (rows.length > PROJECT_THREAD_TREE_PREVIEW_COUNT) {
-      const more: ThreadListV2ProjectMoreListItem = {
-        type: "v2-project-more",
-        key: `v2-project-more:${group.projectKey}`,
-        projectKey: group.projectKey,
+      const more: ThreadListV2FolderMoreListItem = {
+        type: "v2-folder-more",
+        key: `v2-folder-more:${groupKey}`,
+        folder: group.folder,
         hiddenCount: rows.length - visible.length,
         expanded,
       };
@@ -228,6 +222,47 @@ export function buildProjectThreadTreeListItems(input: {
   }
   result.push(...snoozedShelf);
   return result;
+}
+
+/**
+ * Groups the Workers shelf's rows by folder, in `folderOrder`, then Unfiled; folders without a
+ * worker are left out. A collapsed folder keeps only the selected worker.
+ */
+export function groupWorkerRowsByFolder(input: {
+  readonly rows: ReadonlyArray<ThreadListV2ListItem>;
+  readonly folderOrder: ReadonlyArray<string>;
+  readonly collapsedGroupKeys: ReadonlySet<string>;
+  readonly selectedThreadKey?: string | null;
+}): ThreadListV2ListItem[] {
+  const threadRows = input.rows.filter((row) => row.type === "v2-thread");
+  const grouped = groupByFolder(
+    threadRows,
+    (row) => folderOfTags(row.item.thread.source.tags),
+    input.folderOrder,
+  );
+  const groups = [
+    ...grouped.folders.map((group) => ({
+      folder: group.folder as string | null,
+      rows: group.threads,
+    })),
+    { folder: null, rows: grouped.unfiled },
+  ];
+  return groups.flatMap(({ folder, rows }) => {
+    if (rows.length === 0) return [];
+    const groupKey = folderGroupKey(folder);
+    const collapsed = input.collapsedGroupKeys.has(groupKey);
+    const header: ThreadListV2WorkerFolderListItem = {
+      type: "v2-worker-folder",
+      key: `v2-worker-folder:${groupKey}`,
+      folder,
+      count: rows.length,
+      collapsed,
+    };
+    const visible = collapsed
+      ? rows.filter((row) => rowThreadKey(row) === input.selectedThreadKey)
+      : rows;
+    return [header, ...visible];
+  });
 }
 
 export function toTreeRow(row: ThreadListV2ThreadListItem): ThreadListV2ThreadListItem {

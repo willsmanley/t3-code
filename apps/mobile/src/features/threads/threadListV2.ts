@@ -35,7 +35,11 @@ import type { MenuAction } from "@react-native-menu/menu";
 
 import type { ThreadListProvider } from "../../state/thread-list-environments";
 import type { ThreadMoveAvailability } from "./threadOrder";
-import type { ThreadStatusDotKind } from "./projectThreadTree";
+import {
+  isThreadFolderTreeListItem,
+  threadFolderTreeListItemsAreEqual,
+  type ThreadFolderTreeListItem,
+} from "./threadFolderListItems";
 
 import { relativeTime } from "../../lib/time";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
@@ -428,39 +432,6 @@ export interface ThreadListV2SettledShelfListItem {
   readonly disabled: boolean;
 }
 
-/** Project header in the project tree layout (see projectThreadTree.ts). */
-export interface ThreadListV2ProjectHeaderListItem {
-  readonly type: "v2-project";
-  readonly key: string;
-  readonly projectKey: string;
-  readonly title: string;
-  readonly threadCount: number;
-  readonly collapsed: boolean;
-  /** The most urgent thread status, shown only while the project is collapsed. */
-  readonly status: ThreadStatusDotKind | null;
-  /**
-   * The environment project a new thread from this header starts in: the one
-   * most recently active, when the project is open in several environments.
-   */
-  readonly newThreadProjectKey: string;
-  /** The neighbouring projects, which Move up and Move down place this one past. */
-  readonly previousProjectKey: string | null;
-  readonly nextProjectKey: string | null;
-  /**
-   * Carried on the item because a recycled cell ignores the render closure, so
-   * the header must re-render once the collapsed-project preference loads.
-   */
-  readonly disabled: boolean;
-}
-
-export interface ThreadListV2ProjectMoreListItem {
-  readonly type: "v2-project-more";
-  readonly key: string;
-  readonly projectKey: string;
-  readonly hiddenCount: number;
-  readonly expanded: boolean;
-}
-
 export type ThreadListV2ListItem =
   | ThreadListV2ThreadListItem
   | ThreadListV2PendingListItem
@@ -468,8 +439,7 @@ export type ThreadListV2ListItem =
   | ThreadListV2SnoozedShelfListItem
   | ThreadListV2SettledShelfListItem
   | ThreadListV2WorkersShelfListItem
-  | ThreadListV2ProjectHeaderListItem
-  | ThreadListV2ProjectMoreListItem;
+  | ThreadFolderTreeListItem;
 
 export function isThreadListV2ListItem(value: {
   readonly type: string;
@@ -481,8 +451,7 @@ export function isThreadListV2ListItem(value: {
     value.type === "v2-snoozed-shelf" ||
     value.type === "v2-settled-shelf" ||
     value.type === "v2-workers-shelf" ||
-    value.type === "v2-project" ||
-    value.type === "v2-project-more"
+    isThreadFolderTreeListItem(value)
   );
 }
 
@@ -544,26 +513,10 @@ export function threadListV2ListItemsAreEqual(
         previous.count === item.count &&
         previous.expanded === item.expanded
       );
-    case "v2-project":
-      return (
-        previous.type === "v2-project" &&
-        previous.key === item.key &&
-        previous.title === item.title &&
-        previous.threadCount === item.threadCount &&
-        previous.collapsed === item.collapsed &&
-        previous.status === item.status &&
-        previous.newThreadProjectKey === item.newThreadProjectKey &&
-        previous.previousProjectKey === item.previousProjectKey &&
-        previous.nextProjectKey === item.nextProjectKey &&
-        previous.disabled === item.disabled
-      );
-    case "v2-project-more":
-      return (
-        previous.type === "v2-project-more" &&
-        previous.key === item.key &&
-        previous.hiddenCount === item.hiddenCount &&
-        previous.expanded === item.expanded
-      );
+    case "v2-folder":
+    case "v2-folder-more":
+    case "v2-worker-folder":
+      return threadFolderTreeListItemsAreEqual(previous, item);
   }
 }
 

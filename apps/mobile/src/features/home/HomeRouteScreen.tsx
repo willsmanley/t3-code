@@ -213,10 +213,10 @@ export function HomeRouteScreen() {
           onSelectPendingTask={openPendingTask}
           onDeletePendingTask={confirmDeletePendingTask}
           onNewThreadOnBranch={handleNewThreadOnBranch}
-          onNewThreadInProject={(project) => {
+          onNewThreadInProject={(project, requestId = uuidv4()) => {
             selectThreadRoute({
               draft: {
-                requestId: uuidv4(),
+                requestId,
                 environmentId: String(project.environmentId),
                 projectId: String(project.id),
                 title: project.title,

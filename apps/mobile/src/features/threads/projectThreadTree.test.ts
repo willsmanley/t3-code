@@ -4,11 +4,11 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { makeThreadShellFixture } from "../../test-fixtures";
 import {
-  applyProjectMove,
-  buildProjectThreadTreeListItems,
-  mergeProjectOrder,
+  buildFolderThreadTreeListItems,
+  moveFolderNextTo,
   PROJECT_THREAD_TREE_PREVIEW_COUNT,
 } from "./projectThreadTree";
+import { folderGroupKey } from "./threadFolderListItems";
 import {
   buildThreadListV2Items,
   buildThreadListV2ListItems,
@@ -23,36 +23,34 @@ const BASE_MS = Date.parse(NOW);
 
 function makeThread(
   id: string,
-  projectId: ProjectId,
+  folder: string | null,
   minutesAgo: number,
   overrides: Partial<EnvironmentThreadShell> = {},
 ): EnvironmentThreadShell {
   const at = new Date(BASE_MS - minutesAgo * 60_000).toISOString();
-  return makeThreadShellFixture({
+  const thread = makeThreadShellFixture({
     environmentId,
     id: ThreadId.make(id),
-    projectId,
+    projectId: api,
     title: id,
     createdAt: at,
     updatedAt: at,
     latestUserMessageAt: at,
     ...overrides,
   });
+  return folder === null
+    ? thread
+    : { ...thread, source: { ...thread.source, tags: [`folder:${folder}`] } };
 }
-
-const projectGroups = new Map([
-  [`${environmentId}:${api}`, { key: "group:api", title: "API" }],
-  [`${environmentId}:${web}`, { key: "group:web", title: "Web" }],
-]);
 
 function buildTree(
   threads: ReadonlyArray<EnvironmentThreadShell>,
   options: {
-    readonly collapsed?: ReadonlyArray<string>;
-    readonly expanded?: ReadonlyArray<string>;
+    readonly folderOrder?: ReadonlyArray<string>;
+    readonly collapsed?: ReadonlyArray<string | null>;
+    readonly expanded?: ReadonlyArray<string | null>;
+    readonly showEmptyFolders?: boolean;
     readonly selectedThreadKey?: string;
-    readonly groups?: typeof projectGroups;
-    readonly projectOrder?: ReadonlyArray<string>;
     readonly snoozedShelfExpanded?: boolean;
   } = {},
 ): ThreadListV2ListItem[] {
@@ -65,7 +63,7 @@ function buildTree(
     snoozedShelfExpanded,
     settledShelfExpanded: true,
   });
-  return buildProjectThreadTreeListItems({
+  return buildFolderThreadTreeListItems({
     listItems: buildThreadListV2ListItems({
       items: layout.items,
       pendingTasks: [],
@@ -76,10 +74,10 @@ function buildTree(
       settledShelfExpanded: true,
       settledShelfHeaderIndex: layout.settledShelfHeaderIndex,
     }),
-    projectGroups: options.groups ?? projectGroups,
-    collapsedProjectKeys: new Set(options.collapsed ?? []),
-    expandedProjectKeys: new Set(options.expanded ?? []),
-    projectOrder: options.projectOrder,
+    folderOrder: options.folderOrder ?? [],
+    collapsedGroupKeys: new Set((options.collapsed ?? []).map(folderGroupKey)),
+    expandedGroupKeys: new Set((options.expanded ?? []).map(folderGroupKey)),
+    showEmptyFolders: options.showEmptyFolders ?? true,
     selectedThreadKey: options.selectedThreadKey,
   });
 }
@@ -87,9 +85,9 @@ function buildTree(
 function outline(items: ReadonlyArray<ThreadListV2ListItem>): string[] {
   return items.map((item) => {
     switch (item.type) {
-      case "v2-project":
-        return `# ${item.title}${item.collapsed ? ` (${item.threadCount})` : ""}`;
-      case "v2-project-more":
+      case "v2-folder":
+        return `# ${item.folder ?? "Unfiled"}${item.collapsed ? ` (${item.threadCount})` : ""}`;
+      case "v2-folder-more":
         return item.expanded ? "less" : `more ${item.hiddenCount}`;
       case "v2-thread":
         return item.item.thread.title;
@@ -99,95 +97,118 @@ function outline(items: ReadonlyArray<ThreadListV2ListItem>): string[] {
   });
 }
 
-describe("buildProjectThreadTreeListItems", () => {
-  it("groups threads under projects, most recently active first, without shelves", () => {
-    const items = buildTree([
-      makeThread("api-old", api, 30),
-      makeThread("web-new", web, 1),
-      makeThread("api-settled", api, 5, { settledOverride: "settled" }),
-      makeThread("web-old", web, 60),
-    ]);
+describe("buildFolderThreadTreeListItems", () => {
+  it("groups threads by folder in the given order, then Unfiled, most recently active first", () => {
+    const items = buildTree(
+      [
+        makeThread("api-old", "API", 30),
+        makeThread("loose", null, 2),
+        makeThread("web-new", "Web", 1),
+        makeThread("api-settled", "API", 5, { settledOverride: "settled" }),
+        makeThread("web-old", "Web", 60),
+      ],
+      { folderOrder: ["API", "Web"] },
+    );
 
     expect(outline(items)).toEqual([
-      "# Web",
-      "web-new",
-      "web-old",
       "# API",
       "api-settled",
       "api-old",
+      "# Web",
+      "web-new",
+      "web-old",
+      "# Unfiled",
+      "loose",
     ]);
   });
 
-  it("moves snoozed threads out of their projects to a Snoozed section after them", () => {
+  it("lists a folder it was not given after the ordered ones, and empty folders on request", () => {
+    const threads = [makeThread("tagged", "Elsewhere", 1), makeThread("loose", null, 2)];
+
+    expect(outline(buildTree(threads, { folderOrder: ["Empty"] }))).toEqual([
+      "# Empty",
+      "# Elsewhere",
+      "tagged",
+      "# Unfiled",
+      "loose",
+    ]);
+    expect(
+      outline(buildTree(threads, { folderOrder: ["Empty"], showEmptyFolders: false })),
+    ).toEqual(["# Elsewhere", "tagged", "# Unfiled", "loose"]);
+    expect(outline(buildTree([threads[0]!], { showEmptyFolders: false }))).toEqual([
+      "# Elsewhere",
+      "tagged",
+    ]);
+    expect(buildTree([], { folderOrder: ["Empty"], showEmptyFolders: false })).toEqual([]);
+  });
+
+  it("moves snoozed threads out of their folders to a Snoozed section after them", () => {
     const wakeAt = (minutes: number) => new Date(BASE_MS + minutes * 60_000).toISOString();
     const threads = [
-      makeThread("api-active", api, 10),
-      makeThread("api-snoozed", api, 5, { snoozedUntil: wakeAt(60) }),
-      makeThread("web-snoozed", web, 1, { snoozedUntil: wakeAt(120) }),
+      makeThread("api-active", "API", 10),
+      makeThread("api-snoozed", "API", 5, { snoozedUntil: wakeAt(60) }),
+      makeThread("web-snoozed", null, 1, { snoozedUntil: wakeAt(120) }),
     ];
 
-    expect(outline(buildTree(threads, { snoozedShelfExpanded: false }))).toEqual([
+    expect(
+      outline(buildTree(threads, { folderOrder: ["API"], snoozedShelfExpanded: false })),
+    ).toEqual(["# API", "api-active", "# Unfiled", "v2-snoozed-shelf"]);
+    expect(outline(buildTree(threads, { folderOrder: ["API"] }))).toEqual([
       "# API",
       "api-active",
-      "v2-snoozed-shelf",
-    ]);
-    expect(outline(buildTree(threads))).toEqual([
-      "# API",
-      "api-active",
+      "# Unfiled",
       "v2-snoozed-shelf",
       "api-snoozed",
       "web-snoozed",
     ]);
   });
 
-  it("keeps the arranged project order whatever was active last", () => {
-    const threads = [makeThread("api-old", api, 30), makeThread("web-new", web, 1)];
-
-    expect(outline(buildTree(threads, { projectOrder: ["group:api", "group:web"] }))).toEqual([
-      "# API",
-      "api-old",
-      "# Web",
-      "web-new",
-    ]);
-  });
-
-  it("puts a project the order has not listed yet above the arranged ones", () => {
-    const items = buildTree([makeThread("api", api, 30), makeThread("web", web, 60)], {
-      projectOrder: ["group:api"],
+  it("gives folder headers their neighbours for Move up and Move down, and Unfiled none", () => {
+    const items = buildTree([makeThread("a", "A", 30), makeThread("b", "B", 1)], {
+      folderOrder: ["A", "B"],
     });
-
-    expect(outline(items)).toEqual(["# Web", "web", "# API", "api"]);
-  });
-
-  it("gives each project header its neighbours for Move up and Move down", () => {
-    const items = buildTree([makeThread("api", api, 30), makeThread("web", web, 1)]);
     const headers = items.flatMap((item) =>
-      item.type === "v2-project"
-        ? [[item.previousProjectKey, item.projectKey, item.nextProjectKey]]
+      item.type === "v2-folder"
+        ? [[item.previousFolder, item.folder, item.nextFolder, item.canArrange]]
         : [],
     );
 
     expect(headers).toEqual([
-      [null, "group:web", "group:api"],
-      ["group:web", "group:api", null],
+      [null, "A", "B", true],
+      ["A", "B", null, true],
+      [null, null, null, true],
     ]);
   });
 
-  it("keeps pinned threads at the top of their project", () => {
+  it("offers a folder per project on Unfiled only until a folder exists", () => {
+    const offers = (folderOrder: ReadonlyArray<string>) =>
+      buildTree([makeThread("loose", null, 1)], { folderOrder }).flatMap((item) =>
+        item.type === "v2-folder" ? [[item.folder, item.offerFolderPerProject]] : [],
+      );
+
+    expect(offers([])).toEqual([[null, true]]);
+    expect(offers(["A"])).toEqual([
+      ["A", false],
+      [null, false],
+    ]);
+  });
+
+  it("keeps pinned threads at the top of their folder", () => {
     const items = buildTree([
-      makeThread("recent", api, 1),
-      makeThread("pinned", api, 90, { pinnedAt: NOW, pinOrderKey: "a0" }),
+      makeThread("recent", null, 1),
+      makeThread("pinned", null, 90, { pinnedAt: NOW, pinOrderKey: "a0" }),
     ]);
 
-    expect(outline(items)).toEqual(["# API", "pinned", "recent"]);
+    expect(outline(items)).toEqual(["# Unfiled", "pinned", "recent"]);
   });
 
-  it("previews a long project, and keeps the selected thread visible", () => {
+  it("previews a long folder, and keeps the selected thread visible", () => {
     const threads = Array.from({ length: PROJECT_THREAD_TREE_PREVIEW_COUNT + 3 }, (_, index) =>
-      makeThread(`t${index}`, api, index),
+      makeThread(`t${index}`, "API", index),
     );
 
     const preview = buildTree(threads, {
+      folderOrder: ["API"],
       selectedThreadKey: `${environmentId}:t${PROJECT_THREAD_TREE_PREVIEW_COUNT + 2}`,
     });
     expect(outline(preview)).toEqual([
@@ -195,82 +216,89 @@ describe("buildProjectThreadTreeListItems", () => {
       ...threads.slice(0, PROJECT_THREAD_TREE_PREVIEW_COUNT).map((thread) => thread.title),
       `t${PROJECT_THREAD_TREE_PREVIEW_COUNT + 2}`,
       "more 2",
+      "# Unfiled",
     ]);
 
-    const expanded = buildTree(threads, { expanded: ["group:api"] });
-    expect(outline(expanded)).toEqual(["# API", ...threads.map((thread) => thread.title), "less"]);
-  });
-
-  it("hides a collapsed project's threads and shows its most urgent status", () => {
-    const items = buildTree(
-      [
-        makeThread("needs-input", api, 10, { hasPendingUserInput: true }),
-        makeThread("needs-approval", api, 20, { hasPendingApprovals: true }),
-        makeThread("web", web, 1),
-      ],
-      { collapsed: ["group:api"] },
-    );
-
-    expect(outline(items)).toEqual(["# Web", "web", "# API (2)"]);
-    const header = items.find(
-      (item) => item.type === "v2-project" && item.projectKey === "group:api",
-    );
-    expect(header?.type === "v2-project" ? header.status : undefined).toBe("approval");
-  });
-
-  it("starts new threads in the project's most recently active environment", () => {
-    const laptop = EnvironmentId.make("environment-2");
-    const groups = new Map([
-      ...projectGroups,
-      [`${laptop}:${api}`, { key: "group:api", title: "API" }],
+    const expanded = buildTree(threads, { folderOrder: ["API"], expanded: ["API"] });
+    expect(outline(expanded)).toEqual([
+      "# API",
+      ...threads.map((thread) => thread.title),
+      "less",
+      "# Unfiled",
     ]);
+  });
+
+  it("hides a collapsed folder's threads but the open one, and shows its most urgent status", () => {
+    const threads = [
+      makeThread("needs-input", "API", 10, { hasPendingUserInput: true }),
+      makeThread("needs-approval", "API", 20, { hasPendingApprovals: true }),
+      makeThread("loose", null, 1),
+    ];
+    const items = buildTree(threads, { folderOrder: ["API"], collapsed: ["API", null] });
+
+    expect(outline(items)).toEqual(["# API (2)", "# Unfiled (1)"]);
+    const header = items.find((item) => item.type === "v2-folder" && item.folder === "API");
+    expect(header?.type === "v2-folder" ? header.status : undefined).toBe("approval");
+
+    const selected = buildTree(threads, {
+      folderOrder: ["API"],
+      collapsed: ["API"],
+      selectedThreadKey: `${environmentId}:needs-input`,
+    });
+    expect(outline(selected)).toEqual(["# API (2)", "needs-input", "# Unfiled", "loose"]);
+  });
+
+  it("starts new threads in the project of the folder's most recently active thread", () => {
     const items = buildTree(
-      [makeThread("server", api, 30), makeThread("laptop", api, 2, { environmentId: laptop })],
-      { groups },
+      [makeThread("older", "Mixed", 30), makeThread("newer", "Mixed", 2, { projectId: web })],
+      { folderOrder: ["Mixed"] },
     );
 
-    const header = items.find((item) => item.type === "v2-project");
-    expect(header?.type === "v2-project" ? header.newThreadProjectKey : undefined).toBe(
-      `${laptop}:${api}`,
-    );
+    expect(
+      items.flatMap((item) =>
+        item.type === "v2-folder" ? [[item.folder, item.newThreadProjectKey]] : [],
+      ),
+    ).toEqual([
+      ["Mixed", `${environmentId}:${web}`],
+      [null, null],
+    ]);
   });
 
   it("shows the compact time on rows that also show a status", () => {
     using _now = vi.spyOn(Date, "now").mockReturnValue(BASE_MS);
-    const items = buildTree([makeThread("working", api, 5, { hasPendingUserInput: true })]);
+    const items = buildTree([makeThread("working", null, 5, { hasPendingUserInput: true })]);
     const row = items.find((item) => item.type === "v2-thread");
 
     expect(row?.type === "v2-thread" ? row.timeLabel : undefined).toBe("5m");
   });
 });
 
-describe("project order", () => {
-  it("adds projects it has not seen in front, without duplicates", () => {
-    expect(mergeProjectOrder(["b", "c"], ["a", "c", "a", "d"])).toEqual(["a", "d", "b", "c"]);
-  });
+describe("moveFolderNextTo", () => {
+  it("moves a folder before or after another", () => {
+    const order = ["a", "b", "c", "d"];
 
-  it("moves a project past its neighbour and leaves hidden projects in place", () => {
-    const order = ["a", "hidden", "b", "c"];
-
-    expect(applyProjectMove(order, "b", { targetKey: "a", placement: "before" })).toEqual([
-      "b",
-      "a",
-      "hidden",
+    expect(moveFolderNextTo(order, "c", { target: "a", placement: "before" })).toEqual([
       "c",
+      "a",
+      "b",
+      "d",
     ]);
-    expect(applyProjectMove(order, "a", { targetKey: "c", placement: "after" })).toEqual([
-      "hidden",
+    expect(moveFolderNextTo(order, "a", { target: "c", placement: "after" })).toEqual([
       "b",
       "c",
       "a",
+      "d",
     ]);
   });
 
-  it("records an unlisted project when it moves", () => {
-    expect(applyProjectMove(["a", "b"], "new", { targetKey: "b", placement: "after" })).toEqual([
+  it("leaves the order alone for an unknown folder or target", () => {
+    expect(moveFolderNextTo(["a", "b"], "x", { target: "a", placement: "before" })).toEqual([
       "a",
       "b",
-      "new",
+    ]);
+    expect(moveFolderNextTo(["a", "b"], "a", { target: "x", placement: "after" })).toEqual([
+      "a",
+      "b",
     ]);
   });
 });

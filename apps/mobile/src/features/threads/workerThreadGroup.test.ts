@@ -3,7 +3,8 @@ import { EnvironmentId, ProjectId, ThreadId, WORKER_THREAD_TAG } from "@t3tools/
 import { describe, expect, it } from "vite-plus/test";
 
 import { makeThreadShellFixture } from "../../test-fixtures";
-import { buildProjectThreadTreeListItems } from "./projectThreadTree";
+import { buildFolderThreadTreeListItems } from "./projectThreadTree";
+import { folderGroupKey } from "./threadFolderListItems";
 import {
   buildThreadListV2Items,
   buildThreadListV2ListItems,
@@ -35,6 +36,7 @@ function makeThread(
     readonly minutesAgo?: number;
     readonly projectId?: ProjectId;
     readonly worker?: boolean;
+    readonly folder?: string;
     readonly overrides?: Partial<EnvironmentThreadShell>;
   } = {},
 ): EnvironmentThreadShell {
@@ -49,9 +51,11 @@ function makeThread(
     latestUserMessageAt: at,
     ...options.overrides,
   });
-  return options.worker
-    ? { ...thread, source: { ...thread.source, tags: [WORKER_THREAD_TAG] } }
-    : thread;
+  const tags = [
+    ...(options.worker ? [WORKER_THREAD_TAG] : []),
+    ...(options.folder === undefined ? [] : [`folder:${options.folder}`]),
+  ];
+  return tags.length === 0 ? thread : { ...thread, source: { ...thread.source, tags } };
 }
 
 function failedRuntime(): EnvironmentThreadShell["runtime"] {
@@ -233,11 +237,12 @@ describe("Workers shelf", () => {
       `v2-thread:${environmentId}:settled`,
     ]);
 
-    const tree = buildProjectThreadTreeListItems({
+    const tree = buildFolderThreadTreeListItems({
       listItems: flat,
-      projectGroups: new Map(),
-      collapsedProjectKeys: new Set(),
-      expandedProjectKeys: new Set(),
+      folderOrder: [],
+      collapsedGroupKeys: new Set(),
+      expandedGroupKeys: new Set(),
+      showEmptyFolders: true,
     });
     const treeShelf = buildWorkerShelfListItems({
       workers: shelved,
@@ -247,13 +252,58 @@ describe("Workers shelf", () => {
       layout: "tree",
     });
     expect(withWorkerShelf(tree, treeShelf).map((item) => item.type)).toEqual([
-      "v2-project",
+      "v2-folder",
       "v2-thread",
       "v2-thread",
       "v2-workers-shelf",
       "v2-thread",
     ]);
     expect(withWorkerShelf(tree, [])).toBe(tree);
+  });
+
+  it("groups an open tree shelf by folder, then Unfiled, and keeps the selected worker", () => {
+    const shelf = (options: { readonly expanded: boolean; readonly collapsed?: string[] }) =>
+      buildWorkerShelfListItems({
+        workers: [
+          makeThread("loose", { worker: true, minutesAgo: 1 }),
+          makeThread("b-worker", { worker: true, folder: "B", minutesAgo: 2 }),
+          makeThread("a-worker", { worker: true, folder: "A", minutesAgo: 3 }),
+        ],
+        environmentId: null,
+        now: NOW,
+        expanded: options.expanded,
+        selectedThreadKey: `${environmentId}:a-worker`,
+        layout: "tree",
+        folders: {
+          order: ["A", "Empty", "B"],
+          collapsedGroupKeys: new Set((options.collapsed ?? []).map(folderGroupKey)),
+        },
+      }).map((item) =>
+        item.type === "v2-worker-folder"
+          ? `# ${item.folder ?? "Unfiled"}${item.collapsed ? ` (${item.count})` : ""}`
+          : item.type === "v2-thread"
+            ? item.item.thread.id
+            : item.type,
+      );
+
+    expect(shelf({ expanded: true })).toEqual([
+      "v2-workers-shelf",
+      "# A",
+      "a-worker",
+      "# B",
+      "b-worker",
+      "# Unfiled",
+      "loose",
+    ]);
+    expect(shelf({ expanded: true, collapsed: ["A", "B"] })).toEqual([
+      "v2-workers-shelf",
+      "# A (1)",
+      "a-worker",
+      "# B (1)",
+      "# Unfiled",
+      "loose",
+    ]);
+    expect(shelf({ expanded: false })).toEqual(["v2-workers-shelf", "a-worker"]);
   });
 
   it("compares shelf headers by count and expansion", () => {

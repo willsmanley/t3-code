@@ -23,6 +23,10 @@ import { MOBILE_THEME_IDS, type MobileThemeId, type MobileThemeMode } from "../l
 import * as MobileDatabase from "./mobile-database";
 import * as MobileSecureStorage from "./mobile-secure-storage";
 import { MobileStorageDecodeError, MobileStorageEncodeError } from "./mobile-storage";
+import {
+  sanitizeThreadFolderPreferences,
+  type ThreadFolderPreferences,
+} from "./thread-folder-preferences";
 
 const PREFERENCES_KEY = "t3code.preferences";
 const PREFERENCES_FALLBACK_KEY = "t3code.preferences.fallback";
@@ -88,7 +92,7 @@ const ThreadProject = Schema.Struct({
 });
 const isThreadProject = Schema.is(ThreadProject);
 
-export interface Preferences {
+export interface Preferences extends ThreadFolderPreferences {
   readonly navigationTabOrder?: readonly string[];
   readonly hiddenNavigationTabs?: readonly string[];
   readonly pullRequestHideTestFiles?: boolean;
@@ -109,8 +113,6 @@ export interface Preferences {
   readonly crashReportsEnabled?: boolean;
   readonly connectOnboardingOptOutAccounts?: ReadonlyArray<string>;
   readonly collapsedProjectGroups?: readonly string[];
-  /** The Android project tree's arranged order, by logical project key. */
-  readonly projectOrder?: readonly string[];
   readonly dismissedDatabaseStorageNotices?: readonly string[];
   /** Hardware Return behavior is iOS-only. */
   readonly composerEnterBehavior?: ComposerEnterBehavior;
@@ -197,7 +199,6 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     crashReportsEnabled?: boolean;
     connectOnboardingOptOutAccounts?: ReadonlyArray<string>;
     collapsedProjectGroups?: readonly string[];
-    projectOrder?: readonly string[];
     dismissedDatabaseStorageNotices?: readonly string[];
     composerEnterBehavior?: ComposerEnterBehavior;
     followUpBehavior?: FollowUpBehavior;
@@ -299,11 +300,6 @@ function sanitizePreferences(parsed: Preferences): Preferences {
       (key): key is string => typeof key === "string",
     );
   }
-  if (Array.isArray(parsed.projectOrder)) {
-    preferences.projectOrder = parsed.projectOrder.filter(
-      (key): key is string => typeof key === "string",
-    );
-  }
   if (Array.isArray(parsed.dismissedDatabaseStorageNotices)) {
     preferences.dismissedDatabaseStorageNotices = parsed.dismissedDatabaseStorageNotices.filter(
       (value): value is string => typeof value === "string",
@@ -378,7 +374,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   if (isWorkspaceSelections(parsed.workspaceSelections)) {
     preferences.workspaceSelections = parsed.workspaceSelections;
   }
-  return preferences;
+  return { ...preferences, ...sanitizeThreadFolderPreferences(parsed) };
 }
 
 const make = Effect.fn("MobilePreferencesStore.make")(function* () {
