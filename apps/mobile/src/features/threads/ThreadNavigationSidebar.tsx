@@ -65,6 +65,8 @@ import { withWorkerShelf } from "./workerThreadGroup";
 import { useThreadRowProviderInstanceResolver } from "./thread-provider-instance";
 import { PROJECT_THREAD_TREE_ENABLED } from "./project-thread-tree-items";
 import { useThreadFolderTree } from "./thread-folder-tree";
+import { WorkerJobsSection } from "./worker-jobs-section";
+import { WORKERS_TAB_ENABLED } from "../layout/workspace/navigation-tabs";
 import type { ThreadPrPresentation } from "../../state/thread-pr-presentation";
 import { ThreadPrDemandProvider } from "../../state/thread-pr-demand";
 import {
@@ -76,6 +78,8 @@ import {
 } from "./threadListV2";
 import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
 import { NativeScrollView } from "../../native/NativeScrollViewMarker";
+
+const NO_PENDING_TASKS: ReadonlyArray<PendingNewTask> = [];
 
 type SidebarListItem =
   | ThreadListV2ListItem
@@ -103,6 +107,8 @@ interface ThreadNavigationSidebarProps {
   ) => void;
   readonly onRequestVisibility: () => void;
   readonly searchQuery: string;
+  /** Fork (F18): Android's Workers tab, which lists worker threads instead of project threads. */
+  readonly workers?: boolean;
 }
 
 export function ThreadNavigationSidebar(props: ThreadNavigationSidebarProps) {
@@ -249,7 +255,9 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
     toggleSnoozedShelf,
     toggleWorkingShelf,
   } = useThreadListV2ShelfPreferences();
+  const workerTab = WORKERS_TAB_ENABLED ? (props.workers ? "workers" : "projects") : null;
   const folderTree = useThreadFolderTree({
+    tab: props.workers ? "workers" : "projects",
     projects,
     projectGroupingMode: options.projectGroupingMode,
     selectedThreadKey: props.selectedThreadKey ?? null,
@@ -285,7 +293,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
     queuedThreadKeys,
     selectedThreadKey: props.selectedThreadKey ?? null,
     layout: PROJECT_THREAD_TREE_ENABLED ? "tree" : "flat",
-    folderOrder: PROJECT_THREAD_TREE_ENABLED ? folderTree.folderOrder : null,
+    tab: workerTab,
   });
   const {
     layout: threadListV2Layout,
@@ -294,7 +302,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
     olderSettledShelf,
   } = useThreadListV2({
     threads: workerGroup.listedThreads,
-    pendingTasks,
+    pendingTasks: props.workers ? NO_PENDING_TASKS : pendingTasks,
     environmentId: options.selectedEnvironmentId,
     projectRefs: selectedProjectScope === null ? null : selectedProjectScope.projectRefs,
     searchQuery: props.searchQuery,
@@ -392,6 +400,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
     listEnvironments,
     threadSearchMatchByKey,
     workingShelfEnabled,
+    jobEnvironments: searchEnvironmentIds.join(","),
   };
   useThreadJumpShortcuts(listItems, handleSelectThread);
   const sidebarItemsAreEqual = (previous: SidebarListItem, item: SidebarListItem): boolean => {
@@ -500,9 +509,10 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
             pinningSupported={pinningEnvironmentIds.has(thread.environmentId)}
             autoSettleOptOutSupported={autoSettleOptOutEnvironmentIds.has(thread.environmentId)}
             reorderSupported={
-              item.item.pinned
+              !props.workers &&
+              (item.item.pinned
                 ? pinReorderEnvironmentIds.has(thread.environmentId)
-                : !workingShelfEnabled && activeReorderEnvironmentIds.has(thread.environmentId)
+                : !workingShelfEnabled && activeReorderEnvironmentIds.has(thread.environmentId))
             }
             canMoveUp={item.canMoveUp}
             canMoveDown={item.canMoveDown}
@@ -572,13 +582,21 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
         );
       case "v2-folder":
       case "v2-folder-more":
-      case "v2-worker-folder":
-        return folderTree.renderItem(item, workerGroup.toggleWorkerFolder);
+        return folderTree.renderItem(item);
+      case "v2-worker-jobs":
+        return (
+          <WorkerJobsSection
+            workerCount={item.workerCount}
+            environmentIds={searchEnvironmentIds}
+            pane="sidebar"
+            onOpenThread={handleSelectThread}
+          />
+        );
     }
   };
   const header = (
     <WorkspaceListHeader
-      accessibilityLabel="T3 Code, Threads"
+      accessibilityLabel={props.workers ? "T3 Code, Workers" : "T3 Code, Threads"}
       onOpenEnvironments={props.onOpenEnvironmentSettings}
       onOpenSettings={props.onOpenSettings}
       search={{

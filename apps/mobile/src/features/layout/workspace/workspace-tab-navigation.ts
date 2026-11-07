@@ -228,7 +228,14 @@ export function workspaceTabNavigationState<
   const home = state.routes.find((route) => route.name === "Home") ?? { name: "Home" };
   const detail =
     options.columns && tab !== "usage"
-      ? detailRoute(state, tab, selections, options.check, options.seedPullRequest)
+      ? detailRoute(
+          state,
+          // A worker's detail column shows a thread, as the thread list's does.
+          tab === "workers" ? "threads" : tab,
+          selections,
+          options.check,
+          options.seedPullRequest,
+        )
       : undefined;
   const routes = [...[home, ...(detail ? [detail] : [])].map(keyed), ...overlays];
   return { ...state, index: routes.length - 1, routes };

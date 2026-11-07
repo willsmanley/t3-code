@@ -1,16 +1,25 @@
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import { getThreadSortTimestamp } from "@t3tools/client-runtime/state/thread-sort";
-import { isListedThreadLineage, type EnvironmentId, type ProjectId } from "@t3tools/contracts";
+import {
+  isListedThreadLineage,
+  isWorkerThread,
+  type EnvironmentId,
+  type ProjectId,
+} from "@t3tools/contracts";
 
-import { groupWorkerRowsByFolder, toTreeRow } from "./projectThreadTree";
+import { toTreeRow } from "./projectThreadTree";
 import {
   buildThreadListV2ListItems,
   resolveThreadListV2WokeAt,
   type ThreadListV2Item,
   type ThreadListV2ListItem,
 } from "./threadListV2";
-import { isShelvedWorkerThread, type ThreadListV2WorkersShelfListItem } from "./workerThreads";
+import {
+  isShelvedWorkerThread,
+  type ThreadListV2WorkerJobsListItem,
+  type ThreadListV2WorkersShelfListItem,
+} from "./workerThreads";
 
 const NO_THREADS: ReadonlyArray<EnvironmentThreadShell> = [];
 
@@ -32,9 +41,53 @@ export function partitionWorkerThreads(
 }
 
 /**
+ * Android's bottom tabs split the list (F18): Projects leaves shelved workers out (one that needs
+ * the user stays, as on desktop), and Workers lists every worker thread.
+ */
+export function threadsForWorkerTab(
+  threads: ReadonlyArray<EnvironmentThreadShell>,
+  tab: "projects" | "workers",
+): ReadonlyArray<EnvironmentThreadShell> {
+  return threads.filter((thread) =>
+    tab === "workers" ? isWorkerThread(thread.source) : !isShelvedWorkerThread(thread),
+  );
+}
+
+/**
+ * The Workers tab's closing item: how to make a worker when there is none in scope, then the jobs
+ * that run in project threads. Left out while searching, so an empty search says so.
+ */
+export function buildWorkerJobsListItems(input: {
+  readonly workers: ReadonlyArray<EnvironmentThreadShell>;
+  readonly searchQuery: string;
+  readonly environmentId: EnvironmentId | null;
+  readonly projectRefs?: ReadonlyArray<{
+    readonly environmentId: EnvironmentId;
+    readonly projectId: ProjectId;
+  }> | null;
+}): ThreadListV2ListItem[] {
+  if (input.searchQuery.trim().length > 0) return [];
+  const projectKeys = input.projectRefs
+    ? new Set(input.projectRefs.map((ref) => `${ref.environmentId}:${ref.projectId}`))
+    : null;
+  const workerCount = input.workers.filter(
+    (thread) =>
+      thread.archivedAt === null &&
+      isListedThreadLineage(thread.lineage) &&
+      (input.environmentId === null || thread.environmentId === input.environmentId) &&
+      (projectKeys === null || projectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
+  ).length;
+  const item: ThreadListV2WorkerJobsListItem = {
+    type: "v2-worker-jobs",
+    key: "v2-worker-jobs",
+    workerCount,
+  };
+  return [item];
+}
+
+/**
  * The Workers shelf header and its rows, newest activity first. Collapsed, it shows only the
- * selected thread, like the other shelves. Tree rows get the tree's time label and, with
- * `folders`, sit under folder headers (F20).
+ * selected thread, like the other shelves. Tree rows get the project tree's time label.
  */
 export function buildWorkerShelfListItems(input: {
   readonly workers: ReadonlyArray<EnvironmentThreadShell>;
@@ -53,10 +106,6 @@ export function buildWorkerShelfListItems(input: {
   readonly expanded: boolean;
   readonly selectedThreadKey?: string | null;
   readonly layout: "flat" | "tree";
-  readonly folders?: {
-    readonly order: ReadonlyArray<string>;
-    readonly collapsedGroupKeys: ReadonlySet<string>;
-  };
 }): ThreadListV2ListItem[] {
   const projectKeys = input.projectRefs
     ? new Set(input.projectRefs.map((ref) => `${ref.environmentId}:${ref.projectId}`))
@@ -116,17 +165,11 @@ export function buildWorkerShelfListItems(input: {
     count: workers.length,
     expanded: input.expanded,
   };
-  if (input.layout === "flat") return [header, ...rows];
-  const treeRows = rows.map((row) => (row.type === "v2-thread" ? toTreeRow(row) : row));
-  if (!input.expanded || input.folders === undefined) return [header, ...treeRows];
   return [
     header,
-    ...groupWorkerRowsByFolder({
-      rows: treeRows,
-      folderOrder: input.folders.order,
-      collapsedGroupKeys: input.folders.collapsedGroupKeys,
-      selectedThreadKey: input.selectedThreadKey ?? null,
-    }),
+    ...(input.layout === "tree"
+      ? rows.map((row) => (row.type === "v2-thread" ? toTreeRow(row) : row))
+      : rows),
   ];
 }
 

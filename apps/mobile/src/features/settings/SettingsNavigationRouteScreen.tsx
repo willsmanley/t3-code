@@ -16,20 +16,22 @@ import { SymbolView } from "../../components/ui/AppSymbol";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import {
   NAVIGATION_TAB_ICONS,
+  PHONE_NAVIGATION_TAB_CAPACITY,
   WORKSPACE_TAB_LABELS,
+  workspaceTabOrder,
   useNavigationTabOrder,
   useHiddenNavigationTabs,
   useEnabledNavigationTabs,
 } from "../layout/workspace/navigation-tabs";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { SettingsSection } from "./components/SettingsSection";
-import { resolveWorkspaceTabOrder } from "../layout/workspace/workspace-tabs-state";
 
 export function SettingsNavigationRouteScreen() {
   const insets = useSafeAreaInsets();
   const order = useNavigationTabOrder();
   const { layout } = useAdaptiveWorkspaceLayout();
-  const capacity = Platform.OS === "android" && layout.usesSplitView ? 5 : 4;
+  const capacity =
+    Platform.OS === "android" && layout.usesSplitView ? 5 : PHONE_NAVIGATION_TAB_CAPACITY;
   const hidden = useHiddenNavigationTabs();
   const enabled = useEnabledNavigationTabs();
   const preferences = useAtomValue(mobilePreferencesAtom);
@@ -89,7 +91,7 @@ export function SettingsNavigationRouteScreen() {
                   save({
                     transform: (current) => ({
                       navigationTabOrder: moveNavigationTab(
-                        resolveWorkspaceTabOrder(current.navigationTabOrder),
+                        workspaceTabOrder(current.navigationTabOrder),
                         tab,
                         index - 1,
                       ),
@@ -105,7 +107,7 @@ export function SettingsNavigationRouteScreen() {
                   save({
                     transform: (current) => ({
                       navigationTabOrder: moveNavigationTab(
-                        resolveWorkspaceTabOrder(current.navigationTabOrder),
+                        workspaceTabOrder(current.navigationTabOrder),
                         tab,
                         index + 1,
                       ),

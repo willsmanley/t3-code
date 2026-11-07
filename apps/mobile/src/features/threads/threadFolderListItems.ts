@@ -34,19 +34,9 @@ export interface ThreadListV2FolderMoreListItem {
   readonly expanded: boolean;
 }
 
-/** A folder inside the Workers shelf. */
-export interface ThreadListV2WorkerFolderListItem {
-  readonly type: "v2-worker-folder";
-  readonly key: string;
-  readonly folder: string | null;
-  readonly count: number;
-  readonly collapsed: boolean;
-}
-
 export type ThreadFolderTreeListItem =
   | ThreadListV2FolderHeaderListItem
-  | ThreadListV2FolderMoreListItem
-  | ThreadListV2WorkerFolderListItem;
+  | ThreadListV2FolderMoreListItem;
 
 /** A folder's key in collapse and "show more" state. Folder names never contain a newline. */
 export function folderGroupKey(folder: string | null): string {
@@ -56,11 +46,7 @@ export function folderGroupKey(folder: string | null): string {
 export function isThreadFolderTreeListItem(value: {
   readonly type: string;
 }): value is ThreadFolderTreeListItem {
-  return (
-    value.type === "v2-folder" ||
-    value.type === "v2-folder-more" ||
-    value.type === "v2-worker-folder"
-  );
+  return value.type === "v2-folder" || value.type === "v2-folder-more";
 }
 
 export function threadFolderTreeListItemsAreEqual(
@@ -89,13 +75,6 @@ export function threadFolderTreeListItemsAreEqual(
         previous.key === item.key &&
         previous.hiddenCount === item.hiddenCount &&
         previous.expanded === item.expanded
-      );
-    case "v2-worker-folder":
-      return (
-        previous.type === "v2-worker-folder" &&
-        previous.key === item.key &&
-        previous.count === item.count &&
-        previous.collapsed === item.collapsed
       );
   }
 }

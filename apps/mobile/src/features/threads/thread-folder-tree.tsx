@@ -11,7 +11,6 @@ import { FolderArrangementSheet } from "./FolderArrangementSheet";
 import {
   ThreadFolderHeader,
   ThreadTreeMoreRow,
-  WorkerFolderHeader,
   type ThreadFolderHeaderAction,
 } from "./project-thread-tree-items";
 import { buildFolderThreadTreeListItems } from "./projectThreadTree";
@@ -31,7 +30,12 @@ import { useThreadFolderTreeState } from "./use-thread-folders";
 
 const NO_KEYS: ReadonlySet<string> = new Set();
 
+/**
+ * `tab` is Android's bottom tab (F18). Workers lists only folders that hold a worker, closes
+ * folders for the session only, and has no new-thread buttons or folder-per-project offer.
+ */
 export function useThreadFolderTree(input: {
+  readonly tab: "projects" | "workers";
   readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly projectGroupingMode: SidebarProjectGroupingMode;
   readonly selectedThreadKey: string | null;
@@ -42,7 +46,8 @@ export function useThreadFolderTree(input: {
   readonly pane: "screen" | "sidebar";
   readonly onNewThreadInProject: (project: EnvironmentProject, requestId?: string) => void;
 }) {
-  const state = useThreadFolderTreeState();
+  const state = useThreadFolderTreeState(input.tab);
+  const projectsTab = input.tab === "projects";
   const { projects, projectGroupingMode } = input;
   const projectScopes = () =>
     buildHomeProjectScopes({ projects, environmentId: null, projectGroupingMode });
@@ -53,7 +58,8 @@ export function useThreadFolderTree(input: {
       folderOrder: state.folderOrder,
       collapsedGroupKeys: input.searching ? NO_KEYS : state.collapsedGroupKeys,
       expandedGroupKeys: state.expandedGroupKeys,
-      showEmptyFolders: !input.searching && !input.filtered,
+      showEmptyFolders: projectsTab && !input.searching && !input.filtered,
+      offerFolderPerProject: projectsTab,
       selectedThreadKey: input.selectedThreadKey,
       preferencesLoading: !state.loaded,
     });
@@ -91,10 +97,7 @@ export function useThreadFolderTree(input: {
     }
   };
 
-  const renderItem = (
-    item: ThreadFolderTreeListItem,
-    onToggleWorkerFolder: (folder: string | null) => void,
-  ) => {
+  const renderItem = (item: ThreadFolderTreeListItem) => {
     switch (item.type) {
       case "v2-folder":
         return (
@@ -110,7 +113,7 @@ export function useThreadFolderTree(input: {
             disabled={item.disabled}
             pane={input.pane}
             onToggle={() => state.toggleFolderCollapsed(item.folder)}
-            onNewThread={() => startThreadInFolder(item)}
+            {...(projectsTab ? { onNewThread: () => startThreadInFolder(item) } : {})}
             onAction={(action) => handleAction(item, action)}
           />
         );
@@ -121,16 +124,6 @@ export function useThreadFolderTree(input: {
             expanded={item.expanded}
             pane={input.pane}
             onToggle={() => state.toggleFolderExpanded(item.folder)}
-          />
-        );
-      case "v2-worker-folder":
-        return (
-          <WorkerFolderHeader
-            folder={item.folder}
-            count={item.count}
-            collapsed={item.collapsed}
-            pane={input.pane}
-            onToggle={() => onToggleWorkerFolder(item.folder)}
           />
         );
     }

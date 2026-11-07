@@ -24,7 +24,11 @@ import { useAppearancePreferences } from "../../settings/appearance/AppearancePr
 import { useSoftKeyboardShowing } from "../../keyboard/useSoftKeyboardShowing";
 import { useAdaptiveWorkspaceLayout } from "../adaptive-workspace-context";
 import { useAndroidWorkspaceRoot } from "./AndroidWorkspaceTabsProvider";
-import { useNavigationTabOrder, useHiddenNavigationTabs } from "./navigation-tabs";
+import {
+  PHONE_NAVIGATION_TAB_CAPACITY,
+  useHiddenNavigationTabs,
+  useNavigationTabOrder,
+} from "./navigation-tabs";
 import { useWorkspaceTabs } from "./WorkspaceTabsContext";
 import { FLOATING_TABS, floatingTabsMetrics } from "./floating-workspace-tabs";
 
@@ -87,7 +91,8 @@ export function AndroidWorkspaceNavigation(props: {
   const window = useWindowDimensions();
   const rail = Boolean(props.rail);
   const floating = !rail && Boolean(props.floating);
-  const tabs = [...visibleNavigationTabs(order, hidden, rail ? 5 : 4), "settings"];
+  const capacity = rail ? 5 : PHONE_NAVIGATION_TAB_CAPACITY;
+  const tabs = [...visibleNavigationTabs(order, hidden, capacity), "settings"];
   const { containerColor, indicatorColor, selectedColor, unselectedColor } =
     androidWorkspaceNavigationColors(colors, rail, floating);
   const selectedTab = selectedNavigationTab(
@@ -95,7 +100,7 @@ export function AndroidWorkspaceNavigation(props: {
     workspace.state.selectedTab,
     root?.settingsOpen ?? false,
     hidden,
-    rail ? 5 : 4,
+    capacity,
   );
   // FloatingWorkspaceTabs starts the bar at the left inset, so a cutout narrows the room.
   const barWidth =

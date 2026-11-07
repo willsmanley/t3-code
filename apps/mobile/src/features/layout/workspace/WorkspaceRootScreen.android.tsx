@@ -79,8 +79,8 @@ function WorkspaceRoot() {
                 tabs={TABS}
                 selected={tab}
                 renderTab={(tab) =>
-                  tab === "threads" ? (
-                    <HomeRouteScreen />
+                  tab === "threads" || tab === "workers" ? (
+                    <HomeRouteScreen workers={tab === "workers"} />
                   ) : tab !== "pullRequests" ? (
                     <WorkspacePageFrame width={workspacePageWidth ?? null}>
                       <WorkspaceExtraTab tab={tab} />

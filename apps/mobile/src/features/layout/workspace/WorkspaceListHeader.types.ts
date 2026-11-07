@@ -6,6 +6,8 @@ export interface WorkspaceListHeaderProps {
   readonly accessibilityLabel: string;
   /** The connection status beside the brand opens environment settings. */
   readonly onOpenEnvironments: () => void;
+  /** The workspace tab this list belongs to; Android's Workers tab has its own (F18). */
+  readonly tab?: "threads" | "workers";
   readonly search: {
     readonly value: string;
     readonly onChangeText: (value: string) => void;

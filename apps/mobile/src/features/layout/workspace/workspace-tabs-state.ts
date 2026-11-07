@@ -5,10 +5,12 @@ import {
   type NavigationTab,
 } from "./navigation-tab-order";
 
-export function resolveWorkspaceTabOrder(saved: readonly unknown[] | undefined) {
-  return navigationCustomizationAvailable()
-    ? resolveNavigationTabOrder(saved)
-    : NAVIGATION_TAB_ORDER;
+/** `defaults` is the platform's order (`DEFAULT_NAVIGATION_TAB_ORDER`), with every section. */
+export function resolveWorkspaceTabOrder(
+  saved: readonly unknown[] | undefined,
+  defaults: readonly NavigationTab[] = NAVIGATION_TAB_ORDER,
+) {
+  return navigationCustomizationAvailable() ? resolveNavigationTabOrder(saved, defaults) : defaults;
 }
 
 export type WorkspaceTab = NavigationTab;
@@ -16,9 +18,9 @@ export type WorkspaceTab = NavigationTab;
 export type WorkspaceSearchTab = WorkspaceTab | "settings";
 export type WorkspaceSearchMode = "resting" | "active" | "expanded";
 
-/** Settings, Chats and pull requests pair a list with a detail column; Usage is one page. */
+/** Settings, Chats, Workers and pull requests pair a list with a detail column; Usage is one page. */
 export function workspaceUsesColumns(tab: WorkspaceTab, settingsOpen = false) {
-  return settingsOpen || tab === "threads" || tab === "pullRequests";
+  return settingsOpen || tab === "threads" || tab === "workers" || tab === "pullRequests";
 }
 
 export interface WorkspaceTabState {
@@ -44,6 +46,7 @@ export function initialWorkspaceTabsState(): WorkspaceTabsState {
     selectionRevision: 0,
     tabs: {
       threads: emptyTab(),
+      workers: emptyTab(),
       pullRequests: emptyTab(),
       usage: emptyTab(),
       settings: emptyTab(),
@@ -72,7 +75,7 @@ export function workspaceTabsReducer(
           selectionRevision: state.selectionRevision + 1,
         };
   const tab = action.tab ?? state.selectedTab;
-  if (tab !== "threads" && tab !== "pullRequests" && tab !== "settings") return state;
+  if (tab === "usage") return state;
   const current = state.tabs[tab];
   let next: WorkspaceTabState;
   switch (action.type) {

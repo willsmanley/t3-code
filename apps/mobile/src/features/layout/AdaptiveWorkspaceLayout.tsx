@@ -69,7 +69,10 @@ import {
   useHardwareKeyboardCommand,
 } from "../keyboard/hardwareKeyboardCommands";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
-import { useEnabledNavigationTabs } from "./workspace/navigation-tabs";
+import {
+  PHONE_NAVIGATION_TAB_CAPACITY,
+  useEnabledNavigationTabs,
+} from "./workspace/navigation-tabs";
 import { FLOATING_TABS, floatingTabsMetrics } from "./workspace/floating-workspace-tabs";
 import {
   AndroidWorkspaceNavigation,
@@ -330,7 +333,11 @@ function AdaptiveWorkspaceLayoutContent(
     Platform.OS === "android" && baseLayout.usesSplitView && !floatingTabsEnabled;
   const enabledTabs = useEnabledNavigationTabs();
   const { scale, fabSize } = useAndroidControlSizing();
-  const floatingTabs = floatingTabsMetrics(enabledTabs.length + 1, scale, fabSize);
+  const floatingTabs = floatingTabsMetrics(
+    Math.min(enabledTabs.length, PHONE_NAVIGATION_TAB_CAPACITY) + 1,
+    scale,
+    fabSize,
+  );
   // The rail stays whether or not the sidebar shows; only the list pane comes and goes.
   const navigationRailWidth = shouldRenderNavigationRail ? ANDROID_WORKSPACE_RAIL_WIDTH : 0;
   const [hinge, setHinge] = useState<VerticalHinge | null>(null);

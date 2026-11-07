@@ -4,6 +4,7 @@ import type {
 } from "@t3tools/client-runtime/state/shell";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useNavigation, useNavigationState } from "@react-navigation/native";
+import { useState } from "react";
 
 import { scopedThreadKey } from "../../../lib/scopedEntities";
 import { uuidv4 } from "../../../lib/uuid";
@@ -39,8 +40,8 @@ function selectedThreadKey(state: { readonly index: number; readonly routes: rea
   }
 }
 
-/** The thread list in the workspace's sidebar column. */
-export function WorkspaceThreadSidebar() {
+/** The thread list in the workspace's sidebar column; `workers` is Android's Workers tab (F18). */
+export function WorkspaceThreadSidebar(props: { readonly workers?: boolean }) {
   const navigation = useNavigation();
   const {
     layout,
@@ -56,6 +57,7 @@ export function WorkspaceThreadSidebar() {
   const selectThreadRoute = (params: ReactNavigation.RootParamList["Thread"]) =>
     selectDetail({ name: "Thread", params });
   const { openPendingTask } = usePendingTaskListActions(selectThreadRoute);
+  const [workersSearchQuery, setWorkersSearchQuery] = useState("");
   return (
     <ThreadNavigationSidebar
       width={layout.listPaneWidth ?? 0}
@@ -93,8 +95,9 @@ export function WorkspaceThreadSidebar() {
         })
       }
       onOpenThreadPullRequests={openThreadPullRequests}
-      onSearchQueryChange={setPrimarySidebarSearchQuery}
-      searchQuery={primarySidebarSearchQuery}
+      onSearchQueryChange={props.workers ? setWorkersSearchQuery : setPrimarySidebarSearchQuery}
+      searchQuery={props.workers ? workersSearchQuery : primarySidebarSearchQuery}
+      workers={props.workers}
     />
   );
 }

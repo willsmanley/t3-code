@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { act, createElement, createContext, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { WorkspaceRootScreen } from "./WorkspaceRootScreen.android";
+import { ANDROID_NAVIGATION_TAB_ORDER, NAVIGATION_TAB_ORDER } from "./navigation-tab-order";
 import {
   initialWorkspaceTabsState,
   workspaceTabsReducer,
@@ -57,14 +58,19 @@ describe("workspace root navigation", () => {
     expect(workspaceUsesColumns("usage")).toBe(false);
     expect(workspaceUsesColumns("usage", true)).toBe(true);
     expect(workspaceUsesColumns("threads")).toBe(true);
+    expect(workspaceUsesColumns("workers")).toBe(true);
     expect(workspaceUsesColumns("pullRequests")).toBe(true);
   });
 
-  it("keeps the registered defaults while customization is unavailable", () => {
-    expect(resolveWorkspaceTabOrder(undefined)).toEqual(["threads", "pullRequests", "usage"]);
+  it("keeps the platform's defaults while customization is unavailable", () => {
+    expect(resolveWorkspaceTabOrder(undefined)).toEqual(NAVIGATION_TAB_ORDER);
     expect(resolveWorkspaceTabOrder(["home", "usage", "issues", "threads"])).toEqual(
       resolveWorkspaceTabOrder(undefined),
     );
+    // A saved order from before Workers can't bring Pulls back onto Android's bar.
+    expect(
+      resolveWorkspaceTabOrder(["threads", "pullRequests", "usage"], ANDROID_NAVIGATION_TAB_ORDER),
+    ).toEqual(ANDROID_NAVIGATION_TAB_ORDER);
   });
 
   it("retains separate queries and positions across tabs, and cancels only the current search", () => {

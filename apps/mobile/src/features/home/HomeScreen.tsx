@@ -84,6 +84,8 @@ import { useThreadListV2ShelfPreferences } from "../threads/use-thread-list-v2-s
 import { PROJECT_THREAD_TREE_ENABLED } from "../threads/project-thread-tree-items";
 import { useThreadFolderTree } from "../threads/thread-folder-tree";
 import { isThreadFolderTreeListItem } from "../threads/threadFolderListItems";
+import { WorkerJobsSection } from "../threads/worker-jobs-section";
+import { WORKERS_TAB_ENABLED } from "../layout/workspace/navigation-tabs";
 import type { HomeListFilterMenuEnvironment } from "./home-list-filter-menu";
 import {
   buildHomeProjectScopes,
@@ -143,6 +145,8 @@ interface HomeScreenProps {
   readonly onDeletePendingTask: (pendingTask: PendingNewTask) => void;
   readonly onNewThreadOnBranch: (thread: EnvironmentThreadShell) => void;
   readonly onNewThreadInProject: (project: EnvironmentProject, requestId?: string) => void;
+  /** Fork (F18): Android's Workers tab, which lists worker threads instead of project threads. */
+  readonly workers?: boolean;
 }
 
 const ESTIMATED_THREAD_LIST_V2_ROW_HEIGHT = 72;
@@ -447,7 +451,9 @@ export function HomeScreen(props: HomeScreenProps) {
     toggleSnoozedShelf,
     toggleWorkingShelf,
   } = useThreadListV2ShelfPreferences();
+  const workerTab = WORKERS_TAB_ENABLED ? (props.workers ? "workers" : "projects") : null;
   const folderTree = useThreadFolderTree({
+    tab: props.workers ? "workers" : "projects",
     projects: props.projects,
     projectGroupingMode,
     selectedThreadKey,
@@ -483,7 +489,7 @@ export function HomeScreen(props: HomeScreenProps) {
     queuedThreadKeys,
     selectedThreadKey,
     layout: PROJECT_THREAD_TREE_ENABLED ? "tree" : "flat",
-    folderOrder: PROJECT_THREAD_TREE_ENABLED ? folderTree.folderOrder : null,
+    tab: workerTab,
   });
   const {
     layout: threadListV2Layout,
@@ -620,9 +626,17 @@ export function HomeScreen(props: HomeScreenProps) {
         />
       );
     }
-    if (isThreadFolderTreeListItem(item)) {
-      return folderTree.renderItem(item, workerGroup.toggleWorkerFolder);
+    if (item.type === "v2-worker-jobs") {
+      return (
+        <WorkerJobsSection
+          workerCount={item.workerCount}
+          environmentIds={searchEnvironmentIds}
+          pane={sidebarSurface ? "sidebar" : "screen"}
+          onOpenThread={selectThread}
+        />
+      );
     }
+    if (isThreadFolderTreeListItem(item)) return folderTree.renderItem(item);
     const thread = item.item.thread;
     return (
       <ThreadListV2Row
@@ -676,9 +690,11 @@ export function HomeScreen(props: HomeScreenProps) {
         pinningSupported={pinningEnvironmentIds.has(thread.environmentId)}
         autoSettleOptOutSupported={autoSettleOptOutEnvironmentIds.has(thread.environmentId)}
         reorderSupported={
-          item.item.pinned
+          // Workers sit outside the arranged sections.
+          !props.workers &&
+          (item.item.pinned
             ? pinReorderEnvironmentIds.has(thread.environmentId)
-            : !workingShelfEnabled && activeReorderEnvironmentIds.has(thread.environmentId)
+            : !workingShelfEnabled && activeReorderEnvironmentIds.has(thread.environmentId))
         }
         canMoveUp={item.canMoveUp}
         canMoveDown={item.canMoveDown}
@@ -709,12 +725,15 @@ export function HomeScreen(props: HomeScreenProps) {
     selectedThreadKey,
     threadSearchMatchByKey,
     workingShelfEnabled,
+    jobEnvironments: searchEnvironmentIds.join(","),
   };
 
-  const hasAnyThreads =
-    props.threads.some((thread) => thread.archivedAt === null) ||
-    props.pendingTasks.length > 0 ||
-    threadListV2Layout.settledCount > 0;
+  // The Workers tab lists once threads load: with no worker it shows how to make one.
+  const hasAnyThreads = props.workers
+    ? props.catalogState.hasLoadedShellSnapshot
+    : props.threads.some((thread) => thread.archivedAt === null) ||
+      props.pendingTasks.length > 0 ||
+      threadListV2Layout.settledCount > 0;
   const selectedEnvironmentLabel =
     props.selectedEnvironmentId === null
       ? null

@@ -13,6 +13,13 @@ export interface ThreadListV2WorkersShelfListItem {
   readonly expanded: boolean;
 }
 
+/** The end of Android's Workers tab: the no-workers hint and the jobs in project threads. */
+export interface ThreadListV2WorkerJobsListItem {
+  readonly type: "v2-worker-jobs";
+  readonly key: "v2-worker-jobs";
+  readonly workerCount: number;
+}
+
 /** Waiting on the user's approval or answer, or its latest run failed. */
 export function workerThreadNeedsUser(
   thread: Pick<

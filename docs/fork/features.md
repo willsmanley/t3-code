@@ -803,9 +803,17 @@ Workers", a worker for "Move to Projects"; archiving from Workers pauses the wor
 A worker's finished runs stay quiet: no browser notification, no phone card or completion alert
 (questions, approvals and failures still push). Clicking a worker whose thread is archived opens
 it with `?archived=true`, which lets the thread route show an archived (never a deleted) thread,
-with an "archived" composer banner and Unarchive. The Android/iOS app hides workers from its lists
-into a collapsed "Workers (N)" group (except ones that need the user; on Android the open group
-lists workers by folder, F20) and offers the same move in the long-press menu.
+with an "archived" composer banner and Unarchive. Both phone apps offer the same move in the
+long-press menu.
+
+Android app: the bottom bar is Projects | Workers | Usage | Settings, like the sidebar tabs.
+Projects is the thread list without quiet workers (one that needs the user stays). Workers lists
+every worker thread by folder (F20), then "Jobs in project threads" from the server's scheduled
+tasks (a job opens its thread, or Settings > Scheduled tasks when it starts a new thread each
+run); with no worker in view it says how to make one. Pulls left the bar: it comes after the
+bar's three sections, so it is the first row of Settings (the tablet rail still lists it). The
+tab order isn't customizable, so a saved order from an older build can't put Pulls back. iOS
+keeps its tabs and hides workers into a collapsed "Workers (N)" group at the end of its list.
 
 Fork-owned files:
 
@@ -814,7 +822,9 @@ Fork-owned files:
   (+ test), `apps/web/src/components/chat/useArchivedThreadBanner.tsx`.
 - Server: `apps/server/src/relay/workerThreadAwareness.ts`.
 - Mobile: `apps/mobile/src/features/threads/workerThreads.ts`, `workerThreadGroup.ts` (+ test),
-  `use-worker-thread-group.ts`, `workerThreadTag.ts`.
+  `use-worker-thread-group.ts`, `workerThreadTag.ts`, `workerJobs.ts` (+ test),
+  `worker-jobs-section.tsx`, and the bar icons `t3_projects.xml` and `t3_workers.xml` in
+  `apps/mobile/modules/t3-native-controls/android/src/main/res/drawable/`.
 
 Touch points:
 
@@ -834,15 +844,33 @@ Touch points:
   snapshot and the startup catch-up, `thread.tags-updated` publishes, and a worker's finished run
   doesn't alert after the tag is removed (+ tests). `ProjectionStore.ts`: the awareness snapshot
   carries `tags` (+ test).
-- Mobile: `threadListV2.ts`, `thread-list-v2-items.tsx`, `projectThreadTree.ts` (one export),
-  `HomeScreen.tsx`, `ThreadNavigationSidebar.tsx`.
+- Mobile list: `threadListV2.ts` (the shelf and jobs items), `thread-list-v2-items.tsx`,
+  `projectThreadTree.ts` (one export), `HomeScreen.tsx` and `ThreadNavigationSidebar.tsx` (a
+  `workers` prop: `useWorkerThreadGroup({ tab })`, the jobs item, no reordering of workers),
+  `home/HomeRouteScreen.tsx` and `layout/workspace/WorkspaceThreadSidebar.tsx` (a `workers` prop
+  with its own search query, no new-thread button), `WorkspaceListHeader.android.tsx` and
+  `.types.ts` (`tab`).
+- Mobile tabs: `layout/workspace/navigation-tab-order.ts` (`workers` in `NAVIGATION_TAB_ORDER`,
+  labels, `ANDROID_NAVIGATION_TAB_ORDER`, a `capacity` for `overflowNavigationTabs`),
+  `navigation-tabs.ts` (`WORKERS_TAB_ENABLED`, the platform order, iOS hides `workers`,
+  `PHONE_NAVIGATION_TAB_CAPACITY`), `workspace-tabs-state.ts` (`resolveWorkspaceTabOrder`
+  defaults, `workers` state and columns), `WorkspaceTabsContext.tsx`,
+  `AndroidWorkspaceNavigation.android.tsx` (bar capacity), `WorkspaceRootScreen.android.tsx` and
+  `AndroidWorkspaceSidebar.android.tsx` (render Workers), `workspace-tab-navigation.ts` (a
+  worker's detail is a thread), `WorkspaceToolbar.ios.tsx` (search label type),
+  `home/AndroidHomeFab.android.tsx`, `settings/SettingsRouteScreen.tsx` and
+  `SettingsNavigationRouteScreen.tsx` (capacity), `T3WorkspaceNavigationModule.kt` (Projects and
+  Workers titles and icons).
 
 Verify:
 
 - `vp test run apps/web/src/components/legacySidebarWorkers.logic.test.ts apps/web/src/threadRoutes.test.ts`
 - `vp test run apps/server/src/relay/AgentAwarenessRelay.test.ts apps/server/src/orchestration-v2/ProjectionStore.test.ts`
-- `vp test run apps/mobile/src/features/threads/workerThreadGroup.test.ts`
+- `vp test run apps/mobile/src/features/threads/workerThreadGroup.test.ts apps/mobile/src/features/threads/workerJobs.test.ts apps/mobile/src/features/layout/workspace/navigation-tab-order.test.ts apps/mobile/src/features/layout/workspace/workspace-tabs-state.test.ts`
 - In the legacy sidebar, "Move to Workers" moves a thread to the Workers tab and back.
+- In the Android app the bar reads Projects, Workers, Usage, Settings; Settings starts with
+  Pulls; "Move to Workers" on a Projects thread moves it to the Workers tab, and "Move to
+  Projects" brings it back.
 
 ### F19. Rebound Cmd+arrow shortcuts work from the composer (web/desktop, Mac)
 
@@ -896,12 +924,13 @@ device's) list after them by name. Folder names are trimmed, one line, at most 5
 - Thread traversal and the Cmd+1–9 jump hints follow the folders as shown. In a folder that mixes
   projects, a row's title tooltip adds the project name (the row itself shows only the title).
 
-Phone app (Android tree, F7): the home list and the tablet sidebar group threads by the same
-folders, then Unfiled, and the open Workers group (F18) lists workers by folder too (those
-sub-groups collapse for the session). Folder order, empty folders, collapse state and folders
-picked for unsent drafts are this device's, in the app preferences (`threadFolders`,
-`collapsedThreadFolders`, `unfiledThreadsCollapsed`, `pendingThreadFolders`). Search opens every
-folder and lists only folders with matches; a project or environment filter hides empty folders.
+Phone app (Android tree, F7): the Projects tab (home list and tablet sidebar) groups threads by
+the same folders, then Unfiled. The Workers tab (F18) lists workers by them too, showing only
+folders that hold a worker, collapsing them for the session, without new-thread buttons. Folder
+order, empty folders, Projects' collapse state and folders picked for unsent drafts are this
+device's, in the app preferences (`threadFolders`, `collapsedThreadFolders`,
+`unfiledThreadsCollapsed`, `pendingThreadFolders`). Search opens every folder and lists only
+folders with matches; a project or environment filter hides empty folders.
 
 - Thread long-press: "Move to folder ›" (folders, the current one checked, "New folder…") and
   "Remove from folder", on iOS too.
@@ -932,8 +961,8 @@ Fork-owned files:
   writes, prompts, draft filing, the row menu), `threadFolderListItems.ts` (the tree's list
   items), `thread-folder-tree.tsx` (grouping, headers and actions for both lists),
   `use-thread-folders.ts`, `FolderArrangementSheet.tsx`, `projectThreadTree.ts` (+ test;
-  `buildFolderThreadTreeListItems`, `groupWorkerRowsByFolder`), `project-thread-tree-items.tsx`
-  (`ThreadFolderHeader`, `WorkerFolderHeader`), `apps/mobile/src/persistence/thread-folder-preferences.ts`.
+  `buildFolderThreadTreeListItems`), `project-thread-tree-items.tsx` (`ThreadFolderHeader`),
+  `apps/mobile/src/persistence/thread-folder-preferences.ts`.
 
 Touch points:
 
@@ -952,17 +981,14 @@ Touch points:
 - `packages/client-runtime/package.json`: the `./thread-folders` export.
 - `apps/mobile/src/features/home/HomeScreen.tsx` and `threads/ThreadNavigationSidebar.tsx`:
   `useThreadFolderTree(...)`, `folderTree.groupListItems(...)` in place of the project grouping,
-  `folderTree.renderItem(...)` for the folder items, `folderTree.arrangementSheet`, and
-  `folderOrder` passed to `useWorkerThreadGroup`; `onNewThreadInProject` takes an optional
-  `requestId`.
+  `folderTree.renderItem(...)` for the folder items and `folderTree.arrangementSheet`;
+  `onNewThreadInProject` takes an optional `requestId`.
 - `apps/mobile/src/features/home/HomeRouteScreen.tsx` and
   `layout/workspace/WorkspaceThreadSidebar.tsx`: `onNewThreadInProject` uses the given `requestId`.
 - `apps/mobile/src/features/threads/NewTaskDraftScreen.tsx`: one `fileSentDraftInFolder(...)`
   call after the outbox accepts the first message.
 - `apps/mobile/src/features/threads/thread-list-v2-items.tsx`: `useThreadFolderMenu(thread)` in
   the row's menu items and event handler.
-- `apps/mobile/src/features/threads/use-worker-thread-group.ts` and `workerThreadGroup.ts` (F18):
-  `folderOrder` input, session-collapsed worker folders, `toggleWorkerFolder`.
 - `apps/mobile/src/persistence/mobile-preferences.ts`: `Preferences extends
   ThreadFolderPreferences` and one `sanitizeThreadFolderPreferences(parsed)` spread.
 

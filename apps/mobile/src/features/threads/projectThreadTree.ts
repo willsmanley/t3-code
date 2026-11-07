@@ -11,7 +11,6 @@ import {
   folderGroupKey,
   type ThreadListV2FolderHeaderListItem,
   type ThreadListV2FolderMoreListItem,
-  type ThreadListV2WorkerFolderListItem,
 } from "./threadFolderListItems";
 import {
   resolveThreadListV2Status,
@@ -127,6 +126,8 @@ export function buildFolderThreadTreeListItems(input: {
   /** Folder group keys whose "Show more" is open. */
   readonly expandedGroupKeys: ReadonlySet<string>;
   readonly showEmptyFolders: boolean;
+  /** Unfiled may offer a folder per project while no folder exists. */
+  readonly offerFolderPerProject?: boolean;
   readonly selectedThreadKey?: string | null;
   readonly preferencesLoading?: boolean;
 }): ThreadListV2ListItem[] {
@@ -189,6 +190,7 @@ export function buildFolderThreadTreeListItems(input: {
       nextFolder: group.folder === null ? null : (folders[groupIndex + 1]?.folder ?? null),
       canArrange: input.folderOrder.length > 1,
       offerFolderPerProject:
+        input.offerFolderPerProject !== false &&
         group.folder === null &&
         input.folderOrder.length === 0 &&
         input.preferencesLoading !== true,
@@ -222,47 +224,6 @@ export function buildFolderThreadTreeListItems(input: {
   }
   result.push(...snoozedShelf);
   return result;
-}
-
-/**
- * Groups the Workers shelf's rows by folder, in `folderOrder`, then Unfiled; folders without a
- * worker are left out. A collapsed folder keeps only the selected worker.
- */
-export function groupWorkerRowsByFolder(input: {
-  readonly rows: ReadonlyArray<ThreadListV2ListItem>;
-  readonly folderOrder: ReadonlyArray<string>;
-  readonly collapsedGroupKeys: ReadonlySet<string>;
-  readonly selectedThreadKey?: string | null;
-}): ThreadListV2ListItem[] {
-  const threadRows = input.rows.filter((row) => row.type === "v2-thread");
-  const grouped = groupByFolder(
-    threadRows,
-    (row) => folderOfTags(row.item.thread.source.tags),
-    input.folderOrder,
-  );
-  const groups = [
-    ...grouped.folders.map((group) => ({
-      folder: group.folder as string | null,
-      rows: group.threads,
-    })),
-    { folder: null, rows: grouped.unfiled },
-  ];
-  return groups.flatMap(({ folder, rows }) => {
-    if (rows.length === 0) return [];
-    const groupKey = folderGroupKey(folder);
-    const collapsed = input.collapsedGroupKeys.has(groupKey);
-    const header: ThreadListV2WorkerFolderListItem = {
-      type: "v2-worker-folder",
-      key: `v2-worker-folder:${groupKey}`,
-      folder,
-      count: rows.length,
-      collapsed,
-    };
-    const visible = collapsed
-      ? rows.filter((row) => rowThreadKey(row) === input.selectedThreadKey)
-      : rows;
-    return [header, ...visible];
-  });
 }
 
 export function toTreeRow(row: ThreadListV2ThreadListItem): ThreadListV2ThreadListItem {

@@ -42,9 +42,13 @@ export function AndroidWorkspaceSidebar() {
         tabs={NAVIGATION_TAB_ORDER}
         selected={workspace.state.selectedTab}
         renderTab={(tab) =>
-          tab === "threads" ? (
-            <AndroidHomeFabLayout sidebar disabled={coveredByPage} onStartNewTask={startNewTask}>
-              <WorkspaceThreadSidebar />
+          tab === "threads" || tab === "workers" ? (
+            <AndroidHomeFabLayout
+              sidebar
+              disabled={coveredByPage || tab === "workers"}
+              onStartNewTask={startNewTask}
+            >
+              <WorkspaceThreadSidebar workers={tab === "workers"} />
             </AndroidHomeFabLayout>
           ) : tab !== "pullRequests" ? (
             <View className="flex-1 bg-screen" />

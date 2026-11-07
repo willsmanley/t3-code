@@ -4,7 +4,6 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { makeThreadShellFixture } from "../../test-fixtures";
 import { buildFolderThreadTreeListItems } from "./projectThreadTree";
-import { folderGroupKey } from "./threadFolderListItems";
 import {
   buildThreadListV2Items,
   buildThreadListV2ListItems,
@@ -13,8 +12,10 @@ import {
   type ThreadListV2ListItem,
 } from "./threadListV2";
 import {
+  buildWorkerJobsListItems,
   buildWorkerShelfListItems,
   partitionWorkerThreads,
+  threadsForWorkerTab,
   withWorkerShelf,
 } from "./workerThreadGroup";
 import {
@@ -36,7 +37,6 @@ function makeThread(
     readonly minutesAgo?: number;
     readonly projectId?: ProjectId;
     readonly worker?: boolean;
-    readonly folder?: string;
     readonly overrides?: Partial<EnvironmentThreadShell>;
   } = {},
 ): EnvironmentThreadShell {
@@ -51,11 +51,9 @@ function makeThread(
     latestUserMessageAt: at,
     ...options.overrides,
   });
-  const tags = [
-    ...(options.worker ? [WORKER_THREAD_TAG] : []),
-    ...(options.folder === undefined ? [] : [`folder:${options.folder}`]),
-  ];
-  return tags.length === 0 ? thread : { ...thread, source: { ...thread.source, tags } };
+  return options.worker
+    ? { ...thread, source: { ...thread.source, tags: [WORKER_THREAD_TAG] } }
+    : thread;
 }
 
 function failedRuntime(): EnvironmentThreadShell["runtime"] {
@@ -114,6 +112,42 @@ describe("worker threads", () => {
     expect(searching.workers).toEqual([]);
 
     expect(partitionWorkerThreads([plain], "").listed).toEqual([plain]);
+  });
+
+  it("splits Android's Projects and Workers tabs, keeping a worker that needs the user in both", () => {
+    const plain = makeThread("plain");
+    const quiet = makeThread("quiet", { worker: true });
+    const asking = makeThread("asking", {
+      worker: true,
+      overrides: { hasPendingUserInput: true },
+    });
+    const threads = [plain, quiet, asking];
+
+    expect(threadsForWorkerTab(threads, "projects")).toEqual([plain, asking]);
+    expect(threadsForWorkerTab(threads, "workers")).toEqual([quiet, asking]);
+  });
+
+  it("closes the Workers tab with the count of workers in scope, except while searching", () => {
+    const workers = [
+      makeThread("api-worker", { worker: true }),
+      makeThread("web-worker", { worker: true, projectId: web }),
+      makeThread("archived", { worker: true, overrides: { archivedAt: NOW } }),
+    ];
+
+    expect(buildWorkerJobsListItems({ workers, searchQuery: "", environmentId: null })).toEqual([
+      { type: "v2-worker-jobs", key: "v2-worker-jobs", workerCount: 2 },
+    ]);
+    expect(
+      buildWorkerJobsListItems({
+        workers,
+        searchQuery: "",
+        environmentId: null,
+        projectRefs: [{ environmentId, projectId: web }],
+      }),
+    ).toMatchObject([{ workerCount: 1 }]);
+    expect(buildWorkerJobsListItems({ workers, searchQuery: "api", environmentId: null })).toEqual(
+      [],
+    );
   });
 
   it("leaves shelved workers out of the arranged sections", () => {
@@ -259,51 +293,6 @@ describe("Workers shelf", () => {
       "v2-thread",
     ]);
     expect(withWorkerShelf(tree, [])).toBe(tree);
-  });
-
-  it("groups an open tree shelf by folder, then Unfiled, and keeps the selected worker", () => {
-    const shelf = (options: { readonly expanded: boolean; readonly collapsed?: string[] }) =>
-      buildWorkerShelfListItems({
-        workers: [
-          makeThread("loose", { worker: true, minutesAgo: 1 }),
-          makeThread("b-worker", { worker: true, folder: "B", minutesAgo: 2 }),
-          makeThread("a-worker", { worker: true, folder: "A", minutesAgo: 3 }),
-        ],
-        environmentId: null,
-        now: NOW,
-        expanded: options.expanded,
-        selectedThreadKey: `${environmentId}:a-worker`,
-        layout: "tree",
-        folders: {
-          order: ["A", "Empty", "B"],
-          collapsedGroupKeys: new Set((options.collapsed ?? []).map(folderGroupKey)),
-        },
-      }).map((item) =>
-        item.type === "v2-worker-folder"
-          ? `# ${item.folder ?? "Unfiled"}${item.collapsed ? ` (${item.count})` : ""}`
-          : item.type === "v2-thread"
-            ? item.item.thread.id
-            : item.type,
-      );
-
-    expect(shelf({ expanded: true })).toEqual([
-      "v2-workers-shelf",
-      "# A",
-      "a-worker",
-      "# B",
-      "b-worker",
-      "# Unfiled",
-      "loose",
-    ]);
-    expect(shelf({ expanded: true, collapsed: ["A", "B"] })).toEqual([
-      "v2-workers-shelf",
-      "# A (1)",
-      "a-worker",
-      "# B (1)",
-      "# Unfiled",
-      "loose",
-    ]);
-    expect(shelf({ expanded: false })).toEqual(["v2-workers-shelf", "a-worker"]);
   });
 
   it("compares shelf headers by count and expansion", () => {

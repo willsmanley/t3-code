@@ -1,5 +1,18 @@
-export const NAVIGATION_TAB_ORDER = ["threads", "pullRequests", "usage"] as const;
+/** Every section. Each platform's default order and hidden sections are in `navigation-tabs.ts`. */
+export const NAVIGATION_TAB_ORDER = ["threads", "workers", "pullRequests", "usage"] as const;
 export type NavigationTab = (typeof NAVIGATION_TAB_ORDER)[number];
+
+/**
+ * Fork (F18): Android's phone bar is Projects | Workers | Usage | Settings. Pulls comes after the
+ * bar's three sections, so it opens from the top of Settings.
+ */
+export const ANDROID_NAVIGATION_TAB_ORDER: readonly NavigationTab[] = [
+  "threads",
+  "workers",
+  "usage",
+  "pullRequests",
+];
+export const ANDROID_PHONE_NAVIGATION_TAB_CAPACITY = 3;
 
 export function navigationCustomizationAvailable(
   registeredSections: number = NAVIGATION_TAB_ORDER.length,
@@ -8,7 +21,8 @@ export function navigationCustomizationAvailable(
 }
 
 export const NAVIGATION_TAB_LABELS: Readonly<Record<NavigationTab, string>> = {
-  threads: "Threads",
+  threads: "Projects",
+  workers: "Workers",
   pullRequests: "Pulls",
   usage: "Usage",
 };
@@ -18,9 +32,12 @@ function isNavigationTab(value: unknown): value is NavigationTab {
 }
 
 /** Complete older preferences without losing their order or retaining removed sections. */
-export function resolveNavigationTabOrder(saved?: readonly unknown[]): readonly NavigationTab[] {
-  if (!saved?.length) return NAVIGATION_TAB_ORDER;
-  return [...new Set([...saved.filter(isNavigationTab), ...NAVIGATION_TAB_ORDER])];
+export function resolveNavigationTabOrder(
+  saved?: readonly unknown[],
+  defaults: readonly NavigationTab[] = NAVIGATION_TAB_ORDER,
+): readonly NavigationTab[] {
+  if (!saved?.length) return defaults;
+  return [...new Set([...saved.filter(isNavigationTab), ...defaults])];
 }
 
 export function moveNavigationTab(
@@ -61,8 +78,12 @@ export function visibleNavigationTabs(
   return enabledNavigationTabs(saved, hidden).slice(0, capacity);
 }
 
-export function overflowNavigationTabs(saved?: readonly unknown[], hidden?: readonly unknown[]) {
-  return enabledNavigationTabs(saved, hidden).slice(4);
+export function overflowNavigationTabs(
+  saved?: readonly unknown[],
+  hidden?: readonly unknown[],
+  capacity = 4,
+) {
+  return enabledNavigationTabs(saved, hidden).slice(capacity);
 }
 
 export function selectedNavigationTab(

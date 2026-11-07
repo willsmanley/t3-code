@@ -116,7 +116,8 @@ export const ThreadFolderHeader = memo(function ThreadFolderHeader(props: {
   readonly disabled?: boolean;
   readonly pane?: "screen" | "sidebar";
   readonly onToggle: () => void;
-  readonly onNewThread: () => void;
+  /** Leave out to hide the new-thread button. */
+  readonly onNewThread?: () => void;
   readonly onAction: (action: ThreadFolderHeaderAction) => void;
 }) {
   const sidebarPane = props.pane === "sidebar";
@@ -240,12 +241,14 @@ export const ThreadFolderHeader = memo(function ThreadFolderHeader(props: {
             onPress={() => act("new-folder")}
           />
         ) : null}
-        <TreeIconButton
-          icon="square.and.pencil"
-          label={`New thread in ${title}`}
-          tint={iconTint}
-          onPress={props.onNewThread}
-        />
+        {props.onNewThread ? (
+          <TreeIconButton
+            icon="square.and.pencil"
+            label={`New thread in ${title}`}
+            tint={iconTint}
+            onPress={props.onNewThread}
+          />
+        ) : null}
       </View>
       {props.offerFolderPerProject && !props.collapsed ? (
         <Pressable
@@ -275,49 +278,6 @@ export const ThreadFolderHeader = memo(function ThreadFolderHeader(props: {
         </Pressable>
       ) : null}
     </View>
-  );
-});
-
-/** Fork (F20): a folder inside the Workers shelf. */
-export const WorkerFolderHeader = memo(function WorkerFolderHeader(props: {
-  readonly folder: string | null;
-  readonly count: number;
-  readonly collapsed: boolean;
-  readonly pane?: "screen" | "sidebar";
-  readonly onToggle: () => void;
-}) {
-  const sidebarPane = props.pane === "sidebar";
-  const title = props.folder ?? "Unfiled";
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`${title}, ${props.count} ${props.count === 1 ? "worker" : "workers"}`}
-      accessibilityState={{ expanded: !props.collapsed }}
-      className={cn("flex-row items-center gap-2 py-1.5", sidebarPane ? "pl-6 pr-3" : "pl-8 pr-5")}
-      onPress={props.onToggle}
-      style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
-    >
-      <View className="w-3 items-center">
-        <SymbolView
-          name={props.collapsed ? "chevron.right" : "chevron.down"}
-          size={10}
-          tintColorClassName={sidebarPane ? "accent-drawer-foreground-muted" : "accent-icon-muted"}
-          type="monochrome"
-        />
-      </View>
-      <Text
-        className={cn(
-          "min-w-0 flex-1 text-xs font-t3-medium",
-          sidebarPane ? "text-drawer-foreground-muted" : "text-foreground-muted",
-        )}
-        numberOfLines={1}
-      >
-        {title}
-      </Text>
-      {props.collapsed ? (
-        <Text className="text-xs tabular-nums text-foreground-muted">{props.count}</Text>
-      ) : null}
-    </Pressable>
   );
 });
 

@@ -17,7 +17,10 @@ import { updateFabScroll } from "./fab-scroll";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
 import { WorkspaceTabsContext, useWorkspaceTabs } from "../layout/workspace/WorkspaceTabsContext";
 import { FLOATING_TABS, floatingTabsMetrics } from "../layout/workspace/floating-workspace-tabs";
-import { useEnabledNavigationTabs } from "../layout/workspace/navigation-tabs";
+import {
+  PHONE_NAVIGATION_TAB_CAPACITY,
+  useEnabledNavigationTabs,
+} from "../layout/workspace/navigation-tabs";
 import {
   useAppearancePreferences,
   useAndroidFloatingTabs,
@@ -38,7 +41,12 @@ export function AndroidHomeFabLayout(props: ComponentProps<typeof SharedAndroidH
       ? undefined
       : layoutWidth - (Math.max(insets.left, FLOATING_TABS.edge) - FLOATING_TABS.edge);
   const size = floatingTabsEnabled
-    ? floatingTabsMetrics(enabledTabs.length + 1, scale, fabSize, barWidth).height
+    ? floatingTabsMetrics(
+        Math.min(enabledTabs.length, PHONE_NAVIGATION_TAB_CAPACITY) + 1,
+        scale,
+        fabSize,
+        barWidth,
+      ).height
     : fabSize;
   const workspace = useWorkspaceTabs();
   const bottomClearance = insets.bottom + FLOATING_TABS.bottom + FLOATING_TABS.edge + size;

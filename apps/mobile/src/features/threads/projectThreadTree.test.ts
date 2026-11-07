@@ -50,6 +50,7 @@ function buildTree(
     readonly collapsed?: ReadonlyArray<string | null>;
     readonly expanded?: ReadonlyArray<string | null>;
     readonly showEmptyFolders?: boolean;
+    readonly offerFolderPerProject?: boolean;
     readonly selectedThreadKey?: string;
     readonly snoozedShelfExpanded?: boolean;
   } = {},
@@ -78,6 +79,7 @@ function buildTree(
     collapsedGroupKeys: new Set((options.collapsed ?? []).map(folderGroupKey)),
     expandedGroupKeys: new Set((options.expanded ?? []).map(folderGroupKey)),
     showEmptyFolders: options.showEmptyFolders ?? true,
+    offerFolderPerProject: options.offerFolderPerProject,
     selectedThreadKey: options.selectedThreadKey,
   });
 }
@@ -180,13 +182,14 @@ describe("buildFolderThreadTreeListItems", () => {
     ]);
   });
 
-  it("offers a folder per project on Unfiled only until a folder exists", () => {
-    const offers = (folderOrder: ReadonlyArray<string>) =>
-      buildTree([makeThread("loose", null, 1)], { folderOrder }).flatMap((item) =>
-        item.type === "v2-folder" ? [[item.folder, item.offerFolderPerProject]] : [],
+  it("offers a folder per project on Unfiled only until a folder exists, where asked", () => {
+    const offers = (folderOrder: ReadonlyArray<string>, offerFolderPerProject?: boolean) =>
+      buildTree([makeThread("loose", null, 1)], { folderOrder, offerFolderPerProject }).flatMap(
+        (item) => (item.type === "v2-folder" ? [[item.folder, item.offerFolderPerProject]] : []),
       );
 
     expect(offers([])).toEqual([[null, true]]);
+    expect(offers([], false)).toEqual([[null, false]]);
     expect(offers(["A"])).toEqual([
       ["A", false],
       [null, false],

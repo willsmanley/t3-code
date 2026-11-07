@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
+  ANDROID_NAVIGATION_TAB_ORDER,
+  ANDROID_PHONE_NAVIGATION_TAB_CAPACITY,
   NAVIGATION_TAB_ORDER,
   navigationCustomizationAvailable,
   moveNavigationTab,
@@ -24,8 +26,14 @@ describe("navigation tab order", () => {
   it("fills missing sections and drops removed placeholders, duplicates, and Settings", () => {
     expect(
       resolveNavigationTabOrder(["usage", "home", "issues", "settings", "usage", null]),
-    ).toEqual(["usage", "threads", "pullRequests"]);
+    ).toEqual(["usage", "threads", "workers", "pullRequests"]);
     expect(resolveNavigationTabOrder()).toEqual(NAVIGATION_TAB_ORDER);
+    expect(resolveNavigationTabOrder(["pullRequests"], ANDROID_NAVIGATION_TAB_ORDER)).toEqual([
+      "pullRequests",
+      "threads",
+      "workers",
+      "usage",
+    ]);
   });
 
   it("moves a section without changing the relative order of the others", () => {
@@ -48,10 +56,19 @@ describe("navigation tab order", () => {
     expect(selectedNavigationTab(undefined, "usage", false, [], 2)).toBe("settings");
   });
 
+  it("puts Android's Pulls after the phone bar, where Settings lists it, and on the rail", () => {
+    const capacity = ANDROID_PHONE_NAVIGATION_TAB_CAPACITY;
+    const order = ANDROID_NAVIGATION_TAB_ORDER;
+    expect(visibleNavigationTabs(order, [], capacity)).toEqual(["threads", "workers", "usage"]);
+    expect(overflowNavigationTabs(order, [], capacity)).toEqual(["pullRequests"]);
+    expect(selectedNavigationTab(order, "pullRequests", false, [], capacity)).toBe("settings");
+    expect(visibleNavigationTabs(order, [], 5)).toEqual(order);
+  });
+
   it("removes hidden sections from navigation and restores their saved positions", () => {
     const order = moveNavigationTab(undefined, "usage", 0);
     const hidden = toggleNavigationTabVisibility([], "usage");
-    expect(enabledNavigationTabs(order, hidden)).toEqual(["threads", "pullRequests"]);
+    expect(enabledNavigationTabs(order, hidden)).toEqual(["threads", "workers", "pullRequests"]);
     expect(toggleNavigationTabVisibility(hidden, "usage")).toEqual([]);
     expect(visibleNavigationTabs(order, [], 5)).toEqual(order);
     expect(enabledNavigationTabs(undefined, ["home", "issues", "settings"])).toEqual(
@@ -60,7 +77,7 @@ describe("navigation tab order", () => {
   });
 
   it("falls back when the selected section is hidden, including when all are hidden", () => {
-    expect(resolveSelectedNavigationTab(undefined, ["threads"], "threads")).toBe("pullRequests");
+    expect(resolveSelectedNavigationTab(undefined, ["threads"], "threads")).toBe("workers");
     expect(resolveSelectedNavigationTab(undefined, ["threads"], "usage")).toBe("usage");
     expect(
       resolveSelectedNavigationTab(undefined, NAVIGATION_TAB_ORDER, "threads"),

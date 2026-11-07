@@ -43,7 +43,11 @@ import {
 
 import { relativeTime } from "../../lib/time";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
-import { isShelvedWorkerThread, type ThreadListV2WorkersShelfListItem } from "./workerThreads";
+import {
+  isShelvedWorkerThread,
+  type ThreadListV2WorkerJobsListItem,
+  type ThreadListV2WorkersShelfListItem,
+} from "./workerThreads";
 
 import {
   applyPendingThreadOrder,
@@ -439,6 +443,7 @@ export type ThreadListV2ListItem =
   | ThreadListV2SnoozedShelfListItem
   | ThreadListV2SettledShelfListItem
   | ThreadListV2WorkersShelfListItem
+  | ThreadListV2WorkerJobsListItem
   | ThreadFolderTreeListItem;
 
 export function isThreadListV2ListItem(value: {
@@ -451,6 +456,7 @@ export function isThreadListV2ListItem(value: {
     value.type === "v2-snoozed-shelf" ||
     value.type === "v2-settled-shelf" ||
     value.type === "v2-workers-shelf" ||
+    value.type === "v2-worker-jobs" ||
     isThreadFolderTreeListItem(value)
   );
 }
@@ -513,9 +519,10 @@ export function threadListV2ListItemsAreEqual(
         previous.count === item.count &&
         previous.expanded === item.expanded
       );
+    case "v2-worker-jobs":
+      return previous.type === "v2-worker-jobs" && previous.workerCount === item.workerCount;
     case "v2-folder":
     case "v2-folder-more":
-    case "v2-worker-folder":
       return threadFolderTreeListItemsAreEqual(previous, item);
   }
 }

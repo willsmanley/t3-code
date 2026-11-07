@@ -4,6 +4,7 @@ import {
 } from "../layout/workspace/navigation-tab-order";
 import {
   NAVIGATION_TAB_ICONS,
+  PHONE_NAVIGATION_TAB_CAPACITY,
   WORKSPACE_TAB_LABELS,
   useNavigationTabOrder,
   useHiddenNavigationTabs,
@@ -24,6 +25,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { useAdaptiveWorkspaceLayout } from "../layout/adaptive-workspace-context";
+import { useAndroidFloatingTabs } from "./appearance/AppearancePreferencesProvider";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection, SettingsSidebarContext } from "./components/SettingsSection";
@@ -286,8 +288,10 @@ function useOverflowRows(): SettingsListRow[] {
   const order = useNavigationTabOrder();
   const hidden = useHiddenNavigationTabs();
   const { layout } = useAdaptiveWorkspaceLayout();
-  const tabs =
-    Platform.OS === "android" && layout.usesSplitView ? [] : overflowNavigationTabs(order, hidden);
+  const floatingTabs = useAndroidFloatingTabs();
+  // The Android rail lists every section; the floating bar holds a phone's worth.
+  const rail = Platform.OS === "android" && layout.usesSplitView && !floatingTabs;
+  const tabs = rail ? [] : overflowNavigationTabs(order, hidden, PHONE_NAVIGATION_TAB_CAPACITY);
   const selectTab = useSelectWorkspaceTab();
   return tabs.map((tab) => ({
     id: tab,

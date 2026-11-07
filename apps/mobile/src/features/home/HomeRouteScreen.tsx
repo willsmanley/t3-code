@@ -36,7 +36,10 @@ import { WorkspaceListEmptyDetail } from "../layout/workspace/WorkspaceListEmpty
 import { WorkspaceListHeader } from "../layout/workspace/WorkspaceListHeader";
 import { buildHomeListFilterMenuItems } from "./home-list-filter-menu";
 
-export function HomeRouteScreen() {
+const NO_PENDING_TASKS: ReturnType<typeof usePendingNewTasks> = [];
+
+/** `workers` is Android's Workers tab (F18): worker threads, with their own search. */
+export function HomeRouteScreen(props: { readonly workers?: boolean }) {
   const nativePrimaryColumn = use(NativePrimaryColumnContext);
   const { layout, primarySidebarSearchQuery, setPrimarySidebarSearchQuery, startNewTask } =
     useAdaptiveWorkspaceLayout();
@@ -54,12 +57,14 @@ export function HomeRouteScreen() {
   const selectTab = useSelectWorkspaceTab();
   const workspace = useWorkspaceTabs();
   const [localSearchQuery, setLocalSearchQuery] = useState("");
-  const searchQuery =
-    Platform.OS === "android"
+  const searchQuery = props.workers
+    ? localSearchQuery
+    : Platform.OS === "android"
       ? primarySidebarSearchQuery
       : (workspace?.state.tabs.threads.query ?? localSearchQuery);
   const setSearchQuery = (query: string) => {
-    if (Platform.OS === "android") setPrimarySidebarSearchQuery(query);
+    if (props.workers) setLocalSearchQuery(query);
+    else if (Platform.OS === "android") setPrimarySidebarSearchQuery(query);
     else if (workspace) workspace.dispatch({ type: "query", query, tab: "threads" });
     else setLocalSearchQuery(query);
   };
@@ -164,10 +169,11 @@ export function HomeRouteScreen() {
   }
 
   return (
-    <AndroidHomeFabLayout onStartNewTask={startNewTask}>
+    <AndroidHomeFabLayout disabled={props.workers} onStartNewTask={startNewTask}>
       <>
         <WorkspaceListHeader
-          accessibilityLabel="T3 Code, Threads"
+          accessibilityLabel={props.workers ? "T3 Code, Workers" : "T3 Code, Threads"}
+          tab={props.workers ? "workers" : "threads"}
           onOpenEnvironments={() => openSettings(navigation, "SettingsEnvironments")}
           search={{
             value: searchQuery,
@@ -224,7 +230,8 @@ export function HomeRouteScreen() {
             });
           }}
           onStartNewTask={startNewTask}
-          pendingTasks={pendingTasks}
+          pendingTasks={props.workers ? NO_PENDING_TASKS : pendingTasks}
+          workers={props.workers}
           projectGroupingMode={listOptions.projectGroupingMode}
           projects={projects}
           projectSortOrder={listOptions.projectSortOrder}
