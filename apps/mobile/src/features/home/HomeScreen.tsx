@@ -919,6 +919,8 @@ export function HomeScreen(props: HomeScreenProps) {
                 recycleItems
                 extraData={v2ExtraData}
                 ListHeaderComponent={v2ListHeader}
+                // Lifted above the rows so an iOS filter menu's dismissal morph is not covered.
+                ListHeaderComponentStyle={{ zIndex: 1 }}
                 ListFooterComponent={
                   showOlderSettledRow ? (
                     <ThreadListV2ShowMoreRow
