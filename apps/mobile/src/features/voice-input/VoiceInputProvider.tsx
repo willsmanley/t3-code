@@ -15,6 +15,7 @@ import {
 } from "../../lib/microphonePriority";
 import { getLocalVoiceTranscriber } from "../../native/voiceTranscription";
 import { createVoiceRecorder } from "../../native/voiceRecorder";
+import { createForkAacRecorder } from "../../native/forkAacRecorder";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import { getNativeShowcaseScene } from "../showcase/nativeShowcaseScene";
 import {
@@ -124,7 +125,7 @@ const voiceInputAtom = Atom.make((get) => {
     create: (destination) =>
       destination === "local" && Platform.OS !== "android"
         ? createVoiceRecorder(VOICE_RECORDING_OPTIONS)
-        : new AudioModule.AudioRecorder(VOICE_RECORDING_OPTIONS),
+        : (createForkAacRecorder() ?? new AudioModule.AudioRecorder(VOICE_RECORDING_OPTIONS)),
     onStatus: (status: RecordingStatus) => {
       session.controller.handleRecorderStatus({
         isFinished: status.isFinished,

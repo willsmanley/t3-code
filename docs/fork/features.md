@@ -384,15 +384,19 @@ Verify:
 Commits `434db9cba7`, `28d14f6f71`.
 
 What it does: Android gets voice input. It records AAC (ADTS, 16 kHz, 48 kbps) into document
-storage, so a crash doesn't lose the file. A recording can run up to 20 minutes and keeps going in
+storage, so a crash doesn't lose the file. The fork's own recorder writes it, because Android's
+MediaRecorder drops the last ~170 ms when it stops (the end of the last word). A recording can run up to 20 minutes and keeps going in
 the background behind a notification. Since F16 the thread's server transcribes it; the ElevenLabs
 key the user saves under Settings → Microphone (kept in secure storage) is only the fallback for a
 server that can't. Recordings are kept until transcription succeeds, and the settings page lists
 them.
 
 Fork-owned files: `apps/mobile/src/features/voice-input/elevenLabsTranscription.ts` (key,
-upload, and `androidVoiceTranscriber`), `savedRecordings.ts` (where the files live), and
-`apps/mobile/src/features/settings/VoiceTranscriptionSettings.tsx`.
+upload, and `androidVoiceTranscriber`), `savedRecordings.ts` (where the files live),
+`apps/mobile/src/features/settings/VoiceTranscriptionSettings.tsx`, and the recorder:
+`apps/mobile/modules/t3-fork-aac-recorder` (AudioRecord into MediaCodec; stop drains the
+microphone and flushes the encoder before it returns; its own microphone foreground service for
+background recording) with `apps/mobile/src/native/forkAacRecorder.ts`.
 
 Upstream added its own on-device Android dictation on November 3, 2026 (`d1ec71e6ff`: Google
 speech services, the `modules/t3-voice-transcription` native module and its own
@@ -423,9 +427,10 @@ Touch points:
   which replaced the Microphone page on November 6, 2026): renders `<VoiceTranscriptionSettings>`
   on Android above upstream's "Transcribe on" picker, and on Android the "This device" choice says
   audio goes to the thread's server or ElevenLabs.
-- `VoiceInputProvider.tsx` also builds the Android recorder with `new AudioModule.AudioRecorder`
-  (plain AAC) instead of upstream's `createVoiceRecorder`, whose live recorder writes raw PCM that
-  the ElevenLabs/server upload and kept recordings can't use. Upstream's "Transcribe on:
+- `VoiceInputProvider.tsx` also builds the Android recorder with `createForkAacRecorder()`
+  (falling back to `new AudioModule.AudioRecorder`) instead of upstream's `createVoiceRecorder`,
+  whose live recorder writes raw PCM that the ElevenLabs/server upload and kept recordings can't
+  use. Upstream's "Transcribe on:
   environment" choice still works on Android but rejects recordings over 5 minutes.
 - `apps/mobile/app.config.ts`: expo-audio `recordAudioAndroid: true` and
   `enableBackgroundRecording: true`. (Upstream now lists Settings → Microphone on Android and no
@@ -433,7 +438,10 @@ Touch points:
 
 Verify:
 
-- `vp test run packages/client-runtime/src/voice-input`
+- `vp test run packages/client-runtime/src/voice-input`; after `expo prebuild`,
+  `./gradlew :t3-fork-aac-recorder:testDebugUnitTest` in `apps/mobile/android`.
+- `grep -n "createForkAacRecorder" apps/mobile/src/features/voice-input/VoiceInputProvider.tsx` (the
+  recorder hook).
 - `grep -n "androidVoiceTranscriber" apps/mobile/src/features/voice-input/VoiceInputProvider.tsx apps/mobile/src/features/voice-input/elevenLabsTranscription.ts`
   (the provider's `read` and the export). If upstream stops reading `localVoiceTranscriberAtom`,
   move the hook to whatever replaces it.
