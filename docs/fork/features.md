@@ -1008,6 +1008,66 @@ Verify:
   delete it; start a thread from the folder's new-thread button and send it (it lands in the
   folder); open Workers and see workers under their folders.
 
+### F21. Stay connected for a few minutes after leaving the Android app (mobile, Android only)
+
+Added November 8, 2026.
+
+What it does: when you switch from the app to another one, a quiet foreground service ("T3 Code
+is staying connected", with a countdown, a Stop button, and tap to return) keeps the app running
+and its connection open for N minutes, so switching back shows live threads at once. After N
+minutes, on Stop, or when you come back, the service ends and the app sleeps as before. N is
+under Settings → Environments → "Stay connected after leaving": Off, 1, 5 (default), 10 or 15
+minutes. It is kept on the device only (Android SharedPreferences, read natively the moment the
+app leaves). Each return is logged on the device (time away, whether the service covered it,
+whether the socket survived, ms until the thread list was live, and JS timer ticks while away;
+last 300 in `<documents>/keep-connected-returns.json`), and the setting shows a 7-day summary to
+pick N from.
+
+How it keeps JS running: React Native Android stops JS timers when the activity pauses unless a
+headless JS task is active (`JavaTimerManager`). Socket messages would still arrive, but the
+connection's probes, retries, timeouts and debounces wait on timers. So on leaving, the native
+module starts the foreground service (type `dataSync`) and a headless JS task
+(`T3ForkKeepConnected`) together, from Expo's `OnActivityEntersBackground` (Android still allows a
+foreground-service start then), and ends both together. Returns the service covered count as an
+`application-active-probe` wakeup, not `application-active-long`, so a live socket is probed
+quickly rather than treated as suspect. The thread list and an open thread still resubscribe
+from their cursor on return (upstream's rule for every app-active wakeup), which over a live
+socket finishes well before the 4-second F15 status delay, so no banner shows. Browser and device
+previews still pause in the background (`useAppForeground`); thread views never did.
+
+Fork-owned files: `apps/mobile/modules/t3-fork-keep-connected` (`KeepConnected.kt` decides when
+the window runs and owns the setting, `KeepConnectedService.kt`, `AwaySession.kt` + JVM test,
+`T3ForkKeepConnectedModule.kt`), and `apps/mobile/src/features/keep-connected/`:
+`keepConnectedLogic.ts` (+ test: return classification, log, observation and summary),
+`keepConnectedNative.ts`, `keepConnectedTracking.ts` (the headless task, the return log and its
+watcher) and `KeepConnectedSettings.tsx`.
+
+Touch points:
+
+- `apps/mobile/src/connection/platform.ts`: in `layerWakeups`, the app-active wakeup goes
+  through `forkKeepConnectedWakeup(mobileApplicationActiveWakeup(...), backgroundedAtMs)`.
+- `apps/mobile/src/Stack.tsx`: `useKeepConnectedTracking()` in `RootStackLayout`, after
+  `useAssistantLaunch()`.
+- `apps/mobile/src/features/settings/SettingsEnvironmentsRouteScreen.tsx`:
+  `<KeepConnectedSettings />` after `<PullRequestRoutingSettings />`.
+
+Verify:
+
+- `vp test run apps/mobile/src/features/keep-connected`; after `expo prebuild`,
+  `./gradlew :t3-fork-keep-connected:testDebugUnitTest` in `apps/mobile/android`.
+- `grep -n "forkKeepConnectedWakeup" apps/mobile/src/connection/platform.ts` (import and call),
+  `grep -n "useKeepConnectedTracking" apps/mobile/src/Stack.tsx` and
+  `grep -n "KeepConnectedSettings" apps/mobile/src/features/settings/SettingsEnvironmentsRouteScreen.tsx`
+  (two hits each). If upstream stops building wakeups in `platform.ts` or stops pausing JS timers
+  in the background, move or drop the hook.
+- After prebuild: `grep -n "KeepConnectedService\|FOREGROUND_SERVICE_DATA_SYNC" apps/mobile/android/app/build/intermediates/merged_manifests/release/*/AndroidManifest.xml`
+  (or `aapt2 dump xmltree` on the APK).
+- On a device or emulator: leave the app; `adb shell dumpsys activity services com.willsmanley.t3code`
+  shows `KeepConnectedService` with `isForeground=true`, and the notification is there. Rename a
+  thread from another client while away; coming back shows the new title with no "Syncing" or
+  "Reconnecting". With the setting at 1 minute the service ends after a minute; with Off it never
+  starts. The setting's summary counts each return.
+
 ### C1. Nightly build and release workflow (CI)
 
 Fork-owned: `.github/workflows/custom-nightly-linux.yml` (`5bffb2ec49` through `f9bc6b8b22`,

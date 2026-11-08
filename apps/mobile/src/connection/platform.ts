@@ -29,6 +29,7 @@ import { clearThreadOutboxEnvironment } from "../state/thread-outbox-removal";
 import { clearComposerDraftsEnvironment } from "../state/use-composer-drafts";
 import { clearThreadComposerErrorsForEnvironment } from "../state/thread-composer-error";
 import { mobileApplicationActiveWakeup } from "./app-state-wakeups";
+import { forkKeepConnectedWakeup } from "../features/keep-connected/keepConnectedNative";
 import * as ConnectionStorage from "./storage";
 
 function networkStatus(state: Network.NetworkState): "unknown" | "offline" | "online" {
@@ -132,7 +133,11 @@ const layerWakeups = Wakeups.layer({
               if (state === "active") {
                 Queue.offerUnsafe(
                   queue,
-                  mobileApplicationActiveWakeup(backgroundedAtMs, Date.now()),
+                  // fork (F21): a return the keep-connected service covered only probes its socket.
+                  forkKeepConnectedWakeup(
+                    mobileApplicationActiveWakeup(backgroundedAtMs, Date.now()),
+                    backgroundedAtMs,
+                  ),
                 );
                 backgroundedAtMs = null;
               }

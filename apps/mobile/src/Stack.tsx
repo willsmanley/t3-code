@@ -137,6 +137,7 @@ import {
 } from "./features/layout/workspace-overlay-routes";
 import { ShowcaseReadyMarker } from "./features/showcase/ShowcaseCaptureCoordinator";
 import { useAssistantLaunch } from "./features/assistant/useAssistantLaunch";
+import { useKeepConnectedTracking } from "./features/keep-connected/keepConnectedTracking";
 import { immersiveRoute, modalRoute, pageRoute, sheetRoute } from "./features/layout/route-options";
 import { deriveLayout } from "./lib/layout";
 import { useNativeLayoutMetrics } from "./native/native-layout-metrics";
@@ -403,6 +404,7 @@ function RootStackLayout(props: {
     ? draftParams.draftId[0]
     : draftParams?.draftId;
   useAssistantLaunch();
+  useKeepConnectedTracking(); // fork (F21): logs each return to the app
 
   return (
     <NewTaskFlowProvider
