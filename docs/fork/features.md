@@ -857,7 +857,7 @@ Touch points:
   defaults, `workers` state and columns), `WorkspaceTabsContext.tsx`,
   `AndroidWorkspaceNavigation.android.tsx` (bar capacity), `WorkspaceRootScreen.android.tsx` and
   `AndroidWorkspaceSidebar.android.tsx` (render Workers), `workspace-tab-navigation.ts` (a
-  worker's detail is a thread), `WorkspaceToolbar.ios.tsx` (search label type),
+  worker's detail is a thread), `WorkspaceToolbar.tsx` (search label type; upstream merged the iOS toolbar into it on November 9, 2026),
   `home/AndroidHomeFab.android.tsx`, `settings/SettingsRouteScreen.tsx` and
   `SettingsNavigationRouteScreen.tsx` (capacity), `T3WorkspaceNavigationModule.kt` (Projects and
   Workers titles and icons).

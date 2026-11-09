@@ -61,6 +61,8 @@ vi.mock("expo-notifications", () => ({
   addPushTokenListener: vi.fn(() => ({ remove: vi.fn() })),
   getDevicePushTokenAsync: vi.fn(() => Promise.resolve({ type: "android", data: "fcm-token" })),
   getPermissionsAsync: vi.fn(() => Promise.resolve({ granted: true })),
+  AndroidImportance: { NONE: 0, HIGH: 4 },
+  getNotificationChannelAsync: vi.fn(() => Promise.resolve(null)),
 }));
 
 vi.mock("react-native", () => ({
