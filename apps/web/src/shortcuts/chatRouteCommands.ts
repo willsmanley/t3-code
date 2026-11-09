@@ -126,8 +126,7 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
       "chat.new": (event) => {
         // The fork's desktop and preview builds use the project-tree sidebar, so they
         // start in the current project like the legacy sidebar does.
-        const { legacySidebarEnabled } = getClientSettings();
-        const projectSidebar = legacySidebarEnabled || isElectron || forceLegacySidebar;
+        const projectSidebar = isElectron || forceLegacySidebar;
         const groups = readProjectGroups();
         if (
           !projectSidebar &&
