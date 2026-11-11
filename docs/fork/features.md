@@ -165,7 +165,10 @@ What it does: a scheduled task can (a) run a fixed-time schedule in a chosen IAN
 (b) limit an interval task to active hours, and (c) stop after N runs or at an end time. A task
 that ends stays listed but switched off, labeled Ended. All of this works in web settings, mobile
 settings and the agent MCP tools (`schedule_task`, which also updates a task given
-`scheduledTaskId`).
+`scheduledTaskId`). The tool's `bindToCurrentThread` and `freshSession` text tells agents to keep
+runs in the thread that set the task up (that thread starts any subagents) and to pick a new
+thread or fresh session per run only when the user asks. An agent once switched a refund
+follow-up to a new thread per run, and its runs lost the thread's history.
 
 One-off tasks are upstream's since November 1, 2026 (`{ type: "once", runAt }`, upstream
 `4ac97be2b6`). The fork's own one-off (`{ type: "once", at }`, switched off after its run and
@@ -183,8 +186,8 @@ Touch points:
   `endAfterRuns` / `endAt`), the validators `isValidTimeZone` and `isAbsoluteDateTime` (end
   times), and `ScheduledTaskUpsertFixedTimeSchedule` in the upsert union (+ `scheduledTask.test.ts`).
   The `once` member is upstream's.
-- `packages/contracts/src/orchestratorMcp.ts`: schedule description, and `runCount` on the MCP
-  task summary.
+- `packages/contracts/src/orchestratorMcp.ts`: schedule description, the `bindToCurrentThread`
+  and `freshSession` guidance, and `runCount` on the MCP task summary.
 - `apps/server/src/scheduledTasks/Schedule.ts`: `activeHoursDeferral`, `endsToStore`,
   `timerScheduleToStore` (also stores upstream's `runAt` in UTC), `scheduleEnd` (never ends a
   one-off), time-zone-aware next run (+ `Schedule.test.ts`).
