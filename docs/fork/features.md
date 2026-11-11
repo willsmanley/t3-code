@@ -908,7 +908,9 @@ Added November 6, 2026; the phone app November 7, 2026; folders kept on the serv
 2026; the new-thread project and auto-filing November 11, 2026.
 
 What it does: the legacy sidebar's Projects tab lists folders, then Unfiled, instead of projects.
-A folder only labels threads; it never changes where a thread's agent runs. A thread is in folder
+Once a folder exists, an empty Unfiled is hidden (`UnfiledFolderRow`, November 11, 2026); it shows
+while threads are dragged, so they can be dropped there, and whenever a thread lands in it. ⌘N
+starts a new thread when it is hidden. A folder only labels threads; it never changes where a thread's agent runs. A thread is in folder
 `X` when it has the upstream thread tag `folder:X` (set with F18's `thread.tag.set` client
 command), so archiving keeps the folder. Moving a thread adds the new tag before removing old
 ones, and the newest folder tag wins. Folder names are trimmed, one line, at most 56 characters.

@@ -2263,6 +2263,33 @@ function SortableFolderItem({
   );
 }
 
+/** Whether Unfiled would list any thread, by the same rules its folder row uses. */
+function useUnfiledHasVisibleThreads(): boolean {
+  const unfiledThreads = useFolderThreadShells(null);
+  const withoutSnoozed = useWithoutLegacySnoozed();
+  const delegatedUnderParent = useDelegatedUnderParent();
+  return (
+    withoutSnoozed(filterSidebarV2VisibleThreads(unfiledThreads, null, delegatedUnderParent))
+      .length > 0
+  );
+}
+
+/**
+ * An empty Unfiled is hidden once folders exist. It comes back while threads are dragged, so they
+ * can be dropped there to leave their folder, and whenever a thread lands in it.
+ */
+function UnfiledFolderRow({
+  keepVisible,
+  children,
+}: {
+  keepVisible: boolean;
+  children: React.ReactNode;
+}) {
+  const hasThreads = useUnfiledHasVisibleThreads();
+  if (!keepVisible && !hasThreads) return null;
+  return <UnfiledDropTarget>{children}</UnfiledDropTarget>;
+}
+
 /** Unfiled never moves, but threads dropped on it leave their folder. */
 function UnfiledDropTarget({ children }: { children: React.ReactNode }) {
   const { setNodeRef, isOver } = useDroppable({
@@ -2507,7 +2534,13 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                     </SortableFolderItem>
                   ))}
                 </SortableContext>
-                <UnfiledDropTarget>{renderFolderItem(null, null)}</UnfiledDropTarget>
+                <UnfiledFolderRow
+                  keepVisible={
+                    draggingThreads !== null || !folderSettingsLoaded || folderOrder.length === 0
+                  }
+                >
+                  {renderFolderItem(null, null)}
+                </UnfiledFolderRow>
               </SidebarMenu>
               {/* Mounted only for thread drags: with an overlay, sortable folders stop following the pointer. */}
               {draggingThreads
