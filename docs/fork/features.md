@@ -1086,7 +1086,8 @@ version code.
   it aborts the merge and builds the fork as it is). Builds desktop JS with auto-update on, the
   CLI single executable, the resource monitor and the matching SSH runtime archive (with a smoke
   test). Packages the Linux AppImage, writes SHA256SUMS, and publishes a GitHub prerelease only
-  from `main`.
+  from `main`. The Hostkey script differs here since November 11, 2026: no Linux desktop app,
+  desktop JS with auto-update off, and the signed macOS app instead (C5).
 - **android**: same merge step. Preview variant, fork package and name, build-number version code,
   over-the-air updates off, optional Firebase config. Gradle arm64 release build, re-signed with
   `apksigner` and checked against the expected signer fingerprint.
@@ -1175,14 +1176,39 @@ Verify:
 - Guess at the exact command:
   `APP_VARIANT=preview T3CODE_ANDROID_PACKAGE=com.example.check pnpm --dir apps/mobile exec expo config --type public | grep com.example.check`.
 
-### C5. Mac desktop app built on the Mac (desktop build)
+### C5. Mac desktop app built on Linux, signed and notarized (desktop build)
 
-Added November 6, 2026.
+Added November 6, 2026 (built on the Mac); built on Hostkey since November 11, 2026.
 
-The nightly release has no macOS build. `scripts/fork/mac-desktop-build.sh <version>` builds an
-unsigned Apple Silicon app on the Mac from the release's commit at the release's version, so it
-matches the Hostkey server. The script's header covers getting the source onto the Mac and
-installing the app. Fork-owned file: `scripts/fork/mac-desktop-build.sh`.
+What it does: the nightly release carries the Apple Silicon desktop app
+(`T3-Code-<version>-arm64.zip` and the updater manifest `nightly-mac.yml`), built on Hostkey by
+`scripts/fork/mac-desktop-build-linux.sh` the way ctx builds its macOS release on Linux:
+
+- Nothing is compiled except the Rust resource monitor, which `cargo zigbuild` builds for
+  `aarch64-apple-darwin` against the ctx release factory's pinned macOS SDK. Electron and the
+  native packages (node-pty, objc-js, keyring, Clerk passkeys, ...) ship macOS builds.
+- `scripts/fork/mac-linux-tools/` has stand-ins for `sips` and `iconutil`, which the build calls to
+  make the app icon.
+- rcodesign signs every binary with the Developer ID certificate (hardened runtime; the upstream
+  entitlements minus the passkey ones, which need T3's provisioning profile), notarizes and
+  staples. The certificate and notary key come from Infisical, as for ctx. A stable signature
+  means macOS keeps the keychain item and privacy permissions across updates.
+- Desktop JS is built with auto-update off: the app offers new releases but the Mac and the
+  Hostkey server should move to a new version together.
+- The packaged app has no prepared server compile cache (it needs the macOS app to run), so the
+  local server's first start is slower; the Mac uses the Hostkey server.
+
+Touch points: fork-owned `scripts/fork/mac-desktop-build-linux.sh`, `scripts/fork/mac-linux-tools/`,
+the macOS step in `scripts/fork/nightly-release.sh`, and one hook in `scripts/build-desktop-artifact.ts`
+(`npmRebuild = false` for a macOS build on a non-Mac host, because node-gyp can't compile for macOS
+there). `scripts/fork/mac-desktop-build.sh` still builds an unsigned app on the Mac itself as a
+fallback.
+
+Verify:
+
+- `grep -n 'npmRebuild = false' scripts/build-desktop-artifact.ts` (two: Windows and the macOS hook)
+- `scripts/fork/mac-desktop-build-linux.sh <version> /tmp/mac-check --unsigned` after
+  `pnpm install` and `vp run build:desktop`; the zip should hold `T3 Code (Nightly).app`.
 
 ### Already upstream or lost (no fork diff left)
 

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Builds the fork's nightly release on this machine and publishes it to the fork's GitHub
-# releases. It makes the same files as .github/workflows/custom-nightly-linux.yml (Linux
-# desktop, SSH runtime archive, signed Android APK, SHA256SUMS), so the desktop updater and
-# the phone pick it up the same way. See docs/fork/upstream-sync.md, step 8.
+# releases: the SSH runtime archive (the Linux server), the macOS desktop app (Apple Silicon,
+# signed and notarized, built here by scripts/fork/mac-desktop-build-linux.sh), the signed
+# Android APK and SHA256SUMS. Since November 11, 2026 it builds no Linux desktop app.
+# See docs/fork/upstream-sync.md, step 8.
 #
 # Usage: scripts/fork/nightly-release.sh [--ref <commit>] [--no-publish] [--force]
 #
@@ -18,6 +19,9 @@
 # T3CODE_ANDROID_SIGNING_ITEM, which needs an unlocked vault (BW_SESSION). Push notifications
 # need the fork's Firebase config in T3CODE_ANDROID_GOOGLE_SERVICES_FILE (default
 # ~/.config/t3code-fork/google-services.json); without it the APK builds with no push.
+#
+# macOS signing: the Developer ID certificate and notary key come from Infisical (or the
+# APPLE_CODESIGN_* and NOTARY_* variables); see scripts/fork/mac-desktop-build-linux.sh.
 set -euo pipefail
 
 repo=willsmanley/t3-code
@@ -85,6 +89,13 @@ if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
   rm -f "$secrets_dir/item.json"
 fi
 test -n "${ANDROID_KEYSTORE_PASSWORD:-}" && test -n "${ANDROID_KEY_ALIAS:-}" || die "incomplete Android signing settings"
+# Check the macOS signing secrets are reachable now rather than after half an hour of building.
+if [ -z "${APPLE_CODESIGN_CERT_P12_B64:-}" ]; then
+  infisical secrets get NOTARY_KEY_ID --projectId "${T3CODE_MACOS_SIGNING_INFISICAL_PROJECT:-590927ab-758e-41b0-9e15-4cf070e87cf4}" \
+    --env "${T3CODE_MACOS_SIGNING_INFISICAL_ENV:-prod}" --path / --plain --silent >/dev/null 2>&1 ||
+    die "cannot read the macOS signing secrets from Infisical (log in, or set APPLE_CODESIGN_* and NOTARY_*)"
+fi
+command -v cargo-zigbuild >/dev/null || die "cargo-zigbuild is missing (cargo install cargo-zigbuild --locked)"
 export ANDROID_KEYSTORE_PASSWORD
 keystore="$secrets_dir/release.p12"
 printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$keystore"
@@ -189,7 +200,9 @@ rm -f "$keystore"
 
 log "Building the desktop app and SSH runtime"
 node scripts/update-release-package-versions.ts "$version"
-T3CODE_AUTO_UPDATE=true vp run build:desktop
+# The Mac app offers each new release but doesn't install it by itself: it should move to a new
+# version together with the Hostkey server it connects to.
+T3CODE_AUTO_UPDATE=false vp run build:desktop
 node apps/server/scripts/cli.ts build-exe --verbose
 cargo build --locked --release --manifest-path native/resource-monitor/Cargo.toml --target x86_64-unknown-linux-gnu
 monitor_dir="$build_dir/.cli-resource-monitor"
@@ -202,19 +215,11 @@ node scripts/build-cli-archive.ts \
 node scripts/smoke-cli-archive.ts \
   --archive "$assets/t3-$version-linux-x64.tar.gz" \
   --expect-version "$version"
-T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR=true \
-  T3CODE_DESKTOP_VERSION="$version" \
-  T3CODE_DESKTOP_PLATFORM=linux \
-  T3CODE_DESKTOP_TARGET=AppImage \
-  T3CODE_DESKTOP_ARCH=x64 \
-  T3CODE_DESKTOP_OUTPUT_DIR="$assets" \
-  T3CODE_DESKTOP_SKIP_BUILD=true \
-  T3CODE_DESKTOP_SIGNED=false \
-  node scripts/build-desktop-artifact.ts \
-  --platform linux --target AppImage --arch x64 \
-  --build-version "$version" --skip-build --output-dir "$assets"
 
-(cd "$assets" && sha256sum -- *.AppImage *.deb "t3-$version-linux-x64.tar.gz" *.apk > SHA256SUMS)
+log "Building the macOS app"
+scripts/fork/mac-desktop-build-linux.sh "$version" "$assets"
+
+(cd "$assets" && sha256sum -- *-arm64.zip *-mac.yml "t3-$version-linux-x64.tar.gz" *.apk > SHA256SUMS)
 ls -la "$assets"
 
 if [ "$publish" = false ]; then

@@ -2881,6 +2881,13 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     };
   }
 
+  if (platform === "mac" && (yield* HostProcess.Platform) !== "darwin") {
+    // Building the macOS app on Linux (scripts/fork/mac-desktop-build-linux.sh): node-gyp cannot
+    // compile for macOS there, and the native packages ship macOS prebuilds (node-pty, objc-js)
+    // or per-platform packages, so package them as they are instead of rebuilding.
+    buildConfig.npmRebuild = false;
+  }
+
   if (platform === "mac" && target === "dmg") {
     buildConfig.dmg = {
       // Finder caches DMG backgrounds by volume name; give each installer its own.

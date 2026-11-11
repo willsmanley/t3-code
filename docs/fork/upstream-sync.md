@@ -54,7 +54,8 @@ is only a fallback that builds `main` on a night this job missed, when Actions i
 8. **Build.** Unlock Bitwarden so the script can read the Android signing key (`BW_SESSION`),
    then run `ctx-build-governor exec -- scripts/fork/nightly-release.sh` from the sync checkout.
    It builds the fork's `main` in `../nightly-build` (about half an hour), checks the SSH
-   runtime and the APK signature, and publishes the prerelease. It does nothing when a release
+   runtime and the APK signature, builds, signs and notarizes the Mac app (Infisical must be
+   logged in), and publishes the prerelease. It does nothing when a release
    already exists for `main`. If it fails because of code, fix it, push, and run it once more.
    If Hostkey can't build, start the workflow instead:
    `gh workflow run custom-nightly-linux.yml -R willsmanley/t3-code --ref main -f merge_upstream=false`,

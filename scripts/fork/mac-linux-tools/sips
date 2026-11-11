@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Linux stand-in for the one macOS `sips` call the desktop build makes:
+#   sips -z <height> <width> <source> --out <destination>
+# Uses ImageMagick. Only for building the macOS app on Linux (scripts/fork/mac-desktop-build-linux.sh).
+set -euo pipefail
+[ "${1:-}" = --help ] && { echo "sips stand-in: sips -z H W SRC --out DST"; exit 0; }
+[ "${1:-}" = -z ] && [ "${5:-}" = --out ] && [ $# -eq 6 ] || { echo "sips stand-in: unsupported arguments: $*" >&2; exit 2; }
+height="$2" width="$3" src="$4" dst="$6"
+if command -v magick >/dev/null; then im=(magick); else im=(convert); fi
+"${im[@]}" "$src" -resize "${width}x${height}!" "PNG32:$dst"
