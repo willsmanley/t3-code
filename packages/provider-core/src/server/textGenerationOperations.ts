@@ -13,6 +13,7 @@ import {
   buildReviewGuidePrompt,
   buildThreadTitlePrompt,
 } from "./textGenerationPrompts.ts";
+import { threadFolderAnswer } from "./threadFolderPrompt.ts";
 import {
   sanitizeCommitSubject,
   sanitizePrTitle,
@@ -149,11 +150,13 @@ export function fromRunner(name: string, run: Runner): ProviderTextGeneration {
         linkedContext: input.linkedContext,
         attachments: input.attachments,
         instructions: input.instructions,
+        folderChoice: input.folderChoice,
       }),
     });
     return {
       title: sanitizeThreadTitle(generated.title),
       ...(generated.needsRefinement ? { needsRefinement: true } : {}),
+      ...threadFolderAnswer(generated),
     };
   });
 

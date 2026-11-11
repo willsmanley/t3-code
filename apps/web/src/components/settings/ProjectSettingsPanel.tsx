@@ -50,6 +50,7 @@ import {
 } from "./ProjectFaviconPickerDialog";
 import { ProjectActionsSettings } from "./ProjectActionsSettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
+import { NewThreadProjectSettingsRow } from "./NewThreadProjectSettingsRow";
 import {
   defaultProjectIcon,
   hasDefaultProjectIcon,
@@ -605,6 +606,11 @@ function ProjectDetail({
                 </Button>
               </div>
             }
+          />
+          <NewThreadProjectSettingsRow
+            members={group.memberProjects}
+            preferred={representative}
+            disabled={!canEditGroup}
           />
           {canOrganize ? (
             <>

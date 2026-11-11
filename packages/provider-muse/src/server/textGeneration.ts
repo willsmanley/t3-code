@@ -22,6 +22,7 @@ import {
 } from "./sdk.ts";
 import { museModelCapabilities, resolveMuseReasoningEffort } from "./modelCatalog.ts";
 import type { ProviderTextGeneration } from "@t3tools/provider-core/server/textGeneration";
+import { threadFolderAnswer } from "@t3tools/provider-core/server/threadFolderPrompt";
 import {
   investigationUnsupported,
   TranscriptionPostProcessingOutput,
@@ -348,7 +349,10 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
       ...buildThreadTitlePrompt(input),
       modelSelection: input.modelSelection,
     });
-    return { title: sanitizeThreadTitle(generated.title) };
+    return {
+      title: sanitizeThreadTitle(generated.title),
+      ...threadFolderAnswer(generated),
+    };
   });
   const generateTranscriptionPostProcessing: ProviderTextGeneration["generateTranscriptionPostProcessing"] =
     Effect.fn("MuseTextGeneration.generateTranscriptionPostProcessing")(function* (input) {

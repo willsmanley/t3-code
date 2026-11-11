@@ -20,6 +20,7 @@ import * as Schedule from "effect/Schedule";
 
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
+import * as ThreadAutoFile from "../threadFolders/ThreadAutoFile.ts";
 import type { OrchestratorV2Error } from "./Orchestrator.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
@@ -46,12 +47,18 @@ export class ThreadTitleRegenerationService extends Context.Service<
   }
 >()("t3/orchestration-v2/ThreadTitleRegenerationService") {}
 
+type TitleOutcome =
+  | { readonly type: "stale" }
+  // `folder`: the auto-file answer, when the title call was offered folders (fork, F20).
+  | { readonly type: "complete"; readonly title?: string; readonly folder?: string | null };
+
 const make = Effect.gen(function* () {
   const threads = yield* ThreadManagementService.ThreadManagementService;
   const projects = yield* ProjectStore.ProjectStoreV2;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const textGeneration = yield* TextGeneration.TextGeneration;
   const fileSystem = yield* FileSystem.FileSystem;
+  const autoFile = yield* ThreadAutoFile.optional;
 
   const complete = (input: {
     readonly threadId: ThreadId;
@@ -110,9 +117,7 @@ const make = Effect.gen(function* () {
   const execute: ThreadTitleRegenerationService["Service"]["execute"] = Effect.fn(
     "ThreadTitleRegenerationService.execute",
   )(function* (input) {
-    const outcome:
-      | { readonly type: "stale" }
-      | { readonly type: "complete"; readonly title?: string } = yield* Effect.gen(function* () {
+    const outcome: TitleOutcome = yield* Effect.gen(function* () {
       const projection = yield* threads.getThreadRecords(
         input.threadId,
         ["messages"],
@@ -167,7 +172,10 @@ const make = Effect.gen(function* () {
       const worktreeExists =
         worktreePath !== null &&
         (yield* fileSystem.exists(worktreePath).pipe(Effect.orElseSucceed(() => false)));
+      const folderChoice =
+        input.kind.type === "initial" ? yield* autoFile.folderChoice(projection.thread) : undefined;
       const result = yield* textGeneration.generateThreadTitle({
+        ...(folderChoice === undefined ? {} : { folderChoice }),
         cwd: worktreeExists ? worktreePath : project.value.workspaceRoot,
         message: context.message,
         attachments: context.attachments,
@@ -178,10 +186,11 @@ const make = Effect.gen(function* () {
         projectId: projection.thread.projectId,
       });
       const generatedTitle = result.title.trim();
+      const folder = result.folder === undefined ? {} : { folder: result.folder };
       return generatedTitle === "New thread" ||
         (input.kind.type === "regenerate" && generatedTitle === projection.thread.title.trim())
-        ? { type: "complete" as const }
-        : { type: "complete" as const, title: result.title };
+        ? { type: "complete" as const, ...folder }
+        : { type: "complete" as const, title: result.title, ...folder };
     }).pipe(
       Effect.retry({
         times: input.kind.type === "initial" ? 2 : 0,
@@ -198,13 +207,19 @@ const make = Effect.gen(function* () {
       ),
     );
 
-    if (outcome.type === "stale") {
-      return;
+    if (outcome.type !== "stale") {
+      yield* complete({
+        ...input,
+        ...(outcome.title === undefined ? {} : { title: outcome.title }),
+      });
     }
-    yield* complete({
-      ...input,
-      ...(outcome.title === undefined ? {} : { title: outcome.title }),
-    });
+    if (input.kind.type === "initial") {
+      yield* autoFile.finish({
+        threadId: input.threadId,
+        requestId: input.requestId,
+        answer: outcome.type === "complete" ? (outcome.folder ?? null) : null,
+      });
+    }
   });
 
   return ThreadTitleRegenerationService.of({ execute });

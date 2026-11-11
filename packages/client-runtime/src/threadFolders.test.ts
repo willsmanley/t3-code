@@ -1,9 +1,10 @@
-import { EnvironmentId, type ThreadFolderSettings } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, type ThreadFolderSettings } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   chooseFolderThreadProject,
   deviceFolderMigrationStep,
+  findNewThreadProject,
   folderNameForProject,
   folderNameProblem,
   groupByFolder,
@@ -11,6 +12,7 @@ import {
   orderFolders,
   planFolderPerProject,
   renameFolderInList,
+  resolveNewThreadProject,
   resolveThreadFolderView,
 } from "./threadFolders.ts";
 
@@ -119,6 +121,8 @@ const serverSettings = (
   folders: folders.map(([name, collapsed]) => ({ name, collapsed })),
   defaultFolder: null,
   unfiledCollapsed: false,
+  newThreadProjectId: null,
+  autoFile: true,
   updatedAt: null,
   ...extra,
 });
@@ -160,6 +164,7 @@ describe("resolveThreadFolderView", () => {
       collapsed: new Set(["School", "Seeded"]),
       unfiledCollapsed: true,
       defaultFolder: "Todo",
+      autoFile: true,
       serverBacked: true,
     });
   });
@@ -170,8 +175,37 @@ describe("resolveThreadFolderView", () => {
       collapsed: new Set(["Mine"]),
       unfiledCollapsed: true,
       defaultFolder: null,
+      autoFile: false,
       serverBacked: false,
     });
+  });
+});
+
+describe("resolveNewThreadProject", () => {
+  const hostkey = EnvironmentId.make("hostkey");
+  const laptop = EnvironmentId.make("laptop");
+  const agents = ProjectId.make("project:agents");
+  const local = ProjectId.make("project:local");
+
+  it("takes the most recently changed server that names a project, and only a live one", () => {
+    expect(resolveNewThreadProject(new Map([[hostkey, serverSettings([])]]))).toBeNull();
+    const ref = resolveNewThreadProject(
+      new Map([
+        [
+          hostkey,
+          serverSettings([], { newThreadProjectId: agents, updatedAt: "2026-11-11T00:00:00.000Z" }),
+        ],
+        [
+          laptop,
+          serverSettings([], { newThreadProjectId: local, updatedAt: "2026-11-10T00:00:00.000Z" }),
+        ],
+      ]),
+    );
+    expect(ref).toEqual({ environmentId: hostkey, projectId: agents });
+    const project = { environmentId: hostkey, id: agents, archivedAt: null };
+    expect(findNewThreadProject(ref, [project])).toBe(project);
+    expect(findNewThreadProject(ref, [{ ...project, archivedAt: "2026-11-11" }])).toBeNull();
+    expect(findNewThreadProject(ref, [{ ...project, environmentId: laptop }])).toBeNull();
   });
 });
 

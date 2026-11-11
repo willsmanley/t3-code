@@ -5,6 +5,11 @@ import type { BranchNamingOptions, ChatAttachment } from "@t3tools/contracts";
 
 import { limitSection } from "./textGenerationUtils.ts";
 import type { ReviewGuideStackLayer } from "./textGeneration.ts";
+import {
+  type ThreadFolderChoice,
+  threadFolderOutputField,
+  threadFolderPromptSection,
+} from "./threadFolderPrompt.ts";
 import type { TextGenerationPolicy } from "@t3tools/provider-core/server/textGenerationPolicy";
 
 const EARLIER_CONTENT_TRUNCATION_MARKER = "[Earlier content truncated]\n\n";
@@ -357,6 +362,8 @@ export interface ThreadTitlePromptInput {
   forkSource?: ThreadTitleForkSource | undefined;
   attachments?: ReadonlyArray<ChatAttachment> | undefined;
   instructions?: string | undefined;
+  /** Fork (F20): offer these folders and return the best fit as `folder`. */
+  folderChoice?: ThreadFolderChoice | undefined;
 }
 
 /** The thread a fork branched from, and its conversation up to the fork point. */
@@ -479,10 +486,15 @@ export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
       input.forkSource === undefined ? "Thread contents" : "Thread contents after the fork";
     prompt = `${regenerateThreadTitlePrompt(input.previousTitle)}${forkSourceSection(input.forkSource)}\n\n${label}:\n${message}${threadTitlePromptSuffix(input)}`;
   }
-  const outputSchema = Schema.Struct({
+  const fields = {
     title: Schema.String,
     needsRefinement: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
-  });
-
-  return { prompt, outputSchema };
+  };
+  if (input.folderChoice !== undefined && input.folderChoice.folders.length > 0) {
+    return {
+      prompt: `${prompt}${threadFolderPromptSection(input.folderChoice)}`,
+      outputSchema: Schema.Struct({ ...fields, folder: threadFolderOutputField }),
+    };
+  }
+  return { prompt, outputSchema: Schema.Struct(fields) };
 }

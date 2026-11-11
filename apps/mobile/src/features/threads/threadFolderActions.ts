@@ -12,14 +12,19 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell
 import { createThreadFolderSettingsAtoms } from "@t3tools/client-runtime/state/thread-folder-settings";
 import {
   type DeviceFolderState,
+  findNewThreadProject,
   folderNameProblem,
   folderOfTags,
+  type NewThreadProjectRef,
   planFolderPerProject,
   planFolderTagChange,
 } from "@t3tools/client-runtime/thread-folders";
 import {
+  AUTO_FILED_TAG,
+  autoFileTagsOf,
   AuthOrchestrationOperateScope,
   EnvironmentId,
+  isAutoFiledThread,
   isListedThreadLineage,
   ThreadId,
   type ProjectId,
@@ -39,6 +44,7 @@ import { rememberLaunchFolder } from "../../state/draftLaunchFolder";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import { environmentServerConfigsAtom } from "../../state/server";
 import { readEnvironmentScope } from "../../state/session";
+import { environmentProjects } from "../../state/projects";
 import { environmentThreadShells, threadEnvironment } from "../../state/threads";
 
 export const threadFolderSettings = createThreadFolderSettingsAtoms(connectionAtomRuntime, {
@@ -123,6 +129,44 @@ export function setDefaultFolder(folder: string | null): void {
   void updateFolders({ _tag: "setDefault", name: folder }, "Could not change the default folder");
 }
 
+/** Whether a new thread left in no folder is filed by the title model. */
+export function setAutoFile(enabled: boolean): void {
+  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  void updateFolders({ _tag: "setAutoFile", enabled }, "Could not change auto-filing");
+}
+
+/** Every new thread the user starts begins in `project` (null: each entry point picks). */
+export async function setNewThreadProject(project: NewThreadProjectRef | null): Promise<void> {
+  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  const outcome = await threadFolderSettings.setNewThreadProject(appAtomRegistry, project);
+  if (outcome.failure !== null) {
+    Dialog.alert(
+      "Could not change where new threads start",
+      outcome.failure instanceof Error ? outcome.failure.message : "Try again.",
+    );
+  }
+}
+
+/** The live project new threads start in, or null to keep each entry point's own choice. */
+export function readNewThreadProject() {
+  return findNewThreadProject(
+    appAtomRegistry.get(threadFolderSettings.newThreadProjectAtom),
+    appAtomRegistry.get(environmentProjects.projectsAtom),
+  );
+}
+
+/** A new draft in the new-thread project, or null when none is set. */
+export function newThreadProjectDraft(requestId: string) {
+  const project = readNewThreadProject();
+  return project === null
+    ? null
+    : {
+        requestId,
+        environmentId: String(project.environmentId),
+        projectId: String(project.id),
+      };
+}
+
 /** This device's folder list from before servers kept folders, if it is still saved. */
 export function legacyDeviceFolders(preferences: Preferences): DeviceFolderState | null {
   if (
@@ -203,10 +247,13 @@ async function fileThreads(
     const latest = appAtomRegistry.get(
       environmentThreadShells.threadShellAtom(scopeThreadRef(thread.environmentId, thread.id)),
     );
-    const change = planFolderTagChange((latest ?? thread).source.tags, folder);
+    const tags = (latest ?? thread).source.tags;
+    const change = planFolderTagChange(tags, folder);
+    // A move is the user's choice: it ends auto-filing's wait and clears its mark.
     for (const [tag, tagged] of [
       ...(change.add === null ? [] : [[change.add, true] as const]),
       ...change.remove.map((tag) => [tag, false] as const),
+      ...autoFileTagsOf(tags).map((tag) => [tag, false] as const),
     ]) {
       const failure = await setThreadTag(thread, tag, tagged);
       if (failure !== null) {
@@ -453,7 +500,17 @@ export function fileSentDraftInFolder(
   watchSentDraftFolder(requestId, sent);
 }
 
-/** "Move to folder" and "Remove from folder" for a thread's menu; `handle` says if it took the event. */
+/** Drops the "auto-filed" mark once the user has opened the thread's menu. */
+function clearAutoFileMark(thread: FolderThread): void {
+  if (!isAutoFiledThread(thread.source.tags)) return;
+  if (!readEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope)) return;
+  void setThreadTag(thread, AUTO_FILED_TAG, false);
+}
+
+/**
+ * "Move to folder" and "Remove from folder" for a thread's menu; `handle` says if it took the
+ * event, and `onOpen` runs when the menu opens.
+ */
 export function threadFolderMenu(thread: FolderThread, folders: readonly string[]) {
   const current = folderOfThread(thread);
   const actions: MenuAction[] = [
@@ -492,5 +549,5 @@ export function threadFolderMenu(thread: FolderThread, folders: readonly string[
     if (folder !== undefined) move(folder);
     return true;
   };
-  return { actions, handle } as const;
+  return { actions, handle, onOpen: () => clearAutoFileMark(thread) } as const;
 }

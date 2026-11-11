@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 
+import { ProjectId } from "./baseSchemas.ts";
 import {
   applyThreadFolderUpdate,
   planThreadFolderTagChange,
@@ -16,6 +17,8 @@ const settings = (
   folders: folders.map(([name, collapsed]) => ({ name, collapsed })),
   defaultFolder: null,
   unfiledCollapsed: false,
+  newThreadProjectId: null,
+  autoFile: true,
   updatedAt: null,
   ...extra,
 });
@@ -145,6 +148,18 @@ it("applies folder updates", () => {
       base,
       { _tag: "setDefault", name: null },
       { ...base, defaultFolder: null, updatedAt: NOW },
+    ],
+    [
+      "the new-thread project is set and cleared",
+      base,
+      { _tag: "setNewThreadProject", projectId: ProjectId.make("project:agents") },
+      { ...base, newThreadProjectId: ProjectId.make("project:agents"), updatedAt: NOW },
+    ],
+    [
+      "auto-filing turns off, and setting it again changes nothing",
+      { ...base, autoFile: false },
+      { _tag: "setAutoFile", enabled: false },
+      { ...base, autoFile: false },
     ],
     [
       "a device's saved order replaces the seeded order",

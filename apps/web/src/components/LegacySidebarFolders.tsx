@@ -12,8 +12,21 @@ import {
   folderNameProblem,
   planFolderPerProject,
 } from "@t3tools/client-runtime/thread-folders";
-import { AuthOrchestrationOperateScope, type ContextMenuItem } from "@t3tools/contracts";
-import { CheckIcon, FolderIcon, FolderInputIcon, FolderPlusIcon, InboxIcon } from "lucide-react";
+import {
+  AuthOrchestrationOperateScope,
+  type ContextMenuItem,
+  isAutoFiledThread,
+} from "@t3tools/contracts";
+import {
+  CheckIcon,
+  FolderIcon,
+  FolderInputIcon,
+  FolderPlusIcon,
+  FolderSyncIcon,
+  BotIcon,
+  InboxIcon,
+  SquarePenIcon,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { create } from "zustand";
 
@@ -21,12 +34,13 @@ import { DraftId, useComposerDraftStore } from "../composerDraftStore";
 import { forceLegacySidebar, isElectron } from "../env";
 import { readLocalApi } from "../localApi";
 import { appAtomRegistry } from "../rpc/atomRegistry";
-import { readThreadShells, useThreadShells } from "../state/entities";
+import { readProject, readThreadShells, useThreadShells } from "../state/entities";
 import { readEnvironmentScope } from "../state/session";
 import type { SidebarProjectSnapshot } from "../sidebarProjectGrouping";
 import { type CommandPaletteActionItem, ITEM_ICON_CLASS } from "./CommandPalette.logic";
 import {
   addFolders,
+  clearAutoFileMarks,
   deleteFolder,
   fileThreads,
   folderOfThread,
@@ -36,7 +50,9 @@ import {
   readFolderOrder,
   readLegacyDeviceFolders,
   renameFolder,
+  setAutoFile,
   setDefaultFolder,
+  setNewThreadProject,
   takeArrivedDraftFolders,
   threadFolderSettings,
   threadsInFolder,
@@ -44,6 +60,7 @@ import {
   useFolderOrder,
   useFolderView,
 } from "./legacySidebarFolders.store";
+import { MenuCheckboxItem, MenuGroup } from "./ui/menu";
 import { isSidebarHiddenThread } from "./Sidebar.logic";
 import { Button } from "./ui/button";
 import { Command, CommandInput, CommandItem, CommandList } from "./ui/command";
@@ -149,6 +166,7 @@ async function promptNewFolder(threads: readonly EnvironmentThreadShell[] = []) 
 /** Lets the user pick a folder, or type a new one, for `threads`. */
 async function promptMoveThreadsToFolder(threads: readonly EnvironmentThreadShell[]) {
   if (threads.length === 0) return;
+  clearAutoFileMarks(threads);
   const choice = await requestFolderPick({
     title:
       threads.length === 1 ? "Move thread to folder" : `Move ${threads.length} threads to folder`,
@@ -265,8 +283,12 @@ export function DefaultFolderMark({ folder }: { folder: string }) {
   );
 }
 
-/** "Move to folder" and "Remove from folder" for a thread menu; `handle` says if it took the click. */
+/**
+ * "Move to folder" and "Remove from folder" for a thread menu; `handle` says if it took the click.
+ * Built as the menu opens, which also counts as seeing an auto-filed thread's folder.
+ */
 export function legacyThreadFolderMenu(threads: readonly EnvironmentThreadShell[]) {
+  clearAutoFileMarks(threads);
   const folders = readFolderOrder();
   const current = sharedFolder(threads);
   const canOperate = threads.every((thread) =>
@@ -307,11 +329,53 @@ export function legacyThreadFolderMenu(threads: readonly EnvironmentThreadShell[
   return { items, handle };
 }
 
+/** A quiet mark on a thread the title model filed, until the user moves it or opens its menu. */
+export function AutoFiledMark({ thread }: { thread: Pick<EnvironmentThreadShell, "source"> }) {
+  if (!isAutoFiledThread(thread.source.tags)) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            aria-label="Auto-filed"
+            data-testid="thread-auto-filed"
+            className="inline-flex shrink-0 text-sidebar-muted-foreground/60"
+          />
+        }
+      >
+        <BotIcon className="size-3" />
+      </TooltipTrigger>
+      <TooltipPopup side="top">
+        Auto-filed. Move it, or open its menu, to keep it here.
+      </TooltipPopup>
+    </Tooltip>
+  );
+}
+
+/** The auto-filing switch, for the sidebar's options menu. */
+export function AutoFileMenuGroup() {
+  const view = useFolderView();
+  if (!view.serverBacked) return null;
+  return (
+    <MenuGroup>
+      <div className="px-2 pt-2 pb-1 text-muted-foreground sm:text-xs font-medium">Folders</div>
+      <MenuCheckboxItem
+        checked={view.autoFile}
+        variant="switch"
+        onCheckedChange={(checked) => setAutoFile(Boolean(checked))}
+      >
+        Auto-file new threads
+      </MenuCheckboxItem>
+    </MenuGroup>
+  );
+}
+
 /** Command palette actions; only the legacy sidebar shows folders. */
 export function legacyFolderPaletteItems(
   activeThread: EnvironmentThreadShell | null,
 ): CommandPaletteActionItem[] {
   if (!isElectron && !forceLegacySidebar) return [];
+  const view = appAtomRegistry.get(threadFolderSettings.viewAtom);
   const newFolder: CommandPaletteActionItem = {
     kind: "action",
     value: "action:legacy-folder-new",
@@ -320,7 +384,19 @@ export function legacyFolderPaletteItems(
     icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
     run: () => promptNewFolder(),
   };
-  if (activeThread === null) return [newFolder];
+  const autoFile: CommandPaletteActionItem[] = view.serverBacked
+    ? [
+        {
+          kind: "action",
+          value: "action:legacy-folder-auto-file",
+          searchTerms: ["auto-file", "auto file", "folder", "organize", "classify"],
+          title: view.autoFile ? "Stop auto-filing new threads" : "Auto-file new threads",
+          icon: <FolderSyncIcon className={ITEM_ICON_CLASS} />,
+          run: async () => setAutoFile(!view.autoFile),
+        },
+      ]
+    : [];
+  if (activeThread === null) return [newFolder, ...autoFile];
   return [
     {
       kind: "action",
@@ -332,6 +408,44 @@ export function legacyFolderPaletteItems(
       run: () => promptMoveThreadsToFolder([activeThread]),
     },
     newFolder,
+    ...autoFile,
+    ...newThreadProjectPaletteItems(activeThread),
+  ];
+}
+
+/** "New threads start in <project>" for the open thread's project, or the way back. */
+function newThreadProjectPaletteItems(
+  activeThread: EnvironmentThreadShell,
+): CommandPaletteActionItem[] {
+  if (
+    !appAtomRegistry
+      .get(threadFolderSettings.supportedEnvironmentIdsAtom)
+      .includes(activeThread.environmentId)
+  ) {
+    return [];
+  }
+  const project = readProject(scopeProjectRef(activeThread.environmentId, activeThread.projectId));
+  if (project === null) return [];
+  const current = appAtomRegistry.get(threadFolderSettings.newThreadProjectAtom);
+  const isCurrent =
+    current?.environmentId === activeThread.environmentId &&
+    current.projectId === activeThread.projectId;
+  return [
+    {
+      kind: "action",
+      value: "action:legacy-new-thread-project",
+      searchTerms: ["new threads start here", "root project", "default project", "new thread"],
+      title: isCurrent
+        ? `Stop starting new threads in ${project.title}`
+        : `Start new threads in ${project.title}`,
+      icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+      run: () =>
+        setNewThreadProject(
+          isCurrent
+            ? null
+            : { environmentId: activeThread.environmentId, projectId: activeThread.projectId },
+        ),
+    },
   ];
 }
 

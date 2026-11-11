@@ -19,6 +19,7 @@ export function Menu(props: MenuProps) {
             onLongPress: () => {
               void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
               open();
+              props.onOpenMenu?.();
             },
           })
         }

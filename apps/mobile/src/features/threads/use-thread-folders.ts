@@ -68,6 +68,7 @@ export function useThreadFolderTreeState() {
     expandedGroupKeys,
     arrangingFolders,
     defaultFolder: view.defaultFolder,
+    autoFile: view.autoFile,
     serverBacked: view.serverBacked,
     toggleFolderCollapsed: (folder: string | null) => {
       if (loaded) toggleFolderCollapsed(folder);

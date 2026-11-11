@@ -5,6 +5,7 @@ import {
   type EnvironmentId,
   MAX_THREAD_FOLDER_NAME_LENGTH,
   planThreadFolderTagChange,
+  type ProjectId,
   type ThreadFolderSettings,
   type ThreadFolderTagChange,
   type ThreadFolderUpdateInput,
@@ -178,6 +179,8 @@ export interface ThreadFolderView {
   readonly unfiledCollapsed: boolean;
   /** Where a new thread the user starts without picking a folder lands. */
   readonly defaultFolder: string | null;
+  /** Whether a new thread left in no folder is filed by the title model. */
+  readonly autoFile: boolean;
   /** False when no connected server keeps folders, so the list lasts only this session. */
   readonly serverBacked: boolean;
 }
@@ -203,6 +206,7 @@ export function resolveThreadFolderView(input: {
       collapsed: new Set(input.session.collapsed),
       unfiledCollapsed: input.session.unfiledCollapsed,
       defaultFolder: null,
+      autoFile: false,
       serverBacked: false,
     };
   }
@@ -224,14 +228,58 @@ export function resolveThreadFolderView(input: {
     collapsed,
     unfiledCollapsed: lead.unfiledCollapsed,
     defaultFolder: lead.defaultFolder,
+    autoFile: lead.autoFile,
     serverBacked: true,
   };
+}
+
+export interface NewThreadProjectRef {
+  readonly environmentId: EnvironmentId;
+  readonly projectId: ProjectId;
+}
+
+/**
+ * The project every new thread the user starts begins in, or null to keep each entry point's own
+ * choice. A project lives on one server; if several name one, the most recently changed wins.
+ */
+export function resolveNewThreadProject(
+  settings: ReadonlyMap<EnvironmentId, ThreadFolderSettings>,
+): NewThreadProjectRef | null {
+  let best: { readonly ref: NewThreadProjectRef; readonly at: number } | null = null;
+  for (const [environmentId, entry] of settings) {
+    if (entry.newThreadProjectId === null) continue;
+    const at = changedAt(entry);
+    if (best === null || at > best.at) {
+      best = { ref: { environmentId, projectId: entry.newThreadProjectId }, at };
+    }
+  }
+  return best?.ref ?? null;
+}
+
+/** The new-thread project when it is still a live (unarchived) project the client knows. */
+export function findNewThreadProject<
+  P extends {
+    readonly environmentId: EnvironmentId;
+    readonly id: ProjectId;
+    readonly archivedAt?: unknown;
+  },
+>(ref: NewThreadProjectRef | null, projects: ReadonlyArray<P>): P | null {
+  if (ref === null) return null;
+  return (
+    projects.find(
+      (project) =>
+        project.environmentId === ref.environmentId &&
+        project.id === ref.projectId &&
+        project.archivedAt == null,
+    ) ?? null
+  );
 }
 
 export function threadFolderViewsEqual(left: ThreadFolderView, right: ThreadFolderView): boolean {
   return (
     left.unfiledCollapsed === right.unfiledCollapsed &&
     left.defaultFolder === right.defaultFolder &&
+    left.autoFile === right.autoFile &&
     left.serverBacked === right.serverBacked &&
     left.folders.length === right.folders.length &&
     left.folders.every((name, index) => right.folders[index] === name) &&

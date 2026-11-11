@@ -10,6 +10,7 @@ import type * as Effect from "effect/Effect";
 
 import type { TextGenerationPolicy } from "./textGenerationPolicy.ts";
 import type { ThreadTitleForkSource } from "./textGenerationPrompts.ts";
+import type { ThreadFolderChoice } from "./threadFolderPrompt.ts";
 
 export interface CommitMessageGenerationInput {
   cwd: string;
@@ -68,6 +69,8 @@ export interface ThreadTitleGenerationInput {
   forkSource?: ThreadTitleForkSource | undefined;
   attachments?: ReadonlyArray<ChatAttachment> | undefined;
   instructions?: string | undefined;
+  /** Fork (F20): also pick one of these folders. */
+  folderChoice?: ThreadFolderChoice | undefined;
   modelSelection: ModelSelection;
   projectId?: ProjectId | null | undefined;
 }
@@ -75,6 +78,8 @@ export interface ThreadTitleGenerationInput {
 export interface ThreadTitleGenerationResult {
   title: string;
   needsRefinement?: boolean | undefined;
+  /** Fork (F20): the model's folder answer when a choice was offered; null for none. */
+  folder?: string | null | undefined;
 }
 
 export interface ReviewGuideStackLayer {

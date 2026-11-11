@@ -126,6 +126,8 @@ export function buildFolderThreadTreeListItems(input: {
   /** Folder group keys whose "Show more" is open. */
   readonly expandedGroupKeys: ReadonlySet<string>;
   readonly showEmptyFolders: boolean;
+  /** Show Unfiled even when empty, for its New folder button; defaults to `showEmptyFolders`. */
+  readonly showUnfiled?: boolean;
   /** Unfiled may offer a folder per project while no folder exists. */
   readonly offerFolderPerProject?: boolean;
   readonly selectedThreadKey?: string | null;
@@ -167,7 +169,7 @@ export function buildFolderThreadTreeListItems(input: {
   );
   const groups = [
     ...folders.map((group) => ({ folder: group.folder as string | null, rows: group.threads })),
-    ...(input.showEmptyFolders || grouped.unfiled.length > 0
+    ...((input.showUnfiled ?? input.showEmptyFolders) || grouped.unfiled.length > 0
       ? [{ folder: null, rows: grouped.unfiled }]
       : []),
   ];

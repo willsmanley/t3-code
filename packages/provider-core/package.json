@@ -175,6 +175,10 @@
       "types": "./src/server/textGenerationUtils.ts",
       "import": "./src/server/textGenerationUtils.ts"
     },
+    "./server/threadFolderPrompt": {
+      "types": "./src/server/threadFolderPrompt.ts",
+      "import": "./src/server/threadFolderPrompt.ts"
+    },
     "./server/threadTitleContext": {
       "types": "./src/server/threadTitleContext.ts",
       "import": "./src/server/threadTitleContext.ts"

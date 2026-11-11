@@ -1,6 +1,7 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
-import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { IsoDateTime, NonNegativeInt, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 // Fork (F20): thread folders. A thread is in folder `X` when it carries the thread tag
 // `folder:X`. The server keeps the folder list (order, collapse state, empty folders) and the
@@ -39,6 +40,23 @@ export function threadFolderOfTags(tags: ReadonlyArray<string> | undefined): str
   return null;
 }
 
+/**
+ * Auto-filing: the server tags a thread the user starts without picking a folder with
+ * `AUTO_FILE_PENDING_TAG`; when its title is generated, the model may file it and mark it with
+ * `AUTO_FILED_TAG`. A user's move clears both, so a late answer never overrides it.
+ */
+export const AUTO_FILE_PENDING_TAG = "autofile:pending";
+export const AUTO_FILED_TAG = "autofile:filed";
+
+export function isAutoFiledThread(tags: ReadonlyArray<string> | undefined): boolean {
+  return tags?.includes(AUTO_FILED_TAG) ?? false;
+}
+
+/** The auto-filing tags a thread carries; a user's move or folder menu removes them. */
+export function autoFileTagsOf(tags: ReadonlyArray<string> | undefined): string[] {
+  return (tags ?? []).filter((tag) => tag === AUTO_FILE_PENDING_TAG || tag === AUTO_FILED_TAG);
+}
+
 export interface ThreadFolderTagChange {
   readonly add: string | null;
   readonly remove: readonly string[];
@@ -72,6 +90,12 @@ export const ThreadFolderSettings = Schema.Struct({
   /** Where a thread the user starts without picking a folder lands. */
   defaultFolder: Schema.NullOr(ThreadFolderName),
   unfiledCollapsed: Schema.Boolean,
+  /** The project every thread the user starts from a client begins in; null: the client picks. */
+  newThreadProjectId: Schema.NullOr(ProjectId).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  /** Whether a thread the user starts without picking a folder may be filed by the title model. */
+  autoFile: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   /** The last change a user made; null while the list only holds folders read from thread tags. */
   updatedAt: Schema.NullOr(IsoDateTime),
 });
@@ -88,6 +112,9 @@ export const ThreadFolderUpdateInput = Schema.Union([
     collapsed: Schema.Boolean,
   }),
   Schema.TaggedStruct("setDefault", { name: Schema.NullOr(ThreadFolderName) }),
+  /** A project id names one server's project; clients send this only to that server. */
+  Schema.TaggedStruct("setNewThreadProject", { projectId: Schema.NullOr(ProjectId) }),
+  Schema.TaggedStruct("setAutoFile", { enabled: Schema.Boolean }),
   /** A device's saved folders from before the server kept them; used only while `updatedAt` is null. */
   Schema.TaggedStruct("seedFromDevice", {
     order: Schema.Array(ThreadFolderName),
@@ -191,6 +218,12 @@ export function applyThreadFolderUpdate(
         folders: input.name === null ? settings.folders : withFolder(settings.folders, input.name),
         defaultFolder: input.name,
       });
+    case "setNewThreadProject":
+      if (settings.newThreadProjectId === input.projectId) return settings;
+      return changed({ ...settings, newThreadProjectId: input.projectId });
+    case "setAutoFile":
+      if (settings.autoFile === input.enabled) return settings;
+      return changed({ ...settings, autoFile: input.enabled });
     case "seedFromDevice": {
       if (settings.updatedAt !== null) return settings;
       const collapsed = new Set(input.collapsed);

@@ -158,7 +158,7 @@ log "Building the Android APK"
   export T3CODE_ANDROID_VERSION_CODE="$number"
   export T3CODE_MOBILE_UPDATES_ENABLED=0
   # Holding power opens a new thread in this project (docs/fork/features.md, F13).
-  export T3CODE_ASSISTANT_PROJECT_ROOT=/home/daddy/personal
+  export T3CODE_ASSISTANT_PROJECT_ROOT=/home/daddy/agents
   export EXPO_NO_GIT_STATUS=1
   export T3CODE_MOBILE_VERSION="$version"
   export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"

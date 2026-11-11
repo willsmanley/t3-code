@@ -70,6 +70,7 @@ import { canTurnThreadIntoProject, turnThreadIntoProject } from "./turnThreadInt
 import { WORKER_TAG_MENU_ACTION_ID, workerTagMenuAction } from "./workerThreads";
 import { toggleThreadWorkerTag } from "./workerThreadTag";
 import { useThreadFolderMenu } from "./use-thread-folders";
+import { AutoFiledMark } from "./project-thread-tree-items";
 import { threadCanArchive } from "../home/threadArchive";
 import {
   THREAD_LIST_V2_SETTLED_PAGE_COUNT,
@@ -1239,6 +1240,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           {thread.title}
         </Text>
         <View className="flex-row items-center gap-1.5" style={{ minHeight: titleLineHeight }}>
+          <AutoFiledMark tags={thread.source.tags} selected={selected} />
           {props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
           {pinnedRow ? (
             <SymbolView
@@ -1497,6 +1499,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           />
         ) : null}
       </View>
+      <AutoFiledMark tags={thread.source.tags} selected={selected} />
       {props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
       {pinnedRow ? (
         <SymbolView
@@ -1693,7 +1696,12 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         threadTitle={thread.title}
       >
         {(close) => (
-          <Menu actions={menuActions} onPressAction={handleMenuAction} shouldOpenOnLongPress>
+          <Menu
+            actions={menuActions}
+            onPressAction={handleMenuAction}
+            onOpenMenu={folderMenu.onOpen}
+            shouldOpenOnLongPress
+          >
             {rowContent(close)}
           </Menu>
         )}

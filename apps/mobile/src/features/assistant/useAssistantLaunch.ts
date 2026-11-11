@@ -7,6 +7,7 @@ import { uuidv4 } from "../../lib/uuid";
 import { useProjects } from "../../state/entities";
 import { useWorkspaceState } from "../../state/workspace";
 import { selectWorkspaceDetail } from "../layout/workspace/workspace-detail-selection";
+import { newThreadProjectDraft } from "../threads/threadFolderActions";
 import { requestAssistantDictation } from "./assistantDictation";
 import { assistantDraftParams, isAssistantLaunchUrl } from "./assistantLaunch";
 
@@ -54,7 +55,10 @@ export function useAssistantLaunch(): void {
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- navigates once the launch's project has loaded
   useEffect(() => {
     if (launchId === null || handledLaunchIdRef.current === launchId) return;
-    const draft = assistantDraftParams(projects, ASSISTANT_PROJECT_ROOT, launchId);
+    // Fork (F20): the server's project for new threads wins over the build's assistant project.
+    const draft =
+      newThreadProjectDraft(launchId) ??
+      assistantDraftParams(projects, ASSISTANT_PROJECT_ROOT, launchId);
     if (draft === null && loadingProjects) return;
     handledLaunchIdRef.current = launchId;
     if (draft === null) {

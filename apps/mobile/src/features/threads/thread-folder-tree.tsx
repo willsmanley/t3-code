@@ -19,7 +19,9 @@ import {
   confirmFolderPerProject,
   promptNewFolder,
   promptRenameFolder,
+  readNewThreadProject,
   rememberDraftFolder,
+  setAutoFile,
   setDefaultFolder,
 } from "./threadFolderActions";
 import type {
@@ -32,8 +34,9 @@ import { useThreadFolderTreeState } from "./use-thread-folders";
 const NO_KEYS: ReadonlySet<string> = new Set();
 
 /**
- * `tab` is Android's bottom tab (F18). Workers lists only folders that hold a worker and has no
- * new-thread buttons or folder-per-project offer; collapsing a folder there collapses it everywhere.
+ * `tab` is Android's bottom tab (F18). Workers lists only folders that hold a worker, plus Unfiled
+ * for its New folder button, and has no new-thread buttons or folder-per-project offer;
+ * collapsing a folder there collapses it everywhere.
  */
 export function useThreadFolderTree(input: {
   readonly tab: "projects" | "workers";
@@ -60,18 +63,22 @@ export function useThreadFolderTree(input: {
       collapsedGroupKeys: input.searching ? NO_KEYS : state.collapsedGroupKeys,
       expandedGroupKeys: state.expandedGroupKeys,
       showEmptyFolders: projectsTab && !input.searching && !input.filtered,
+      showUnfiled: !input.searching && !input.filtered,
       offerFolderPerProject: projectsTab,
       selectedThreadKey: input.selectedThreadKey,
       preferencesLoading: !state.loaded,
     });
 
-  // The folder's most recently active project, else the first project; filed once it is sent.
+  // The server's new-thread project, else the folder's most recently active project, else the
+  // first project; filed once it is sent.
   const startThreadInFolder = (item: ThreadListV2FolderHeaderListItem) => {
-    const latest = projects.find(
-      (project) =>
-        project.archivedAt == null &&
-        scopedProjectKey(project.environmentId, project.id) === item.newThreadProjectKey,
-    );
+    const latest =
+      readNewThreadProject() ??
+      projects.find(
+        (project) =>
+          project.archivedAt == null &&
+          scopedProjectKey(project.environmentId, project.id) === item.newThreadProjectKey,
+      );
     const project = latest ?? pickableProjectGroups(projectScopes())[0]?.representative;
     if (project === undefined) return;
     const requestId = uuidv4();
@@ -87,6 +94,7 @@ export function useThreadFolderTree(input: {
     if (action === "new-folder") promptNewFolder();
     if (action === "arrange") state.openFolderArrangement();
     if (action === "folder-per-project") confirmFolderPerProject(projectScopes());
+    if (action === "auto-file") setAutoFile(!state.autoFile);
     if (folder === null) return;
     if (action === "rename") promptRenameFolder(folder);
     if (action === "default") setDefaultFolder(state.defaultFolder === folder ? null : folder);
@@ -114,6 +122,7 @@ export function useThreadFolderTree(input: {
             offerFolderPerProject={item.offerFolderPerProject}
             isDefault={item.folder !== null && item.folder === state.defaultFolder}
             canSetDefault={state.serverBacked}
+            autoFile={state.serverBacked ? state.autoFile : undefined}
             disabled={item.disabled}
             pane={input.pane}
             onToggle={() => state.toggleFolderCollapsed(item.folder)}

@@ -13,6 +13,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/
 import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { useNewThreadProject } from "../components/legacySidebarFolders.store";
 import {
   readProject,
   useAllEnvironmentShellsBootstrapped,
@@ -44,12 +45,16 @@ function IndexDraftLanding() {
   const startedAttemptRef = useRef<number | null>(null);
   const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
 
+  // Fork (F20): the server's project for new threads, when set, takes the landing draft.
+  const newThreadProject = useNewThreadProject();
   const mostRecentProject =
+    newThreadProject ??
     sortScopedProjectsForSidebar(
       projects.filter((project) => project.archivedAt == null),
       threads,
       "updated_at",
-    )[0] ?? null;
+    )[0] ??
+    null;
   const attempt = startState.retryRequest;
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- starts a draft thread in the most recent project and navigates to it while still on the index

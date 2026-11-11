@@ -251,7 +251,7 @@ jobs:
       T3CODE_MOBILE_UPDATES_ENABLED: "0"
       # Holding power opens a new thread in this project when the app is the
       # phone's digital assistant (docs/fork/features.md, F13).
-      T3CODE_ASSISTANT_PROJECT_ROOT: /home/daddy/personal
+      T3CODE_ASSISTANT_PROJECT_ROOT: /home/daddy/agents
       EXPO_NO_GIT_STATUS: "1"
       # Public certificate fingerprint of the fork's signing key. The private key
       # lives in the repository secrets and in Bitwarden.

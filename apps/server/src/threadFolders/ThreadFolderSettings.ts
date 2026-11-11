@@ -1,5 +1,6 @@
 import {
   applyThreadFolderUpdate,
+  AUTO_FILE_PENDING_TAG,
   CommandId,
   type OrchestrationV2ThreadShell,
   planThreadFolderTagChange,
@@ -32,10 +33,12 @@ import * as ThreadManagementService from "../orchestration-v2/ThreadManagementSe
 // Fork (F20): the folder list every client shows, and the folder new threads land in. A thread's
 // folder stays its `folder:<name>` tag; this file holds order, collapse state and empty folders.
 
-const SETTINGS_FILE_NAME = "thread-folders.json";
+export const THREAD_FOLDER_SETTINGS_FILE = "thread-folders.json";
 const RETAG_CONCURRENCY = 4;
 
-const decodeSettingsFile = Schema.decodeUnknownOption(Schema.fromJsonString(ThreadFolderSettings));
+export const decodeThreadFolderSettingsFile = Schema.decodeUnknownOption(
+  Schema.fromJsonString(ThreadFolderSettings),
+);
 const encodeSettingsFile = Schema.encodeSync(Schema.fromJsonString(ThreadFolderSettings));
 
 export class ThreadFolderSettingsService extends Context.Service<
@@ -48,11 +51,13 @@ export class ThreadFolderSettingsService extends Context.Service<
     ) => Effect.Effect<ThreadFolderUpdateResult, ThreadFolderError>;
     /**
      * Tags for a thread the user starts from a client: the folder they picked (null for none),
-     * else the default folder.
+     * else the default folder. A thread left in no folder whose title will be generated
+     * (`titled`) waits to be auto-filed, when that is on.
      */
-    readonly launchTags: (
-      folder: string | null | undefined,
-    ) => Effect.Effect<ReadonlyArray<ThreadTag>>;
+    readonly launchTags: (input: {
+      readonly folder: string | null | undefined;
+      readonly titled: boolean;
+    }) => Effect.Effect<ReadonlyArray<ThreadTag>>;
   }
 >()("t3/threadFolders/ThreadFolderSettings/ThreadFolderSettingsService") {}
 
@@ -76,7 +81,28 @@ export function seedThreadFolderSettings(threads: ReadonlyArray<SeedThread>): Th
       ([leftName, left], [rightName, right]) => right - left || leftName.localeCompare(rightName),
     )
     .map(([name]) => ({ name, collapsed: false }));
-  return { folders, defaultFolder: null, unfiledCollapsed: false, updatedAt: null };
+  return {
+    folders,
+    defaultFolder: null,
+    unfiledCollapsed: false,
+    newThreadProjectId: null,
+    autoFile: true,
+    updatedAt: null,
+  };
+}
+
+/** The launch tags `launchTags` returns once it has the settings. */
+export function threadLaunchTags(
+  input: { readonly folder: string | null | undefined; readonly titled: boolean },
+  settings: Pick<ThreadFolderSettings, "defaultFolder" | "autoFile" | "folders">,
+): ReadonlyArray<ThreadTag> {
+  if (typeof input.folder === "string") return [threadFolderTag(input.folder)];
+  if (input.folder === undefined && settings.defaultFolder !== null) {
+    return [threadFolderTag(settings.defaultFolder)];
+  }
+  return input.titled && settings.autoFile && settings.folders.length > 0
+    ? [AUTO_FILE_PENDING_TAG]
+    : [];
 }
 
 const activeAtMs = (thread: OrchestrationV2ThreadShell) =>
@@ -89,7 +115,7 @@ const make = Effect.gen(function* () {
   const threads = yield* ThreadManagementService.ThreadManagementService;
   const random = yield* SecureRandom.SecureRandom;
   const services = yield* Effect.context<FileSystem.FileSystem | Path.Path>();
-  const filePath = path.join(config.stateDir, SETTINGS_FILE_NAME);
+  const filePath = path.join(config.stateDir, THREAD_FOLDER_SETTINGS_FILE);
   const state = yield* Ref.make<Option.Option<ThreadFolderSettings>>(Option.none());
   const lock = yield* Semaphore.make(1);
   const changesPubSub = yield* PubSub.sliding<ThreadFolderSettings>(1);
@@ -114,7 +140,7 @@ const make = Effect.gen(function* () {
     const loaded = yield* Ref.get(state);
     if (Option.isSome(loaded)) return loaded.value;
     const stored = yield* fs.readFileString(filePath).pipe(
-      Effect.map(decodeSettingsFile),
+      Effect.map(decodeThreadFolderSettingsFile),
       Effect.catch((error) =>
         error.reason._tag === "NotFound"
           ? Effect.succeedNone
@@ -230,13 +256,11 @@ const make = Effect.gen(function* () {
     }),
   );
 
-  const launchTags: ThreadFolderSettingsService["Service"]["launchTags"] = (folder) => {
-    if (folder === null) return Effect.succeed([]);
-    if (folder !== undefined) return Effect.succeed([threadFolderTag(folder)]);
+  const launchTags: ThreadFolderSettingsService["Service"]["launchTags"] = (input) => {
+    if (typeof input.folder === "string") return Effect.succeed([threadFolderTag(input.folder)]);
+    if (input.folder === null && !input.titled) return Effect.succeed([]);
     return load.pipe(
-      Effect.map((settings) =>
-        settings.defaultFolder === null ? [] : [threadFolderTag(settings.defaultFolder)],
-      ),
+      Effect.map((settings) => threadLaunchTags(input, settings)),
       // A thread must still start when the folder list can't be read.
       Effect.catch((error) =>
         Effect.logWarning("Could not read the default thread folder", { error }).pipe(

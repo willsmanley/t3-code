@@ -539,10 +539,11 @@ If upstream adds its own retry here, drop this one.
 
 What it does: the app shows up in Settings > Apps > Default apps > Digital assistant app. When it
 is chosen there, holding the power button (or swiping up from a bottom corner) opens a new thread
-in the build's assistant project, a fresh draft each time, already recording through the F8 voice
-input (tap ✓ to drop the words into the draft, × to type instead). The nightly sets that project's folder
-with `T3CODE_ASSISTANT_PROJECT_ROOT` (Wills's Personal project). With no folder set, or no
-connected project at it, it opens Choose project instead. Android only needs an activity that
+in the server's new-thread project (F20), else the build's assistant project, a fresh draft each
+time, already recording through the F8 voice input (tap ✓ to drop the words into the draft, × to
+type instead). The nightly sets the build's project folder with `T3CODE_ASSISTANT_PROJECT_ROOT`
+(`/home/daddy/agents`, the root project). With neither, or no connected project at the folder, it
+opens Choose project instead. Android only needs an activity that
 handles `ACTION_ASSIST`; there is no voice interaction service, so there's no overlay on top of
 the current app and no screen context.
 
@@ -560,6 +561,8 @@ Touch points:
   `useAssistantLaunch.ts` imports from `features/layout/workspace/`.
 - `apps/mobile/src/lib/appLinking.ts`: `shouldHandleAppLink` ignores the assist link, so the
   router doesn't open NotFound for it.
+- `useAssistantLaunch.ts` asks `newThreadProjectDraft(launchId)` (F20, `threadFolderActions.ts`)
+  before the build's folder.
 - `apps/mobile/src/features/threads/ThreadComposer.tsx`: `useAssistantDictation(...)` right after
   `useVoiceInputController(...)`, passing `props.draftKey` only for new drafts (not
   `composerDraftKey`, which stands in a placeholder key until the draft exists).
@@ -796,8 +799,8 @@ Added November 5, 2026.
 What it does: a thread is either a normal thread (Projects) or a worker, chosen by the user. A
 worker is a thread with the upstream thread tag `worker` (`WORKER_THREAD_TAG`, `isWorkerThread`),
 so no schema or migration is involved. The legacy sidebar gets Projects and Workers tabs. Workers
-lists worker threads by folder (F20), then "Jobs in project threads" (scheduled tasks outside worker
-threads); jobs whose thread is archived and that won't run again hide behind "Show archived".
+lists worker threads by folder (F20), with the same New folder button as Projects, then "Jobs in
+project threads" (scheduled tasks outside worker threads); jobs whose thread is archived and that won't run again hide behind "Show archived".
 A "Needs you" group at the top of Projects shows a worker that waits on the user (question,
 approval) or failed, a job whose last run failed (until "Mark done", kept in localStorage), and a
 job that would still run into an archived thread. Right-click a project thread for "Move to
@@ -898,7 +901,8 @@ Verify:
 
 ### F20. Folders replace projects in the legacy sidebar and the phone app (web/desktop, server, client-runtime, contracts, mobile)
 
-Added November 6, 2026; the phone app November 7, 2026; folders kept on the server November 11, 2026.
+Added November 6, 2026; the phone app November 7, 2026; folders kept on the server November 11,
+2026; the new-thread project and auto-filing November 11, 2026.
 
 What it does: the legacy sidebar's Projects tab lists folders, then Unfiled, instead of projects.
 A folder only labels threads; it never changes where a thread's agent runs. A thread is in folder
@@ -926,6 +930,38 @@ new-thread button: its name; Unfiled's: null) wins over the default. Subagent an
 `delegate_task` and other MCP launches, scheduled tasks, the startup thread, ACP imports and forks
 never pass through that handler, so they never get it; worker threads only become workers after
 they exist.
+
+New-thread project: `newThreadProjectId` in the same file (`setNewThreadProject`; a project id
+names one server's project, so a client sends the id to that server and clears it on the others).
+When it names a live project, every new thread the user starts begins there: desktop ⌘N and the
+command palette's "New thread in …" (`startNewThreadFromContext` in `lib/chatThreadActions.ts`), a
+folder's and Unfiled's new-thread buttons, the landing draft (`routes/_chat.index.tsx`), the phone's
+New thread button (`AdaptiveWorkspaceLayout.tsx`) and folder pencils, and the F13 assistant. Unset,
+each keeps its own choice. "New threads start here" sits on a project's settings page (desktop
+`settings/NewThreadProjectSettingsRow.tsx` in `ProjectSettingsPanel.tsx`; phone
+`threads/NewThreadProjectSection.tsx` in `SettingsProjectOverviewRouteScreen.tsx`), and the desktop
+palette offers "Start new threads in <project>" for the open thread. Explicit project picks ("New
+thread in…" submenu, a thread's "New thread in this project", MCP, `delegate_task`, scheduled
+tasks) are untouched, and existing threads keep their projects.
+
+Auto-filing: `autoFile` in the same file (`setAutoFile`, on by default; desktop sidebar options menu
+and palette, phone Unfiled long-press). The `launchThread` handler adds the tag `autofile:pending`
+to a thread that ends up in no folder, when its title will be generated and the server has
+folders: the new-thread shortcut and phone New thread button without a default folder, and Unfiled's
+button (its `folder: null` skips only the default folder). A folder's button files the thread there
+and never waits. MCP, `delegate_task`, scheduled tasks, subagents and workers never reach that
+handler. The thread's first title call (`ThreadTitleRegenerationService`, same model as the title)
+is then also offered the folder names with up to three recent titles each, hand-filed threads
+first (`ThreadAutoFile.folderChoice`; the prompt section and the optional `folder` reply key are in
+`packages/provider-core/src/server/threadFolderPrompt.ts`). After the title, `ThreadAutoFile.finish`
+re-reads the thread: if it still has `autofile:pending`, no folder tag, isn't a worker and the
+switch is on, and the answer names an offered folder, it adds `folder:X` and `autofile:filed`; it
+always removes `autofile:pending`. A null or unknown answer leaves the thread in Unfiled. Any move
+by a client removes both tags (`fileThreads`), so a late answer never overrides the user. Rows
+with `autofile:filed` show a quiet mark (desktop bot icon, phone "auto") until the user moves the
+thread or opens its menu (desktop thread or multi-select context menu, palette "Move to folder…",
+phone long-press via `onOpenMenu`, which `Menu.android.tsx` now fires). The extra cost is a few
+hundred input tokens and one short field on a call that already runs; no extra model call.
 
 Migration: a server with no `thread-folders.json` builds one from the folder tags on unarchived
 threads, most recently active folder first (an archived thread's tag may name a folder deleted on
@@ -963,7 +999,8 @@ exists, since the older server drops the launch's `folder`.
 
 Phone app (Android tree, F7): the Projects tab (home list and tablet sidebar) groups threads by
 the same folders, then Unfiled. The Workers tab (F18) lists workers by them too, showing only
-folders that hold a worker, without new-thread buttons. Search opens every folder and lists only
+folders that hold a worker plus Unfiled (always, for its New folder button), without new-thread
+buttons. Search opens every folder and lists only
 folders with matches; a project or environment filter hides empty folders.
 
 - Thread long-press: "Move to folder ›" (folders, the current one checked, "New folder…") and
@@ -982,7 +1019,9 @@ Limits: the sidebar's project sort setting no longer applies here; the thread so
 threads" count still do. The phone has no folder drag and drop; iOS keeps the flat list, so its
 menu moves threads into folders it doesn't show (its new threads get the default folder too).
 "Work locally" on a thread whose worktree setup failed starts a new thread that gets the default
-folder, not the old thread's.
+folder, not the old thread's. Auto-filing has a few-millisecond window between its final check and
+its tag writes in which a move made at that exact moment could lose to it. iOS wasn't tested; it
+shares the phone's new-thread path, flat row and project settings screen.
 
 Fork-owned files:
 
@@ -990,7 +1029,9 @@ Fork-owned files:
   the update input and `applyThreadFolderUpdate`, which the server and the clients' instant
   updates share).
 - Server: `apps/server/src/threadFolders/ThreadFolderSettings.ts` (+ test; storage, seeding,
-  retagging, `launchTags`).
+  retagging, `launchTags`), `ThreadAutoFile.ts` (+ test; eligibility, the folder choice, applying
+  the answer; reads `thread-folders.json`, never writes it).
+- Provider core: `packages/provider-core/src/server/threadFolderPrompt.ts` (+ test).
 - Shared client rules (tag helpers, name checks, grouping, ordering, the merged view, the
   migration step, the folder-per-project plan, the new-thread project):
   `packages/client-runtime/src/threadFolders.ts` (+ test), exported as
@@ -1023,6 +1064,15 @@ Touch points:
   `Effect.andThen(threadFolders.launchTags(input.folder))` plus the `tags` spread.
   `server.ts`: `ThreadFolderSettings.layer` after `VoiceDictation.layer`. `RpcAuthorization.ts`
   (read scope for the stream) and `RpcInstrumentation.ts`. `ws.test.ts`: the mock layer.
+- `apps/server/src/orchestration-v2/ThreadTitleRegenerationService.ts`: `ThreadAutoFile.optional`
+  (no requirement, so layers without it never auto-file), `folderChoice` before the initial title
+  call, `folder` in `TitleOutcome`, `finish` after `complete`. `runtimeLayer.ts`: provides
+  `ThreadAutoFile.layer` to the title service.
+- Provider core (upstream files): `textGeneration.ts` (`folderChoice` input, `folder` result),
+  `textGenerationPrompts.ts` (`folderChoice` on `ThreadTitlePromptInput`; `buildThreadTitlePrompt`
+  appends the section and the `folder` key only with a choice), `textGenerationOperations.ts` and
+  `provider-muse/src/server/textGeneration.ts` (pass the choice, return `threadFolderAnswer`),
+  `package.json` (export).
 - `apps/server/src/orchestration-v2/ThreadLaunchService.ts`: `tags` on `ThreadLaunchInput`,
   passed to `thread.create`. `Orchestrator.ts`: `dispatchThreadCreate` stores the command's tags
   (`runtimeLayer.test.ts`, the lifecycle test, covers it).
@@ -1036,7 +1086,13 @@ Touch points:
   `DragOverlay`, `startThreadInFolder`. `LegacySidebarWorkers.tsx` and
   `legacySidebarWorkers.logic.ts` (F18): workers grouped with `groupWorkers` by folder, folder
   collapse from the server, `legacyThreadFolderMenu` in the worker thread menu.
-  `CommandPalette.tsx`: one line pushing `legacyFolderPaletteItems(...)`.
+  `CommandPalette.tsx`: one line pushing `legacyFolderPaletteItems(...)`, and
+  `readNewThreadProject()?.title` first in `activeProjectTitle`. `LegacySidebar.tsx` also has
+  `AutoFiledMark` in `SidebarThreadRow`, `AutoFileMenuGroup` in `SidebarOptionsMenu`,
+  `NewFolderButton` beside `NewWorkerButton`, and `readNewThreadProjectRef()` first in
+  `startThreadInFolder`. `lib/chatThreadActions.ts` (`startNewThreadFromContext`) and
+  `routes/_chat.index.tsx` (landing draft): one new-thread-project line each.
+  `settings/ProjectSettingsPanel.tsx`: `<NewThreadProjectSettingsRow …/>`.
   `AppSidebarLayout.tsx`: mounts `LegacySidebarFoldersHost` beside the sidebar when
   `isElectron || forceLegacySidebar`. `chat/useComposerSend.ts` and `chat/useMultipleModelSend.ts`:
   `...draftLaunchFolder(draftId)` in the bootstrap's `createThread`.
@@ -1049,7 +1105,11 @@ Touch points:
   outbox queues the first message. `lib/projectThreadStartTurn.ts`: `folder` in the spec and the
   bootstrap. `state/threadOutboxDelivery.ts`: `...draftLaunchFolder(...)` in the start-turn spec.
   `threads/thread-list-v2-items.tsx`: `useThreadFolderMenu(thread)` in the row's menu items and
-  event handler. `persistence/mobile-preferences.ts`: `Preferences extends
+  event handler, `onOpenMenu={folderMenu.onOpen}`, and `AutoFiledMark` in the tree and flat rows.
+  `components/ui/Menu.android.tsx`: calls `onOpenMenu` on a long-press open.
+  `layout/AdaptiveWorkspaceLayout.tsx` (`handleStartNewTask`): `newThreadProjectDraft(requestId)`
+  before `newTaskDestination`. `settings/SettingsProjectOverviewRouteScreen.tsx`:
+  `<NewThreadProjectSection …/>`. `persistence/mobile-preferences.ts`: `Preferences extends
   ThreadFolderPreferences` and one `sanitizeThreadFolderPreferences(parsed)` spread.
 
 Verify:
@@ -1058,6 +1118,10 @@ Verify:
 - `vp test run apps/server/src/orchestration-v2/runtimeLayer.test.ts -t "applies lifecycle commands idempotently"`
 - `vp test run packages/client-runtime/src/threadFolders.test.ts packages/client-runtime/src/operations/commands.test.ts apps/web/src/components/legacySidebarFolders.logic.test.ts apps/web/src/components/legacySidebarWorkers.logic.test.ts`
 - `vp test run apps/mobile/src/features/threads/projectThreadTree.test.ts apps/mobile/src/features/threads/workerThreadGroup.test.ts`
+- `vp test run apps/server/src/threadFolders/ThreadAutoFile.test.ts packages/provider-core/src/server/threadFolderPrompt.test.ts`
+- `grep -n "ThreadAutoFile" apps/server/src/orchestration-v2/ThreadTitleRegenerationService.ts apps/server/src/orchestration-v2/runtimeLayer.ts`
+  (hits in both), `grep -n "folderChoice\|threadFolderAnswer" packages/provider-core/src/server/textGenerationOperations.ts packages/provider-muse/src/server/textGeneration.ts packages/provider-core/src/server/textGenerationPrompts.ts`
+  and `grep -n "readNewThreadProject\|newThreadProjectDraft" apps/web/src/lib/chatThreadActions.ts apps/web/src/components/CommandPalette.tsx apps/mobile/src/features/layout/AdaptiveWorkspaceLayout.tsx apps/mobile/src/features/assistant/useAssistantLaunch.ts`.
 - `grep -ln "threadFoldersSubscribe" apps/server/src/ws.ts apps/server/src/auth/RpcAuthorization.ts apps/server/src/observability/RpcInstrumentation.ts packages/contracts/src/rpc.ts packages/client-runtime/src/rpc/client.ts`
   (all five), `grep -n "launchTags\|threadFolders: true" apps/server/src/ws.ts` (two hits) and
   `grep -n "ThreadFolderSettings.layer" apps/server/src/server.ts`.
@@ -1071,8 +1135,13 @@ Verify:
   a thread with the sidebar's new-thread shortcut (it lands there); start one with another
   folder's new-thread button (it lands in that folder); rename a folder that holds an archived
   thread and unarchive it (it comes back in the renamed folder).
+- Turn on "New threads start here" for a project (desktop or phone project settings); ⌘N, a
+  folder's and Unfiled's buttons, the phone's New thread button and the assistant all open drafts
+  in it. Send a clearly job-related first message from Unfiled's button: within a few seconds of
+  the title it moves to Jobs with the auto-filed mark, which goes away when its menu opens. A vague
+  first message ("hey") stays in Unfiled; a folder's button keeps its folder.
 - In the Android app: long-press a thread, Move to folder › New folder…, and see it under that
-  folder (and in the desktop sidebar); long-press the folder header to rename, arrange, make it
+  folder (and in the desktop sidebar); make a folder from Workers' Unfiled button; long-press the folder header to rename, arrange, make it
   the default and delete it; start a thread from a folder's new-thread button and send it (it
   lands in the folder); open Workers and see workers under their folders.
 

@@ -6,6 +6,7 @@ import type {
   ScopedProjectRef,
 } from "@t3tools/contracts";
 import type { ComposerThreadDraftState, DraftThreadEnvMode } from "../composerDraftStore";
+import { readNewThreadProjectRef } from "../components/legacySidebarFolders.store";
 
 type ComposerModelSelectionState = Pick<
   ComposerThreadDraftState,
@@ -85,7 +86,8 @@ export function resolveThreadActionProjectRef(
 export async function startNewThreadFromContext(
   context: ChatThreadActionContext,
 ): Promise<boolean> {
-  const projectRef = resolveThreadActionProjectRef(context);
+  // Fork (F20): a server-chosen project for every new thread wins over the current one.
+  const projectRef = readNewThreadProjectRef() ?? resolveThreadActionProjectRef(context);
   if (!projectRef) {
     return false;
   }

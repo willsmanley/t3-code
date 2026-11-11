@@ -154,6 +154,7 @@ import {
   folderOfThread,
   moveThreadsToFolder,
   readFolderOrder,
+  readNewThreadProjectRef,
   rememberDraftFolder,
   setFolderExpanded,
   setFolderOrder,
@@ -165,6 +166,8 @@ import {
   useFolderView,
 } from "./legacySidebarFolders.store";
 import {
+  AutoFiledMark,
+  AutoFileMenuGroup,
   DefaultFolderMark,
   legacyFolderHeaderMenu,
   legacyThreadFolderMenu,
@@ -766,6 +769,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   </span>
                 }
               />
+              <AutoFiledMark thread={thread} />
               <TooltipPopup side="top">
                 {thread.title}
                 {/* The project shows on hover only, so titles keep the row's width. */}
@@ -2215,6 +2219,7 @@ function SidebarOptionsMenu({
             </NumberField>
           </div>
         </MenuGroup>
+        <AutoFileMenuGroup />
       </MenuPopup>
     </Menu>
   );
@@ -2461,7 +2466,10 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
         <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
           <LegacySidebarTabs value={sidebarTab} onChange={onSidebarTabChange} />
           {sidebarTab === "workers" ? (
-            <NewWorkerButton />
+            <div className="flex items-center gap-1">
+              <NewWorkerButton />
+              <NewFolderButton />
+            </div>
           ) : (
             <div className="flex items-center gap-1">
               <SidebarOptionsMenu
@@ -2798,14 +2806,16 @@ export default function LegacySidebar({ routeReveal }: { routeReveal: SidebarRou
     const routeShell = routeThreadRef ? readThreadShell(routeThreadRef) : null;
     const routeProject = routeShell ?? routeDraftThread;
     const firstProject = liveProjects[0];
-    const projectRef = chooseFolderThreadProject({
-      folderThreads,
-      current:
-        routeProject && liveProjectKeys.has(threadProjectScopedKey(routeProject))
-          ? scopeProjectRef(routeProject.environmentId, routeProject.projectId)
-          : null,
-      first: firstProject ? scopeProjectRef(firstProject.environmentId, firstProject.id) : null,
-    });
+    const projectRef =
+      readNewThreadProjectRef() ??
+      chooseFolderThreadProject({
+        folderThreads,
+        current:
+          routeProject && liveProjectKeys.has(threadProjectScopedKey(routeProject))
+            ? scopeProjectRef(routeProject.environmentId, routeProject.projectId)
+            : null,
+        first: firstProject ? scopeProjectRef(firstProject.environmentId, firstProject.id) : null,
+      });
     if (!projectRef) {
       openCommandPalette({ open: "add-project" });
       return;

@@ -1,4 +1,5 @@
 import type { MenuAction } from "@react-native-menu/menu";
+import { isAutoFiledThread } from "@t3tools/contracts";
 import { memo } from "react";
 import { Platform, Pressable, View } from "react-native";
 
@@ -75,6 +76,7 @@ const FOLDER_HEADER_ACTIONS = [
   "move-up",
   "move-down",
   "folder-per-project",
+  "auto-file",
 ] as const;
 export type ThreadFolderHeaderAction = (typeof FOLDER_HEADER_ACTIONS)[number];
 
@@ -118,6 +120,8 @@ export const ThreadFolderHeader = memo(function ThreadFolderHeader(props: {
   readonly isDefault?: boolean;
   /** The servers keep a default folder, so the menu can choose one. */
   readonly canSetDefault?: boolean;
+  /** Unfiled's menu switches auto-filing; undefined hides the item. */
+  readonly autoFile?: boolean;
   readonly disabled?: boolean;
   readonly pane?: "screen" | "sidebar";
   readonly onToggle: () => void;
@@ -141,6 +145,16 @@ export const ThreadFolderHeader = memo(function ThreadFolderHeader(props: {
           } satisfies MenuAction,
         ]),
     { id: "new-folder", title: "New folder…", image: "folder.badge.plus" },
+    ...(unfiled && props.autoFile !== undefined
+      ? [
+          {
+            id: "auto-file",
+            title: "Auto-file new threads",
+            image: "brain",
+            state: props.autoFile ? "on" : "off",
+          } satisfies MenuAction,
+        ]
+      : []),
     ...(props.offerFolderPerProject
       ? [
           {
@@ -302,6 +316,22 @@ export const ThreadFolderHeader = memo(function ThreadFolderHeader(props: {
     </View>
   );
 });
+
+/** Fork (F20): a quiet mark on a thread the title model filed, until the user moves it or opens its menu. */
+export function AutoFiledMark(props: {
+  readonly tags: ReadonlyArray<string> | undefined;
+  readonly selected: boolean;
+}) {
+  if (!isAutoFiledThread(props.tags)) return null;
+  return (
+    <Text
+      accessibilityLabel="Auto-filed"
+      className={cn("text-[11px]", props.selected ? "opacity-70" : "text-foreground-muted")}
+    >
+      auto
+    </Text>
+  );
+}
 
 export const ThreadTreeMoreRow = memo(function ThreadTreeMoreRow(props: {
   readonly hiddenCount: number;

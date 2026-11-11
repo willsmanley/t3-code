@@ -87,6 +87,7 @@ import { startOpeningDetail } from "./workspace/useSelectWorkspaceDetail";
 import { useWorkspaceTabs } from "./workspace/WorkspaceTabsContext";
 import { HomeListOptionsProvider } from "../home/home-list-options";
 import { newTaskDestination } from "../threads/new-task-project-selection";
+import { newThreadProjectDraft } from "../threads/threadFolderActions";
 import { RenderErrorBoundary, RenderFailureView } from "../../components/RenderErrorBoundary";
 import { PaneContext } from "../../components/ui/Pane";
 import { WORKSPACE_PANE_TIMING } from "./workspace-pane-animation";
@@ -616,14 +617,18 @@ function AdaptiveWorkspaceLayoutContent(
         : undefined;
     const preferences = appAtomRegistry.get(mobilePreferencesAtom);
     const saved = AsyncResult.isSuccess(preferences) ? preferences.value : undefined;
+    const requestId = uuidv4();
+    const rootDraft = newThreadProjectDraft(requestId);
     handleSelectThreadRoute(
-      newTaskDestination({
-        projects,
-        requestId: uuidv4(),
-        useLastProject: saved?.useLastProjectForNewThreads,
-        currentProject: environmentId && projectId ? { environmentId, projectId } : undefined,
-        lastProject: saved?.lastThreadProject,
-      }),
+      rootDraft !== null
+        ? { draft: rootDraft }
+        : newTaskDestination({
+            projects,
+            requestId,
+            useLastProject: saved?.useLastProjectForNewThreads,
+            currentProject: environmentId && projectId ? { environmentId, projectId } : undefined,
+            lastProject: saved?.lastThreadProject,
+          }),
     );
   };
 

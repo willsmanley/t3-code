@@ -241,6 +241,7 @@ import {
 import { useCommandPaletteThreadItems } from "./CommandPaletteThreadItems";
 import { useCommandPaletteThemeItems } from "./CommandPaletteThemeItems";
 import { legacyFolderPaletteItems } from "./LegacySidebarFolders";
+import { readNewThreadProject } from "./legacySidebarFolders.store";
 import {
   CommandPaletteVirtualizedResults,
   scrollCommandPaletteRowIntoView,
@@ -1267,6 +1268,7 @@ function OpenCommandPaletteDialog(props: {
 
   if (projects.length > 0) {
     const activeProjectTitle =
+      readNewThreadProject()?.title ??
       projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??
       currentProject?.title ??
       null;

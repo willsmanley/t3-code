@@ -20,6 +20,7 @@ import {
   layer,
   seedThreadFolderSettings,
   ThreadFolderSettingsService,
+  threadLaunchTags,
 } from "./ThreadFolderSettings.ts";
 
 const settings = (
@@ -29,6 +30,8 @@ const settings = (
   folders: folders.map(([name, collapsed]) => ({ name, collapsed })),
   defaultFolder: null,
   unfiledCollapsed: false,
+  newThreadProjectId: null,
+  autoFile: true,
   updatedAt: null,
   ...extra,
 });
@@ -177,12 +180,47 @@ it.layer(NodeServices.layer)("ThreadFolderSettingsService", (it) => {
   it.effect("a launch gets the picked folder, else the default", () =>
     withService({ active: [], archive: [] }, ({ service }) =>
       Effect.gen(function* () {
-        assert.deepStrictEqual(yield* service.launchTags(undefined), []);
+        const launch = (folder: string | null | undefined) =>
+          service.launchTags({ folder, titled: false });
+        assert.deepStrictEqual(yield* launch(undefined), []);
         yield* service.update({ _tag: "setDefault", name: "Todo" });
-        assert.deepStrictEqual(yield* service.launchTags(undefined), ["folder:Todo"]);
-        assert.deepStrictEqual(yield* service.launchTags("School"), ["folder:School"]);
-        assert.deepStrictEqual(yield* service.launchTags(null), []);
+        assert.deepStrictEqual(yield* launch(undefined), ["folder:Todo"]);
+        assert.deepStrictEqual(yield* launch("School"), ["folder:School"]);
+        assert.deepStrictEqual(yield* launch(null), []);
+        yield* service.update({ _tag: "setDefault", name: null });
+        assert.deepStrictEqual(yield* service.launchTags({ folder: null, titled: true }), [
+          "autofile:pending",
+        ]);
       }),
     ),
   );
+});
+
+it("only a launch left in no folder, with a generated title, waits to be auto-filed", () => {
+  const folders = settings([["Todo", false]]);
+  const cases: ReadonlyArray<
+    readonly [string, string | null | undefined, boolean, Partial<Settings>, string[]]
+  > = [
+    ["a folder's new-thread button files it there", "School", true, {}, ["folder:School"]],
+    ["the new-thread shortcut waits", undefined, true, {}, ["autofile:pending"]],
+    ["Unfiled's new-thread button waits too", null, true, {}, ["autofile:pending"]],
+    ["the default folder wins", undefined, true, { defaultFolder: "Todo" }, ["folder:Todo"]],
+    [
+      "Unfiled skips the default folder",
+      null,
+      true,
+      { defaultFolder: "Todo" },
+      ["autofile:pending"],
+    ],
+    ["no title call, no answer to wait for", undefined, false, {}, []],
+    ["the switch is off", undefined, true, { autoFile: false }, []],
+    ["no folders to pick from", undefined, true, { folders: [] }, []],
+  ];
+  for (const [name, folder, titled, extra, expected] of cases) {
+    assert.deepStrictEqual(
+      threadLaunchTags({ folder, titled }, { ...folders, ...extra }),
+      expected,
+      name,
+    );
+  }
 });

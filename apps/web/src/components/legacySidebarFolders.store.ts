@@ -3,7 +3,11 @@
 // state and default folder live on each server (`threadFolders.*`); only folders picked for
 // unsent drafts stay on this device.
 import { useAtomValue } from "@effect/atom-react";
-import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  scopedThreadKey,
+  scopeProjectRef,
+  scopeThreadRef,
+} from "@t3tools/client-runtime/environment";
 import { arrayElementsEqual } from "@t3tools/client-runtime/state/entities";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import {
@@ -14,13 +18,19 @@ import {
 import { createThreadFolderSettingsAtoms } from "@t3tools/client-runtime/state/thread-folder-settings";
 import {
   type DeviceFolderState,
+  findNewThreadProject,
   folderOfTags,
+  type NewThreadProjectRef,
   planFolderTagChange,
   type ThreadFolderView,
 } from "@t3tools/client-runtime/thread-folders";
 import {
+  AUTO_FILED_TAG,
+  autoFileTagsOf,
   AuthOrchestrationOperateScope,
   type EnvironmentId,
+  isAutoFiledThread,
+  type ScopedProjectRef,
   type ScopedThreadRef,
   type ThreadFolderUpdateInput,
 } from "@t3tools/contracts";
@@ -33,7 +43,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { resolveStorage } from "../lib/storage";
 import { appAtomRegistry } from "../rpc/atomRegistry";
-import { readThreadShell, readThreadShells } from "../state/entities";
+import { readProjects, readThreadShell, readThreadShells, useProjects } from "../state/entities";
 import { environmentServerConfigsAtom } from "../state/server";
 import { readEnvironmentScope } from "../state/session";
 import { environmentThreadShells, threadEnvironment } from "../state/threads";
@@ -224,6 +234,40 @@ export function setDefaultFolder(folder: string | null): void {
   void updateFolders({ _tag: "setDefault", name: folder }, "Could not change the default folder");
 }
 
+/** Whether a new thread left in no folder is filed by the title model. */
+export function setAutoFile(enabled: boolean): void {
+  void updateFolders({ _tag: "setAutoFile", enabled }, "Could not change auto-filing");
+}
+
+/** Every new thread the user starts begins in `project` (null: each entry point picks). */
+export async function setNewThreadProject(project: NewThreadProjectRef | null): Promise<void> {
+  const outcome = await threadFolderSettings.setNewThreadProject(appAtomRegistry, project);
+  if (outcome.failure !== null) {
+    reportFolderFailure("Could not change where new threads start", outcome.failure);
+  }
+}
+
+export function useNewThreadProjectRef(): NewThreadProjectRef | null {
+  return useAtomValue(threadFolderSettings.newThreadProjectAtom);
+}
+
+/** The live project new threads start in, or null to keep each entry point's own choice. */
+export function useNewThreadProject() {
+  return findNewThreadProject(useNewThreadProjectRef(), useProjects());
+}
+
+export function readNewThreadProject() {
+  return findNewThreadProject(
+    appAtomRegistry.get(threadFolderSettings.newThreadProjectAtom),
+    readProjects(),
+  );
+}
+
+export function readNewThreadProjectRef(): ScopedProjectRef | null {
+  const project = readNewThreadProject();
+  return project === null ? null : scopeProjectRef(project.environmentId, project.id);
+}
+
 export function threadsInFolder(folder: string): EnvironmentThreadShell[] {
   return readThreadShells().filter(
     (thread) => thread.archivedAt === null && folderOfThread(thread) === folder,
@@ -288,9 +332,11 @@ export async function fileThreads(
     // The row may have been read before an earlier move landed.
     const tags = (readThreadShell(threadRef) ?? thread).source.tags;
     const change = planFolderTagChange(tags, folder);
+    // A move is the user's choice: it ends auto-filing's wait and clears its mark.
     for (const [tag, tagged] of [
       ...(change.add === null ? [] : [[change.add, true] as const]),
       ...change.remove.map((tag) => [tag, false] as const),
+      ...autoFileTagsOf(tags).map((tag) => [tag, false] as const),
     ]) {
       const failure = await setThreadTag(threadRef, tag, tagged);
       if (failure !== null) {
@@ -307,6 +353,15 @@ export async function fileThreads(
     failures[0],
   );
   return false;
+}
+
+/** Drops the "auto-filed" mark once the user has seen the thread's folder menu. */
+export function clearAutoFileMarks(threads: readonly FolderThread[]): void {
+  for (const thread of threads) {
+    if (!isAutoFiledThread(thread.source.tags)) continue;
+    if (!readEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope)) continue;
+    void setThreadTag(scopeThreadRef(thread.environmentId, thread.id), AUTO_FILED_TAG, false);
+  }
 }
 
 /** Loaded threads on servers that can't retag folders themselves (older servers, or none). */

@@ -2253,8 +2253,14 @@ export const layerWsRpc = (
             "orchestration_v2.command_id": input.commandId,
             "orchestration_v2.project_id": input.projectId,
           }).pipe(
-            // Fork (F20): only the user's own clients launch here, so only they get the default folder.
-            Effect.andThen(threadFolders.launchTags(input.folder)),
+            // Fork (F20): only the user's own clients launch here, so only they get the default
+            // folder or wait to be auto-filed.
+            Effect.andThen(
+              threadFolders.launchTags({
+                folder: input.folder,
+                titled: input.generateTitle === true && input.initialMessage !== undefined,
+              }),
+            ),
             Effect.flatMap((tags) =>
               startup
                 .enqueueCommand(

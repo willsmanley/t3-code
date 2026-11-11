@@ -16,6 +16,8 @@ import type { EnvironmentRegistry } from "../connection/registry.ts";
 import {
   EMPTY_SESSION_FOLDER_STATE,
   folderOfTags,
+  type NewThreadProjectRef,
+  resolveNewThreadProject,
   resolveThreadFolderView,
   type SessionFolderState,
   type ThreadFolderView,
@@ -140,26 +142,56 @@ export function createThreadFolderSettingsAtoms<R, E>(
     return next;
   }).pipe(Atom.withLabel("thread-folders:view"));
 
+  let previousNewThreadProject: NewThreadProjectRef | null = null;
+  /** The project new threads start in, when a server names one. */
+  const newThreadProjectAtom = Atom.make((get) => {
+    const next = resolveNewThreadProject(get(settingsByEnvironmentAtom));
+    if (
+      next?.environmentId === previousNewThreadProject?.environmentId &&
+      next?.projectId === previousNewThreadProject?.projectId
+    ) {
+      return previousNewThreadProject;
+    }
+    previousNewThreadProject = next;
+    return next;
+  }).pipe(Atom.withLabel("thread-folders:new-thread-project"));
+
   /** True once every server that keeps folders has sent them, so the view won't jump. */
   const loadedAtom = Atom.make((get) => {
     const supported = get(supportedEnvironmentIdsAtom);
     return supported.every((environmentId) => liveSettingsOf(get, environmentId) !== undefined);
   }).pipe(Atom.withLabel("thread-folders:loaded"));
 
-  /** Sends `change` to every server that keeps folders; with none, changes this session's list. */
-  const apply = async (
+  /**
+   * Sends each server that keeps folders its change (none: leave it alone); with no such server,
+   * changes this session's list with `sessionChange`.
+   */
+  const applyEach = async (
     registry: AtomRegistry.AtomRegistry,
-    change: ThreadFolderUpdateInput,
+    changeFor: (
+      environmentId: EnvironmentId,
+      settings: ThreadFolderSettings | undefined,
+    ) => ThreadFolderUpdateInput | null,
+    sessionChange: ThreadFolderUpdateInput | null,
   ): Promise<ThreadFolderUpdateOutcome> => {
     const environmentIds = registry.get(supportedEnvironmentIdsAtom);
     if (environmentIds.length === 0) {
-      registry.set(sessionAtom, applySessionFolderUpdate(registry.get(sessionAtom), change));
+      if (sessionChange !== null) {
+        registry.set(
+          sessionAtom,
+          applySessionFolderUpdate(registry.get(sessionAtom), sessionChange),
+        );
+      }
       return { failure: null, unmovedThreads: 0, serverBacked: false };
     }
     const now = DateTime.formatIso(DateTime.nowUnsafe());
     const current = registry.get(settingsByEnvironmentAtom);
     const pending = new Map(registry.get(pendingAtom));
-    for (const environmentId of environmentIds) {
+    const changes = environmentIds.flatMap((environmentId) => {
+      const change = changeFor(environmentId, current.get(environmentId));
+      return change === null ? [] : [{ environmentId, change }];
+    });
+    for (const { environmentId, change } of changes) {
       const settings = current.get(environmentId);
       if (settings === undefined) continue;
       pending.set(environmentId, {
@@ -171,7 +203,7 @@ export function createThreadFolderSettingsAtoms<R, E>(
     }
     registry.set(pendingAtom, pending);
     const results = await Promise.all(
-      environmentIds.map(async (environmentId) => ({
+      changes.map(async ({ environmentId, change }) => ({
         environmentId,
         result: await runAtomCommand(
           registry,
@@ -202,6 +234,26 @@ export function createThreadFolderSettingsAtoms<R, E>(
     return { failure, unmovedThreads, serverBacked: true };
   };
 
+  /** Sends `change` to every server that keeps folders; with none, changes this session's list. */
+  const apply = (registry: AtomRegistry.AtomRegistry, change: ThreadFolderUpdateInput) =>
+    applyEach(registry, () => change, change);
+
+  /** New threads start in `project` (null: each entry point picks); other servers stop naming one. */
+  const setNewThreadProject = (
+    registry: AtomRegistry.AtomRegistry,
+    project: NewThreadProjectRef | null,
+  ) =>
+    applyEach(
+      registry,
+      (environmentId, settings) =>
+        project !== null && environmentId === project.environmentId
+          ? { _tag: "setNewThreadProject", projectId: project.projectId }
+          : settings?.newThreadProjectId == null
+            ? null
+            : { _tag: "setNewThreadProject", projectId: null },
+      null,
+    );
+
   return {
     live,
     update,
@@ -209,8 +261,10 @@ export function createThreadFolderSettingsAtoms<R, E>(
     settingsByEnvironmentAtom,
     threadFolderNamesAtom,
     viewAtom,
+    newThreadProjectAtom,
     loadedAtom,
     apply,
+    setNewThreadProject,
   } as const;
 }
 
@@ -224,10 +278,16 @@ function applySessionFolderUpdate(
       folders: state.folders.map((name) => ({ name, collapsed: state.collapsed.includes(name) })),
       defaultFolder: null,
       unfiledCollapsed: state.unfiledCollapsed,
+      newThreadProjectId: null,
+      autoFile: false,
       updatedAt: null,
     },
-    // No server means no default folder; leave the list alone.
-    change._tag === "setDefault" ? { _tag: "create", names: [] } : change,
+    // No server means no default folder, new-thread project or auto-filing; leave the list alone.
+    change._tag === "setDefault" ||
+      change._tag === "setNewThreadProject" ||
+      change._tag === "setAutoFile"
+      ? { _tag: "create", names: [] }
+      : change,
     "",
   );
   return {
