@@ -12,6 +12,7 @@ import {
   type OrchestrationV2ThreadShell,
   type ThreadId,
 } from "@t3tools/contracts";
+import { monitorHoldsWakeCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import type { ClientSettings } from "@t3tools/contracts/settings";
 import * as Option from "effect/Option";
 import type { AtomRegistry } from "effect/reactivity";
@@ -35,6 +36,7 @@ import {
   threadNotificationTag,
   unlockNotificationAudio,
 } from "../threadNotifications";
+import { resolveBackgroundThreadRequest } from "./backgroundThreadAnnouncement";
 import { resolveSidebarThreadStatus, type SidebarThreadStatus } from "./Sidebar.logic";
 import {
   createThreadNotificationGate,
@@ -259,24 +261,30 @@ export function startThreadNotifications(
       const thread = presentThreadShell(environmentId, rawThread, subagentRequest);
       let status = resolveSidebarThreadStatus(thread);
       if (status === "ready" && thread.latestRun?.status === "failed") status = "failed";
-      const attention =
+      const needsAttention =
         status === "input" ||
         status === "request" ||
         status === "approval" ||
         status === "failed" ||
-        status === "limited"
-          ? `${thread.latestRun?.runId ?? ""}:${status}`
-          : null;
-      const completedAt = Date.parse(thread.latestRun?.completedAt ?? "");
-      const settled = status === "ready" && thread.latestRun?.status === "completed";
+        status === "limited";
+      const requestId = needsAttention ? resolveBackgroundThreadRequest(thread).requestId : null;
+      const attention = needsAttention
+        ? `${thread.latestRun?.runId ?? ""}:${status}:${requestId ?? ""}`
+        : null;
+      const completed = status === "ready" && thread.latestRun?.status === "completed";
+      const settled = completed && !monitorHoldsWakeCompletion(rawThread);
+      const parsedCompletedAt = Date.parse(thread.latestRun?.completedAt ?? "");
+      const completedAt = Number.isFinite(parsedCompletedAt) ? parsedCompletedAt : null;
       const state = {
         raw: rawThread,
         subagentRequest,
         thread,
         status,
         attention,
+        requestId,
         settled,
-        completedAt: settled && Number.isFinite(completedAt) ? completedAt : null,
+        completedAt: settled ? completedAt : null,
+        backgroundWake: rawThread.latestRunBackgroundWake === true,
       };
       next.set(thread.id, state);
       changed.push([prior, state]);
@@ -315,6 +323,7 @@ export function startThreadNotifications(
           return;
         }
         entry.reconnecting = true;
+        entry.gate.pause();
       },
       { immediate: true },
     );

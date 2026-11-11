@@ -11311,8 +11311,22 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               executedModel: undefined,
             };
             const attachTurn = Effect.gen(function* () {
-              querySession.lastTurn = context;
+              // Set before claiming: a query that exits after the claim finalizes this turn; one that exits before it fails the start.
               yield* Ref.set(activeTurn, context);
+              const attached = yield* Ref.modify(queryContext, (current) => {
+                if (current?.query !== querySession.query || querySession.stopping) {
+                  return [false, current];
+                }
+                querySession.lastTurn = context;
+                return [true, current];
+              });
+              if (!attached) {
+                yield* Ref.update(activeTurn, (current) => (current === context ? null : current));
+                return yield* new ProviderAdapter.ProviderAdapterProtocolError({
+                  driver: CLAUDE_PROVIDER,
+                  detail: "Claude provider query ended before the turn could start.",
+                });
+              }
               if (
                 !isClaudeProviderContinuationTurn(turnInput) &&
                 permissionModeForClaudeRuntimePolicy(turnInput.runtimePolicy) ===
@@ -11389,15 +11403,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             // Transcript reads suspend replay; hold SDK frames until the buffer is applied to preserve order.
             yield* sdkMessageLock.withPermits(1)(
               Effect.gen(function* () {
-                if (
-                  (yield* Ref.get(queryContext))?.query !== querySession.query ||
-                  querySession.stopping
-                ) {
-                  return yield* new ProviderAdapter.ProviderAdapterProtocolError({
-                    driver: CLAUDE_PROVIDER,
-                    detail: "Claude provider query ended before the continuation could start.",
-                  });
-                }
                 yield* attachTurn;
                 const drained = (yield* Ref.get(wakeBuffers)).get(nativeThreadId)?.messages ?? [];
                 yield* Ref.update(requestedContinuations, (current) => {
@@ -12337,10 +12342,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               const sourceNativeThreadId = yield* getNativeThreadId(forkInput.sourceProviderThread);
               yield* closeLiveQueryForNativeThread(sourceNativeThreadId);
               const upToMessageId = yield* resolveClaudeForkUpToMessageId(forkInput);
-              const forkOptions: ForkSessionOptions = {
-                ...(input.runtimePolicy.cwd === null ? {} : { dir: input.runtimePolicy.cwd }),
-                ...(upToMessageId === undefined ? {} : { upToMessageId }),
-              };
+              // A moved project still has its transcript under the original cwd.
+              // Let the SDK find the session by ID within this Claude home.
+              const forkOptions: ForkSessionOptions =
+                upToMessageId === undefined ? {} : { upToMessageId };
               const forked = yield* queryRunner.forkSession({
                 sessionId: sourceNativeThreadId,
                 options: forkOptions,
