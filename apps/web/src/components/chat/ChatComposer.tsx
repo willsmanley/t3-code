@@ -1840,6 +1840,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ownerKey: questionAttachmentTarget ?? composerDraftTargetKey,
     draftText: prompt,
     disabled: dictationDisabled,
+    // Fork: the composer already has its own mic (ComposerVoiceInputControl, F16). Upstream's
+    // environment dictation shows only after it is chosen in Voice settings, like every other
+    // editor; otherwise a second mic appears whose first click opens Voice settings.
+    offerSetup: false,
     readDraft: () => {
       const snapshot = readComposerSnapshot();
       return {

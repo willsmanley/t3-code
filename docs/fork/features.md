@@ -588,7 +588,9 @@ Upstream added its own web and desktop voice input on November 6, 2026 (`b8dce83
 `a9a1b8c4be`): a local speech model on a chosen environment, off until **Settings → Voice → Send
 microphone audio to** names one, with its own button (`ComposerSpeechButton`, `useEnvironmentSpeechInput`,
 **Composer: Dictation** `mod+shift+d`). The fork's ElevenLabs mic stays and both can show at once
-when a device opts in. ChatComposer combines them (`voiceInputBusy || speechInput.freezesEditor`,
+when a device opts in. Until then the composer passes `offerSetup: false` (November 11, 2026), so
+upstream's button stays hidden instead of showing a second mic whose first click opens Voice
+settings, the same as upstream's other editors. ChatComposer combines them (`voiceInputBusy || speechInput.freezesEditor`,
 and the send-disabled reason). `apps/web/src/speech/useEnvironmentSpeechInput.ts` wraps
 `controller.stop()` so upstream's `stop` still resolves `void` (the fork's resolves whether the
 transcript landed, F16). `Space` in `EVENT_CODE_SHORTCUT_KEYS` now lives in
@@ -650,6 +652,7 @@ Verify:
 
 - `vp test run packages/client-runtime/src/voice-input apps/server/src/voiceInput`
 - `grep -c "voiceInputBusy" apps/web/src/components/chat/ChatComposer.tsx` (four),
+  `grep -c "offerSetup: false" apps/web/src/components/chat/ChatComposer.tsx` (one),
   `grep -c "<ComposerVoiceInputControl" apps/web/src/components/chat/ChatComposer.tsx` (one) and
   `grep -c "<VoiceRecordingsSettingsSection" apps/web/src/components/settings/SettingsPanels.tsx` (one).
 - `grep -n "composer.voiceInput" packages/contracts/src/keybindings.ts packages/shared/src/keybindings.ts apps/web/src/components/chat/ComposerVoiceInputControl.tsx`
