@@ -3198,6 +3198,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       snoozedAt: null,
       lastVisitedAt: null,
       deletedAt: null,
+      ...(command.tags === undefined || command.tags.length === 0
+        ? {}
+        : { tags: [...new Set(command.tags)] }),
     };
 
     yield* emitEvent({

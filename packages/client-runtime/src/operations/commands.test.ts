@@ -268,6 +268,7 @@ describe("V2 environment commands", () => {
             branch: "feature",
             worktreePath: "/workspace/project-worktrees/feature",
             createdAt: "2026-06-20T00:00:00.000Z",
+            folder: "School",
           },
         },
       }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
@@ -276,6 +277,7 @@ describe("V2 environment commands", () => {
         threadId: v2ThreadId,
         title: "Continue here",
         generateTitle: true,
+        folder: "School",
         workspaceStrategy: {
           type: "existing_worktree",
           worktreePath: "/workspace/project-worktrees/feature",

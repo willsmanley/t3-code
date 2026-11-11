@@ -20,6 +20,7 @@ import {
   promptNewFolder,
   promptRenameFolder,
   rememberDraftFolder,
+  setDefaultFolder,
 } from "./threadFolderActions";
 import type {
   ThreadFolderTreeListItem,
@@ -31,8 +32,8 @@ import { useThreadFolderTreeState } from "./use-thread-folders";
 const NO_KEYS: ReadonlySet<string> = new Set();
 
 /**
- * `tab` is Android's bottom tab (F18). Workers lists only folders that hold a worker, closes
- * folders for the session only, and has no new-thread buttons or folder-per-project offer.
+ * `tab` is Android's bottom tab (F18). Workers lists only folders that hold a worker and has no
+ * new-thread buttons or folder-per-project offer; collapsing a folder there collapses it everywhere.
  */
 export function useThreadFolderTree(input: {
   readonly tab: "projects" | "workers";
@@ -46,7 +47,7 @@ export function useThreadFolderTree(input: {
   readonly pane: "screen" | "sidebar";
   readonly onNewThreadInProject: (project: EnvironmentProject, requestId?: string) => void;
 }) {
-  const state = useThreadFolderTreeState(input.tab);
+  const state = useThreadFolderTreeState();
   const projectsTab = input.tab === "projects";
   const { projects, projectGroupingMode } = input;
   const projectScopes = () =>
@@ -74,7 +75,7 @@ export function useThreadFolderTree(input: {
     const project = latest ?? pickableProjectGroups(projectScopes())[0]?.representative;
     if (project === undefined) return;
     const requestId = uuidv4();
-    if (item.folder !== null) rememberDraftFolder(requestId, item.folder);
+    rememberDraftFolder(requestId, item.folder);
     input.onNewThreadInProject(project, requestId);
   };
 
@@ -88,6 +89,7 @@ export function useThreadFolderTree(input: {
     if (action === "folder-per-project") confirmFolderPerProject(projectScopes());
     if (folder === null) return;
     if (action === "rename") promptRenameFolder(folder);
+    if (action === "default") setDefaultFolder(state.defaultFolder === folder ? null : folder);
     if (action === "delete") confirmDeleteFolder(folder);
     if (action === "move-up" && item.previousFolder !== null) {
       state.moveFolder(folder, { target: item.previousFolder, placement: "before" });
@@ -110,6 +112,8 @@ export function useThreadFolderTree(input: {
             canMoveDown={item.nextFolder !== null}
             canArrange={item.canArrange}
             offerFolderPerProject={item.offerFolderPerProject}
+            isDefault={item.folder !== null && item.folder === state.defaultFolder}
+            canSetDefault={state.serverBacked}
             disabled={item.disabled}
             pane={input.pane}
             onToggle={() => state.toggleFolderCollapsed(item.folder)}

@@ -1,6 +1,7 @@
 // Fork (F20): folder state and actions for the legacy sidebar. Membership is the thread tag
-// `folder:<name>`, set through the existing `thread.tag.set` command; the order, empty folders,
-// collapse state and folders wanted for unsent drafts stay on this device.
+// `folder:<name>`, set through the existing `thread.tag.set` command. The folder list, collapse
+// state and default folder live on each server (`threadFolders.*`); only folders picked for
+// unsent drafts stay on this device.
 import { useAtomValue } from "@effect/atom-react";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { arrayElementsEqual } from "@t3tools/client-runtime/state/entities";
@@ -10,58 +11,114 @@ import {
   runAtomCommand,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { AuthOrchestrationOperateScope, type ScopedThreadRef } from "@t3tools/contracts";
+import { createThreadFolderSettingsAtoms } from "@t3tools/client-runtime/state/thread-folder-settings";
+import {
+  type DeviceFolderState,
+  folderOfTags,
+  planFolderTagChange,
+  type ThreadFolderView,
+} from "@t3tools/client-runtime/thread-folders";
+import {
+  AuthOrchestrationOperateScope,
+  type EnvironmentId,
+  type ScopedThreadRef,
+  type ThreadFolderUpdateInput,
+} from "@t3tools/contracts";
+import * as Option from "effect/Option";
 import { Atom } from "effect/reactivity";
+import * as Schema from "effect/Schema";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
+import { connectionAtomRuntime } from "../connection/runtime";
 import { resolveStorage } from "../lib/storage";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { readThreadShell, readThreadShells } from "../state/entities";
+import { environmentServerConfigsAtom } from "../state/server";
 import { readEnvironmentScope } from "../state/session";
 import { environmentThreadShells, threadEnvironment } from "../state/threads";
 import { ORCHESTRATION_OPERATE_DENIED_MESSAGE } from "../state/use-orchestration-command";
-import {
-  folderOfTags,
-  orderFolders,
-  planFolderTagChange,
-  renameFolderInList,
-} from "@t3tools/client-runtime/thread-folders";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 
+export const threadFolderSettings = createThreadFolderSettingsAtoms(connectionAtomRuntime, {
+  serverConfigsAtom: environmentServerConfigsAtom,
+  threadShellsAtom: environmentThreadShells.threadShellsAtom,
+});
+
 interface PendingDraftFolder {
-  readonly folder: string;
+  /** null: the user started it in Unfiled, so the default folder doesn't apply. */
+  readonly folder: string | null;
   readonly threadKey: string;
   readonly requestedAt: number;
 }
 
-interface LegacyFolderState {
-  readonly folders: readonly string[];
-  readonly collapsedFolders: readonly string[];
-  readonly unfiledCollapsed: boolean;
-  /** Folders picked for drafts by draft id; the tag is set once the thread exists. */
+interface DraftFolderState {
+  /** Folders picked for drafts by draft id; sent with the draft's first message. */
   readonly pendingDraftFolders: Readonly<Record<string, PendingDraftFolder>>;
 }
-
-const INITIAL_STATE: LegacyFolderState = {
-  folders: [],
-  collapsedFolders: [],
-  unfiledCollapsed: false,
-  pendingDraftFolders: {},
-};
 
 // A draft never sent keeps its entry this long; its thread id is unique, so a stale one is inert.
 const PENDING_DRAFT_FOLDER_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const TAG_WRITE_CONCURRENCY = 6;
+/** The per-device folder list from before servers kept folders; read once to migrate. */
+const LEGACY_FOLDER_STORAGE_KEY = "t3code:legacy-sidebar-folders:v1";
 
-export const useLegacyFolderStore = create<LegacyFolderState>()(
-  persist(() => INITIAL_STATE, {
-    name: "t3code:legacy-sidebar-folders:v1",
-    version: 1,
-    storage: createJSONStorage(() =>
-      resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined),
-    ),
-  }),
+const browserStorage = () =>
+  resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined);
+
+const decodeLegacyFolderState = Schema.decodeUnknownOption(
+  Schema.fromJsonString(
+    Schema.Struct({
+      state: Schema.Struct({
+        folders: Schema.optional(Schema.Array(Schema.String)),
+        collapsedFolders: Schema.optional(Schema.Array(Schema.String)),
+        unfiledCollapsed: Schema.optional(Schema.Boolean),
+        pendingDraftFolders: Schema.optional(
+          Schema.Record(
+            Schema.String,
+            Schema.Struct({
+              folder: Schema.String,
+              threadKey: Schema.String,
+              requestedAt: Schema.Number,
+            }),
+          ),
+        ),
+      }),
+    }),
+  ),
+);
+
+function readLegacyFolderState() {
+  const raw = browserStorage().getItem(LEGACY_FOLDER_STORAGE_KEY);
+  return typeof raw === "string" ? Option.getOrNull(decodeLegacyFolderState(raw)) : null;
+}
+
+/** This device's saved folder list, if it still has one to hand to the servers. */
+export function readLegacyDeviceFolders(): DeviceFolderState | null {
+  const legacy = readLegacyFolderState();
+  if (legacy === null) return null;
+  return {
+    folders: legacy.state.folders ?? [],
+    collapsed: legacy.state.collapsedFolders ?? [],
+    unfiledCollapsed: legacy.state.unfiledCollapsed ?? false,
+  };
+}
+
+export function forgetLegacyDeviceFolders(): void {
+  browserStorage().removeItem(LEGACY_FOLDER_STORAGE_KEY);
+}
+
+export const useDraftFolderStore = create<DraftFolderState>()(
+  persist(
+    (): DraftFolderState => ({
+      pendingDraftFolders: readLegacyFolderState()?.state.pendingDraftFolders ?? {},
+    }),
+    {
+      name: "t3code:legacy-sidebar-draft-folders:v1",
+      version: 1,
+      storage: createJSONStorage(browserStorage),
+    },
+  ),
 );
 
 export function folderOfThread(thread: Pick<EnvironmentThreadShell, "source">): string | null {
@@ -83,24 +140,6 @@ const folderThreadShellsAtom = Atom.family((folderKey: string) => {
   }).pipe(Atom.withLabel(`legacy-sidebar-folder-threads:${folderKey}`));
 });
 
-function folderNamesOf(threads: ReadonlyArray<EnvironmentThreadShell>): string[] {
-  const names = new Set<string>();
-  for (const thread of threads) {
-    if (thread.archivedAt !== null) continue;
-    const folder = folderOfThread(thread);
-    if (folder !== null) names.add(folder);
-  }
-  return [...names].toSorted();
-}
-
-let previousThreadFolderNames: readonly string[] = [];
-const threadFolderNamesAtom = Atom.make((get) => {
-  const next = folderNamesOf(get(environmentThreadShells.threadShellsAtom));
-  if (arrayElementsEqual(previousThreadFolderNames, next)) return previousThreadFolderNames;
-  previousThreadFolderNames = next;
-  return next;
-}).pipe(Atom.withLabel("legacy-sidebar-thread-folder-names"));
-
 /** Threads tagged with `folder` (null: threads in no folder), archived ones included. */
 export function useFolderThreadShells(
   folder: string | null,
@@ -108,43 +147,81 @@ export function useFolderThreadShells(
   return useAtomValue(folderThreadShellsAtom(folder ?? UNFILED_ATOM_KEY));
 }
 
-/** Every folder in the user's order, with folders known only from thread tags after them. */
-export function useFolderOrder(): string[] {
-  const stored = useLegacyFolderStore((state) => state.folders);
-  return orderFolders(stored, useAtomValue(threadFolderNamesAtom));
+export function useFolderView(): ThreadFolderView {
+  return useAtomValue(threadFolderSettings.viewAtom);
 }
 
-export function readFolderOrder(): string[] {
-  return orderFolders(useLegacyFolderStore.getState().folders, folderNamesOf(readThreadShells()));
+/** False until every server that keeps folders has sent them. */
+export function useFolderSettingsLoaded(): boolean {
+  return useAtomValue(threadFolderSettings.loadedAtom);
+}
+
+function readFolderView(): ThreadFolderView {
+  return appAtomRegistry.get(threadFolderSettings.viewAtom);
+}
+
+/** Every folder in the servers' order, with folders known only from thread tags after them. */
+export function useFolderOrder(): readonly string[] {
+  return useFolderView().folders;
+}
+
+export function readFolderOrder(): readonly string[] {
+  return readFolderView().folders;
 }
 
 export function useFolderExpanded(folder: string | null): boolean {
-  return useLegacyFolderStore((state) =>
-    folder === null ? !state.unfiledCollapsed : !state.collapsedFolders.includes(folder),
+  const view = useFolderView();
+  return folder === null ? !view.unfiledCollapsed : !view.collapsed.has(folder);
+}
+
+function reportFolderFailure(title: string, failure: unknown) {
+  toastManager.add(
+    stackedThreadToast({
+      type: "error",
+      title,
+      description: failure instanceof Error ? failure.message : "An error occurred.",
+    }),
   );
 }
 
+async function updateFolders(
+  change: ThreadFolderUpdateInput,
+  failureTitle: string,
+): Promise<{ readonly ok: boolean; readonly serverBacked: boolean }> {
+  const outcome = await threadFolderSettings.apply(appAtomRegistry, change);
+  if (outcome.failure !== null) reportFolderFailure(failureTitle, outcome.failure);
+  else if (outcome.unmovedThreads > 0) {
+    reportFolderFailure(
+      failureTitle,
+      new Error(
+        `${outcome.unmovedThreads} thread${outcome.unmovedThreads === 1 ? "" : "s"} kept the old folder. Try again.`,
+      ),
+    );
+  }
+  return { ok: outcome.failure === null, serverBacked: outcome.serverBacked };
+}
+
 export function setFolderExpanded(folder: string | null, expanded: boolean): void {
-  useLegacyFolderStore.setState((state) =>
-    folder === null
-      ? { unfiledCollapsed: !expanded }
-      : {
-          collapsedFolders: expanded
-            ? state.collapsedFolders.filter((name) => name !== folder)
-            : [...new Set([...state.collapsedFolders, folder])],
-        },
+  void updateFolders(
+    { _tag: "setCollapsed", name: folder, collapsed: !expanded },
+    "Could not save the folder",
   );
 }
 
 export function addFolders(names: readonly string[]): void {
-  useLegacyFolderStore.setState((state) => {
-    const missing = names.filter((name) => !state.folders.includes(name));
-    return missing.length === 0 ? state : { folders: [...state.folders, ...new Set(missing)] };
-  });
+  const listed = new Set(readFolderOrder());
+  const missing = [...new Set(names)].filter((name) => !listed.has(name));
+  if (missing.length === 0) return;
+  void updateFolders({ _tag: "create", names: missing }, "Could not make the folder");
 }
 
 export function setFolderOrder(order: readonly string[]): void {
-  useLegacyFolderStore.setState({ folders: [...order] });
+  void updateFolders({ _tag: "reorder", order }, "Could not save the folder order");
+}
+
+/** New threads started without a folder land in `folder` (null: in no folder). */
+export function setDefaultFolder(folder: string | null): void {
+  void updateFolders({ _tag: "setDefault", name: folder }, "Could not change the default folder");
 }
 
 export function threadsInFolder(folder: string): EnvironmentThreadShell[] {
@@ -223,57 +300,62 @@ export async function fileThreads(
     }
   });
   if (failures.length === 0) return true;
-  const first = failures[0];
-  toastManager.add(
-    stackedThreadToast({
-      type: "error",
-      title:
-        assignments.length === 1
-          ? "Could not move thread"
-          : `Could not move ${failures.length} of ${assignments.length} threads`,
-      description: first instanceof Error ? first.message : "An error occurred.",
-    }),
+  reportFolderFailure(
+    assignments.length === 1
+      ? "Could not move thread"
+      : `Could not move ${failures.length} of ${assignments.length} threads`,
+    failures[0],
   );
   return false;
 }
 
-/** Renames a folder on this device and retags its threads; a taken name merges the two. */
-export async function renameFolder(from: string, to: string): Promise<void> {
-  if (from === to) return;
-  const threads = threadsInFolder(from);
-  const order = readFolderOrder();
-  useLegacyFolderStore.setState((state) => ({
-    folders: renameFolderInList(order, from, to),
-    collapsedFolders: state.collapsedFolders.includes(from)
-      ? renameFolderInList(state.collapsedFolders, from, to)
-      : state.collapsedFolders.filter((name) => name !== from),
+/** Loaded threads on servers that can't retag folders themselves (older servers, or none). */
+function threadsServersWontRetag(folder: string): EnvironmentThreadShell[] {
+  const retagging = new Set<EnvironmentId>(
+    appAtomRegistry.get(threadFolderSettings.supportedEnvironmentIdsAtom),
+  );
+  return threadsInFolder(folder).filter((thread) => !retagging.has(thread.environmentId));
+}
+
+function renameDraftFolders(from: string, to: string | null) {
+  useDraftFolderStore.setState((state) => ({
     pendingDraftFolders: Object.fromEntries(
-      Object.entries(state.pendingDraftFolders).map(([draftId, pending]) => [
-        draftId,
-        pending.folder === from ? { ...pending, folder: to } : pending,
-      ]),
+      Object.entries(state.pendingDraftFolders).flatMap(([draftId, pending]) =>
+        pending.folder !== from
+          ? [[draftId, pending]]
+          : to === null
+            ? []
+            : [[draftId, { ...pending, folder: to }]],
+      ),
     ),
   }));
-  await moveThreadsToFolder(threads, to);
+}
+
+/** Renames a folder everywhere; servers retag every thread in it, archived ones too. */
+export async function renameFolder(from: string, to: string): Promise<void> {
+  if (from === to) return;
+  const leftover = threadsServersWontRetag(from);
+  renameDraftFolders(from, to);
+  await updateFolders({ _tag: "rename", from, to }, "Could not rename the folder");
+  if (leftover.length > 0) await moveThreadsToFolder(leftover, to);
 }
 
 /** Deletes a folder; its threads go to Unfiled. */
 export async function deleteFolder(folder: string): Promise<void> {
-  const threads = threadsInFolder(folder);
-  useLegacyFolderStore.setState((state) => ({
-    folders: state.folders.filter((name) => name !== folder),
-    collapsedFolders: state.collapsedFolders.filter((name) => name !== folder),
-    pendingDraftFolders: Object.fromEntries(
-      Object.entries(state.pendingDraftFolders).filter(([, pending]) => pending.folder !== folder),
-    ),
-  }));
-  await moveThreadsToFolder(threads, null);
+  const leftover = threadsServersWontRetag(folder);
+  renameDraftFolders(folder, null);
+  await updateFolders({ _tag: "delete", name: folder }, "Could not delete the folder");
+  if (leftover.length > 0) await moveThreadsToFolder(leftover, null);
 }
 
-/** Files the thread a draft becomes in `folder` once it exists (drafts become threads on send). */
-export function rememberDraftFolder(draftId: string, threadRef: ScopedThreadRef, folder: string) {
+/** The draft's thread starts in `folder` (null: in no folder) when its first message is sent. */
+export function rememberDraftFolder(
+  draftId: string,
+  threadRef: ScopedThreadRef,
+  folder: string | null,
+) {
   const now = Date.now();
-  useLegacyFolderStore.setState((state) => ({
+  useDraftFolderStore.setState((state) => ({
     pendingDraftFolders: {
       ...Object.fromEntries(
         Object.entries(state.pendingDraftFolders).filter(
@@ -285,7 +367,14 @@ export function rememberDraftFolder(draftId: string, threadRef: ScopedThreadRef,
   }));
 }
 
-export function hasPendingDraftFolders(state: LegacyFolderState): boolean {
+/** The folder picked for a draft, for the thread launch; nothing lets the server use its default. */
+export function draftLaunchFolder(draftId: string | null): { readonly folder?: string | null } {
+  const pending =
+    draftId === null ? undefined : useDraftFolderStore.getState().pendingDraftFolders[draftId];
+  return pending === undefined ? {} : { folder: pending.folder };
+}
+
+export function hasPendingDraftFolders(state: DraftFolderState): boolean {
   return Object.keys(state.pendingDraftFolders).length > 0;
 }
 
@@ -296,16 +385,16 @@ export function hasPendingDraftFolders(state: LegacyFolderState): boolean {
 export function takeArrivedDraftFolders(
   threadKeysOf: (draftId: string, savedThreadKey: string) => readonly string[],
   threadExists: (threadKey: string) => boolean,
-): Array<{ readonly threadKey: string; readonly folder: string }> {
-  const arrived: Array<{ readonly threadKey: string; readonly folder: string }> = [];
+): Array<{ readonly threadKey: string; readonly folder: string | null }> {
+  const arrived: Array<{ readonly threadKey: string; readonly folder: string | null }> = [];
   const remaining: Record<string, PendingDraftFolder> = {};
   for (const [draftId, pending] of Object.entries(
-    useLegacyFolderStore.getState().pendingDraftFolders,
+    useDraftFolderStore.getState().pendingDraftFolders,
   )) {
     const threadKey = threadKeysOf(draftId, pending.threadKey).find(threadExists);
     if (threadKey === undefined) remaining[draftId] = pending;
     else arrived.push({ threadKey, folder: pending.folder });
   }
-  if (arrived.length > 0) useLegacyFolderStore.setState({ pendingDraftFolders: remaining });
+  if (arrived.length > 0) useDraftFolderStore.setState({ pendingDraftFolders: remaining });
   return arrived;
 }

@@ -235,6 +235,10 @@
       "types": "./src/state/device.ts",
       "default": "./src/state/device.ts"
     },
+    "./state/thread-folder-settings": {
+      "types": "./src/state/threadFolderSettings.ts",
+      "default": "./src/state/threadFolderSettings.ts"
+    },
     "./state/deviceHubAccess": {
       "types": "./src/state/deviceHubAccess.ts",
       "default": "./src/state/deviceHubAccess.ts"

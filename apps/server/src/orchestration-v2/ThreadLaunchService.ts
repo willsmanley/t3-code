@@ -103,6 +103,8 @@ export interface ThreadLaunchInput {
   readonly linkOrigin?: OrchestrationV2LinkOrigin;
   /** The parent there, when that environment's agent delegated this as a task. */
   readonly delegatedFrom?: OrchestrationV2DelegatedFrom;
+  /** Tags a new thread starts with; a reused thread keeps its own. Fork (F20): its folder. */
+  readonly tags?: ReadonlyArray<string>;
 }
 
 type PreparationInput = Pick<
@@ -949,6 +951,9 @@ const make = Effect.gen(function* () {
                 ...(input.delegatedFrom === undefined
                   ? {}
                   : { delegatedFrom: input.delegatedFrom }),
+                ...(input.tags === undefined || input.tags.length === 0
+                  ? {}
+                  : { tags: input.tags }),
                 createdBy: input.createdBy,
                 creationSource: input.creationSource,
               });

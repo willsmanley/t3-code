@@ -68,6 +68,7 @@ export function ThreadStatusIcon(props: { readonly kind: ThreadStatusDotKind }) 
 
 const FOLDER_HEADER_ACTIONS = [
   "rename",
+  "default",
   "delete",
   "new-folder",
   "arrange",
@@ -113,6 +114,10 @@ export const ThreadFolderHeader = memo(function ThreadFolderHeader(props: {
   readonly canMoveDown: boolean;
   readonly canArrange: boolean;
   readonly offerFolderPerProject: boolean;
+  /** New threads started without a folder land here. */
+  readonly isDefault?: boolean;
+  /** The servers keep a default folder, so the menu can choose one. */
+  readonly canSetDefault?: boolean;
   readonly disabled?: boolean;
   readonly pane?: "screen" | "sidebar";
   readonly onToggle: () => void;
@@ -126,6 +131,15 @@ export const ThreadFolderHeader = memo(function ThreadFolderHeader(props: {
   const title = props.folder ?? "Unfiled";
   const menuActions: MenuAction[] = [
     ...(unfiled ? [] : [{ id: "rename", title: "Rename…", image: "pencil" } satisfies MenuAction]),
+    ...(unfiled || props.canSetDefault !== true
+      ? []
+      : [
+          {
+            id: "default",
+            title: props.isDefault ? "Stop sending new threads here" : "New threads go here",
+            image: "tray.and.arrow.down",
+          } satisfies MenuAction,
+        ]),
     { id: "new-folder", title: "New folder…", image: "folder.badge.plus" },
     ...(props.offerFolderPerProject
       ? [
@@ -222,6 +236,14 @@ export const ThreadFolderHeader = memo(function ThreadFolderHeader(props: {
             >
               {title}
             </Text>
+            {props.isDefault ? (
+              <Text
+                accessibilityLabel="New threads go here"
+                className="text-[11px] text-foreground-muted"
+              >
+                default
+              </Text>
+            ) : null}
             {props.collapsed && props.status !== null ? (
               <ThreadStatusIcon kind={props.status} />
             ) : null}

@@ -2524,6 +2524,8 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         interactionMode: "default" as const,
         branch: null,
         worktreePath: null,
+        // Fork (F20): the server files a new thread in its folder at creation.
+        tags: ["folder:Inbox", "folder:Inbox"],
       };
 
       const firstCreate = yield* orchestrator.dispatch(create);
@@ -2647,12 +2649,13 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         shell.threads.find((thread) => thread.id === threadId)!;
       const untaggedShell = shellOf(yield* orchestrator.getShellSnapshot());
       yield* TestClock.adjust("1 minute");
+      assert.deepEqual(untaggedShell.tags, ["folder:Inbox"]);
       for (const [step, tag, tagged, expected] of [
-        ["add", "demo", true, ["demo"]],
-        ["retry", "demo", true, ["demo"]],
-        ["add-other", "private", true, ["demo", "private"]],
-        ["remove", "demo", false, ["private"]],
-        ["remove-last", "private", false, []],
+        ["add", "demo", true, ["folder:Inbox", "demo"]],
+        ["retry", "demo", true, ["folder:Inbox", "demo"]],
+        ["add-other", "private", true, ["folder:Inbox", "demo", "private"]],
+        ["remove", "demo", false, ["folder:Inbox", "private"]],
+        ["remove-last", "private", false, ["folder:Inbox"]],
       ] as const) {
         yield* orchestrator.dispatch({
           type: "thread.tag.set",

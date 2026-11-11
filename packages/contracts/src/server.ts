@@ -635,6 +635,8 @@ export const ServerConfig = Schema.Struct({
    * `getOlderSettledThreads` serves them. Only servers that also advertise `shellThreadFamilies`.
    */
   shellOlderSettled: Schema.optionalKey(Schema.Boolean),
+  /** Fork (F20): serves `threadFolders.*` and honors `folder` on `orchestration.launchThread`. */
+  threadFolders: Schema.optionalKey(Schema.Boolean),
   shellRevealInFileManager: Schema.optionalKey(Schema.Boolean),
   shellRevealInFileManagerKind: Schema.optionalKey(FileManagerRevealKind),
   threadResumeCompletionMarker: Schema.optionalKey(Schema.Boolean),

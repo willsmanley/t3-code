@@ -35,6 +35,8 @@ export interface ProjectThreadStartTurnSpec {
   readonly worktreePath: string | null;
   readonly startFromOrigin: boolean;
   readonly worktreeBranchName: string;
+  /** Fork (F20): the folder picked for the draft, null for none; absent takes the server's default. */
+  readonly folder?: string | null;
 }
 
 export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpec) {
@@ -68,6 +70,7 @@ export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpe
         branch: spec.branch,
         worktreePath: isWorktree ? null : spec.worktreePath,
         createdAt: spec.createdAt,
+        ...(spec.folder === undefined ? {} : { folder: spec.folder }),
       },
       ...(isWorktree
         ? {

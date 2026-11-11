@@ -6,15 +6,21 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
-import { folderNameProblem, planFolderPerProject } from "@t3tools/client-runtime/thread-folders";
+import { useAtomValue } from "@effect/atom-react";
+import {
+  deviceFolderMigrationStep,
+  folderNameProblem,
+  planFolderPerProject,
+} from "@t3tools/client-runtime/thread-folders";
 import { AuthOrchestrationOperateScope, type ContextMenuItem } from "@t3tools/contracts";
 import { CheckIcon, FolderIcon, FolderInputIcon, FolderPlusIcon, InboxIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { create } from "zustand";
 
 import { DraftId, useComposerDraftStore } from "../composerDraftStore";
 import { forceLegacySidebar, isElectron } from "../env";
 import { readLocalApi } from "../localApi";
+import { appAtomRegistry } from "../rpc/atomRegistry";
 import { readThreadShells, useThreadShells } from "../state/entities";
 import { readEnvironmentScope } from "../state/session";
 import type { SidebarProjectSnapshot } from "../sidebarProjectGrouping";
@@ -24,14 +30,19 @@ import {
   deleteFolder,
   fileThreads,
   folderOfThread,
+  forgetLegacyDeviceFolders,
   hasPendingDraftFolders,
   moveThreadsToFolder,
   readFolderOrder,
+  readLegacyDeviceFolders,
   renameFolder,
+  setDefaultFolder,
   takeArrivedDraftFolders,
+  threadFolderSettings,
   threadsInFolder,
+  useDraftFolderStore,
   useFolderOrder,
-  useLegacyFolderStore,
+  useFolderView,
 } from "./legacySidebarFolders.store";
 import { isSidebarHiddenThread } from "./Sidebar.logic";
 import { Button } from "./ui/button";
@@ -147,7 +158,7 @@ async function promptMoveThreadsToFolder(threads: readonly EnvironmentThreadShel
   await moveThreadsToFolder(threads, choice.folder);
 }
 
-export async function promptRenameFolder(folder: string) {
+async function promptRenameFolder(folder: string) {
   const name = await requestFolderName({
     title: "Rename folder",
     description: null,
@@ -164,7 +175,7 @@ export async function promptRenameFolder(folder: string) {
   await renameFolder(folder, name);
 }
 
-export async function confirmDeleteFolder(folder: string) {
+async function confirmDeleteFolder(folder: string) {
   const count = threadsInFolder(folder).length;
   if (count > 0) {
     const confirmed = await readLocalApi()?.dialogs.confirm(
@@ -207,6 +218,51 @@ export async function makeFolderPerProject(projects: readonly SidebarProjectSnap
   if (!confirmed) return;
   addFolders(plan.folders);
   await fileThreads(plan.assignments);
+}
+
+/** A folder header's menu: rename, where new threads go, delete. `handle` runs the clicked item. */
+export function legacyFolderHeaderMenu(folder: string) {
+  const view = appAtomRegistry.get(threadFolderSettings.viewAtom);
+  const isDefault = view.defaultFolder === folder;
+  const items: ContextMenuItem<string>[] = [
+    { id: "rename", label: "Rename" },
+    ...(view.serverBacked
+      ? [
+          {
+            id: "default",
+            label: isDefault ? "Stop sending new threads here" : "New threads go here",
+          },
+        ]
+      : []),
+    { id: "delete", label: "Delete folder", destructive: true, icon: "trash" },
+  ];
+  const handle = async (clicked: string | null) => {
+    if (clicked === "rename") await promptRenameFolder(folder);
+    if (clicked === "default") setDefaultFolder(isDefault ? null : folder);
+    if (clicked === "delete") await confirmDeleteFolder(folder);
+  };
+  return { items, handle };
+}
+
+/** A quiet mark beside the folder new threads land in. */
+export function DefaultFolderMark({ folder }: { folder: string }) {
+  const isDefault = useFolderView().defaultFolder === folder;
+  if (!isDefault) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            aria-label="New threads go here"
+            className="shrink-0 text-3xs text-sidebar-muted-foreground/70"
+          />
+        }
+      >
+        default
+      </TooltipTrigger>
+      <TooltipPopup side="top">New threads go here</TooltipPopup>
+    </Tooltip>
+  );
 }
 
 /** "Move to folder" and "Remove from folder" for a thread menu; `handle` says if it took the click. */
@@ -303,16 +359,51 @@ export function NewFolderButton() {
 /** Folder dialogs and filing of sent drafts; mounted beside the sidebar, so a closed one works. */
 export function LegacySidebarFoldersHost() {
   const request = useFolderDialog((state) => state.request);
-  const hasPending = useLegacyFolderStore(hasPendingDraftFolders);
+  const hasPending = useDraftFolderStore(hasPendingDraftFolders);
+  const [hasDeviceFolders, setHasDeviceFolders] = useState(
+    () => readLegacyDeviceFolders() !== null,
+  );
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Resolves an open folder request with null when the host unmounts.
   useEffect(() => () => cancelFolderDialog(), []);
   return (
     <>
+      {hasDeviceFolders ? <DeviceFolderMigration onDone={setHasDeviceFolders} /> : null}
       {hasPending ? <DraftFolderFiler /> : null}
       {request?.kind === "name" ? <FolderNameDialog key={request.id} request={request} /> : null}
       {request?.kind === "pick" ? <FolderPickDialog key={request.id} request={request} /> : null}
     </>
   );
+}
+
+/** Hands this device's saved folder list to the servers once, then forgets it. */
+function DeviceFolderMigration({ onDone }: { onDone: (pending: false) => void }) {
+  const environmentIds = useAtomValue(threadFolderSettings.supportedEnvironmentIdsAtom);
+  const settings = useAtomValue(threadFolderSettings.settingsByEnvironmentAtom);
+  const running = useRef(false);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Moves the device's localStorage folder list to the servers once they report their folder settings.
+  useEffect(() => {
+    const device = readLegacyDeviceFolders();
+    if (device === null) {
+      onDone(false);
+      return;
+    }
+    if (running.current) return;
+    const step = deviceFolderMigrationStep({ device, environmentIds, settings });
+    if (step.type === "wait") return;
+    if (step.type === "forget") {
+      forgetLegacyDeviceFolders();
+      onDone(false);
+      return;
+    }
+    running.current = true;
+    void threadFolderSettings.apply(appAtomRegistry, step.update).then((outcome) => {
+      running.current = false;
+      if (outcome.failure !== null) return;
+      forgetLegacyDeviceFolders();
+      onDone(false);
+    });
+  }, [environmentIds, settings, onDone]);
+  return null;
 }
 
 function DraftFolderFiler() {
@@ -344,9 +435,10 @@ function DraftFolderFiler() {
       },
       (threadKey) => byKey.has(threadKey),
     );
+    // Servers that take a launch folder already filed it; older ones need the tags set here.
     for (const { threadKey, folder } of arrived) {
       const thread = byKey.get(threadKey);
-      if (thread && folderOfThread(thread) === null) void moveThreadsToFolder([thread], folder);
+      if (thread && folderOfThread(thread) !== folder) void moveThreadsToFolder([thread], folder);
     }
   }, [threads]);
   return null;

@@ -1,16 +1,17 @@
+import { EnvironmentId, type ThreadFolderSettings } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   chooseFolderThreadProject,
+  deviceFolderMigrationStep,
   folderNameForProject,
   folderNameProblem,
-  folderOfTags,
   groupByFolder,
   moveFolder,
   orderFolders,
   planFolderPerProject,
-  planFolderTagChange,
   renameFolderInList,
+  resolveThreadFolderView,
 } from "./threadFolders.ts";
 
 describe("folderNameProblem", () => {
@@ -20,39 +21,6 @@ describe("folderNameProblem", () => {
     expect(folderNameProblem("   ")).toBe("Enter a folder name.");
     expect(folderNameProblem("x".repeat(57))).toBe("Folder names can be at most 56 characters.");
     expect(folderNameProblem("two\nlines")).toBe("A folder name must be a single line.");
-  });
-});
-
-describe("folderOfTags", () => {
-  it("reads the newest folder tag and ignores other tags and empty names", () => {
-    expect(folderOfTags(undefined)).toBeNull();
-    expect(folderOfTags(["worker", "folder:", "folderish"])).toBeNull();
-    expect(folderOfTags(["folder:Old", "worker", "folder:New"])).toBe("New");
-    expect(folderOfTags(["folder: Spaced "])).toBe("Spaced");
-  });
-});
-
-describe("planFolderTagChange", () => {
-  it("adds the new folder tag and removes every other folder tag", () => {
-    expect(planFolderTagChange(["worker", "folder:A", "folder: B"], "C")).toEqual({
-      add: "folder:C",
-      remove: ["folder:A", "folder: B"],
-    });
-  });
-
-  it("keeps a folder tag the thread already has and only clears the rest", () => {
-    expect(planFolderTagChange(["folder:A", "folder:B"], "A")).toEqual({
-      add: null,
-      remove: ["folder:B"],
-    });
-    expect(planFolderTagChange(["folder:A"], "A")).toEqual({ add: null, remove: [] });
-  });
-
-  it("removes every folder tag when moving to no folder", () => {
-    expect(planFolderTagChange(["folder:A", "worker"], null)).toEqual({
-      add: null,
-      remove: ["folder:A"],
-    });
   });
 });
 
@@ -141,5 +109,132 @@ describe("chooseFolderThreadProject", () => {
     expect(chooseFolderThreadProject({ folderThreads: [], current: null, first: "first" })).toBe(
       "first",
     );
+  });
+});
+
+const serverSettings = (
+  folders: ReadonlyArray<readonly [string, boolean]>,
+  extra: Partial<ThreadFolderSettings> = {},
+): ThreadFolderSettings => ({
+  folders: folders.map(([name, collapsed]) => ({ name, collapsed })),
+  defaultFolder: null,
+  unfiledCollapsed: false,
+  updatedAt: null,
+  ...extra,
+});
+
+describe("resolveThreadFolderView", () => {
+  const session = { folders: ["Mine"], collapsed: ["Mine"], unfiledCollapsed: true };
+
+  it("leads with the server changed most recently and adds the others' folders", () => {
+    const view = resolveThreadFolderView({
+      servers: [
+        serverSettings([["Seeded", true]]),
+        serverSettings(
+          [
+            ["Work", false],
+            ["Todo", true],
+          ],
+          {
+            updatedAt: "2026-11-10T00:00:00.000Z",
+            defaultFolder: "Work",
+          },
+        ),
+        serverSettings(
+          [
+            ["Todo", false],
+            ["School", true],
+          ],
+          {
+            updatedAt: "2026-11-11T00:00:00.000Z",
+            defaultFolder: "Todo",
+            unfiledCollapsed: true,
+          },
+        ),
+      ],
+      fromThreads: ["Zed", "Work", "Alpha"],
+      session,
+    });
+    expect(view).toEqual({
+      folders: ["Todo", "School", "Work", "Seeded", "Alpha", "Zed"],
+      collapsed: new Set(["School", "Seeded"]),
+      unfiledCollapsed: true,
+      defaultFolder: "Todo",
+      serverBacked: true,
+    });
+  });
+
+  it("uses this session's list when no server keeps folders", () => {
+    expect(resolveThreadFolderView({ servers: [], fromThreads: ["Work"], session })).toEqual({
+      folders: ["Mine", "Work"],
+      collapsed: new Set(["Mine"]),
+      unfiledCollapsed: true,
+      defaultFolder: null,
+      serverBacked: false,
+    });
+  });
+});
+
+describe("deviceFolderMigrationStep", () => {
+  const hostkey = EnvironmentId.make("hostkey");
+  const laptop = EnvironmentId.make("laptop");
+  const device = {
+    folders: ["Todo", "Todo", " ", "School"],
+    collapsed: ["School"],
+    unfiledCollapsed: false,
+  };
+
+  it("waits until every server that keeps folders has sent them", () => {
+    expect(deviceFolderMigrationStep({ device, environmentIds: [], settings: new Map() })).toEqual({
+      type: "wait",
+    });
+    expect(
+      deviceFolderMigrationStep({
+        device,
+        environmentIds: [hostkey, laptop],
+        settings: new Map([[hostkey, serverSettings([])]]),
+      }),
+    ).toEqual({ type: "wait" });
+  });
+
+  it("sends the saved order to every server while none has a user change", () => {
+    expect(
+      deviceFolderMigrationStep({
+        device,
+        environmentIds: [hostkey, laptop],
+        settings: new Map([
+          [hostkey, serverSettings([["Work", false]])],
+          [laptop, serverSettings([])],
+        ]),
+      }),
+    ).toEqual({
+      type: "push",
+      environmentIds: [hostkey, laptop],
+      update: {
+        _tag: "seedFromDevice",
+        order: ["Todo", "School"],
+        collapsed: ["School"],
+        unfiledCollapsed: false,
+      },
+    });
+  });
+
+  it("drops the saved order once a server has a user change, or when it is empty", () => {
+    expect(
+      deviceFolderMigrationStep({
+        device,
+        environmentIds: [hostkey],
+        settings: new Map([
+          [hostkey, serverSettings([], { updatedAt: "2026-11-11T00:00:00.000Z" })],
+        ]),
+      }),
+    ).toEqual({ type: "forget" });
+    expect(
+      deviceFolderMigrationStep({
+        device: { folders: [], collapsed: [], unfiledCollapsed: false },
+        environmentIds: [hostkey],
+        settings: new Map([[hostkey, serverSettings([])]]),
+      }),
+    ).toEqual({ type: "forget" });
   });
 });

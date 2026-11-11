@@ -1,15 +1,20 @@
 // Fork (F20): folder state for the Android thread tree and the thread row menu.
-import { useAtom, useAtomMount, useAtomValue } from "@effect/atom-react";
+import { useAtomMount, useAtomValue } from "@effect/atom-react";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import { AsyncResult, Atom } from "effect/reactivity";
-import { useEffect, useMemo, useState } from "react";
+import { deviceFolderMigrationStep } from "@t3tools/client-runtime/thread-folders";
+import { AsyncResult } from "effect/reactivity";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import { appAtomRegistry } from "../../state/atom-registry";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import { moveFolderNextTo, type FolderMove } from "./projectThreadTree";
 import {
+  forgetLegacyDeviceFolders,
+  legacyDeviceFolders,
   setFolderOrder,
   threadFolderMenu,
   threadFolderOrderAtom,
+  threadFolderSettings,
   toggleFolderCollapsed,
   watchSentDraftFolder,
 } from "./threadFolderActions";
@@ -17,35 +22,27 @@ import { folderGroupKey } from "./threadFolderListItems";
 
 const NO_KEYS: ReadonlySet<string> = new Set();
 
-/** Folders closed in the Workers tab, for the session, like the desktop Workers tab. */
-const collapsedWorkerFoldersAtom = Atom.make(NO_KEYS).pipe(
-  Atom.keepAlive,
-  Atom.withLabel("mobile:thread-list:workers-collapsed-folders"),
-);
-
 /**
- * Folder order and the Projects tab's collapse state persist on this device, like the desktop
- * sidebar's. "Show more" is per visit, so a long folder returns to its preview the next time the
- * list mounts.
+ * Folder order, collapse state and the default folder come from the servers, so every device
+ * shows the same folders, in the Projects and Workers tabs alike. "Show more" is per visit, so a
+ * long folder returns to its preview the next time the list mounts.
  */
-export function useThreadFolderTreeState(tab: "projects" | "workers") {
+export function useThreadFolderTreeState() {
   // Imperative folder actions write preferences through the registry.
   useAtomMount(updateMobilePreferencesAtom);
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
-  const loaded = AsyncResult.isSuccess(preferencesResult);
-  const preferences = loaded ? preferencesResult.value : null;
-  const collapsedFolders = preferences?.collapsedThreadFolders;
-  const unfiledCollapsed = preferences?.unfiledThreadsCollapsed;
-  const savedCollapsedGroupKeys = useMemo(
+  const preferences = AsyncResult.isSuccess(preferencesResult) ? preferencesResult.value : null;
+  const view = useAtomValue(threadFolderSettings.viewAtom);
+  const settingsLoaded = useAtomValue(threadFolderSettings.loadedAtom);
+  const loaded = preferences !== null && settingsLoaded;
+  const collapsedGroupKeys = useMemo(
     () =>
       new Set([
-        ...(collapsedFolders ?? []).map(folderGroupKey),
-        ...(unfiledCollapsed === true ? [folderGroupKey(null)] : []),
+        ...[...view.collapsed].map(folderGroupKey),
+        ...(view.unfiledCollapsed ? [folderGroupKey(null)] : []),
       ]),
-    [collapsedFolders, unfiledCollapsed],
+    [view],
   );
-  const [collapsedWorkerFolders, setCollapsedWorkerFolders] = useAtom(collapsedWorkerFoldersAtom);
-  const collapsedGroupKeys = tab === "workers" ? collapsedWorkerFolders : savedCollapsedGroupKeys;
   const folderOrder = useAtomValue(threadFolderOrderAtom);
   const [expandedGroupKeys, setExpandedGroupKeys] = useState(NO_KEYS);
   const [arrangingFolders, setArrangingFolders] = useState(false);
@@ -62,15 +59,18 @@ export function useThreadFolderTreeState(tab: "projects" | "workers") {
     for (const [requestId, pending] of entries) watchSentDraftFolder(requestId, pending);
   }, [sentDraftsJson]);
 
+  useDeviceFolderMigration(preferences === null ? null : legacyDeviceFolders(preferences));
+
   return {
     loaded,
     folderOrder,
     collapsedGroupKeys,
     expandedGroupKeys,
     arrangingFolders,
+    defaultFolder: view.defaultFolder,
+    serverBacked: view.serverBacked,
     toggleFolderCollapsed: (folder: string | null) => {
-      if (tab === "workers") setCollapsedWorkerFolders((current) => toggleKey(current, folder));
-      else if (loaded) toggleFolderCollapsed(folder);
+      if (loaded) toggleFolderCollapsed(folder);
     },
     toggleFolderExpanded: (folder: string | null) =>
       setExpandedGroupKeys((current) => toggleKey(current, folder)),
@@ -80,6 +80,33 @@ export function useThreadFolderTreeState(tab: "projects" | "workers") {
     openFolderArrangement: () => setArrangingFolders(true),
     closeFolderArrangement: () => setArrangingFolders(false),
   } as const;
+}
+
+/** Hands the phone's saved folder list to the servers once, then forgets it. */
+function useDeviceFolderMigration(device: ReturnType<typeof legacyDeviceFolders>) {
+  const environmentIds = useAtomValue(threadFolderSettings.supportedEnvironmentIdsAtom);
+  const settings = useAtomValue(threadFolderSettings.settingsByEnvironmentAtom);
+  const running = useRef(false);
+  const deviceJson = device === null ? null : JSON.stringify(device);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- moves the folder list saved in this phone's preferences to the servers once they report their folder settings
+  useEffect(() => {
+    if (deviceJson === null || running.current) return;
+    const step = deviceFolderMigrationStep({
+      device: JSON.parse(deviceJson),
+      environmentIds,
+      settings,
+    });
+    if (step.type === "wait") return;
+    if (step.type === "forget") {
+      forgetLegacyDeviceFolders();
+      return;
+    }
+    running.current = true;
+    void threadFolderSettings.apply(appAtomRegistry, step.update).then((outcome) => {
+      running.current = false;
+      if (outcome.failure === null) forgetLegacyDeviceFolders();
+    });
+  }, [deviceJson, environmentIds, settings]);
 }
 
 function toggleKey(keys: ReadonlySet<string>, folder: string | null): ReadonlySet<string> {

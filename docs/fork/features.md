@@ -13,8 +13,10 @@ Measurements in the hotspot table are from fork main `ea7c8bf901` and upstream `
 
 - **Two ways a merge can break the build without a text conflict.** The Git-off switch (F5) makes
   three upstream services need `ServerSettingsService`. Direct push (F6) makes `ws.ts` and
-  `AgentAwarenessRelay` need `DirectPush`. So any new upstream test or harness that builds those
-  layers will fail to typecheck until it gets `ServerSettings.layerTest()` or a `DirectPush` mock.
+  `AgentAwarenessRelay` need `DirectPush`, and folders (F20) make `ws.ts` need
+  `ThreadFolderSettingsService`. So any new upstream test or harness that builds those layers will
+  fail to typecheck until it gets `ServerSettings.layerTest()` or a `DirectPush` or
+  `ThreadFolderSettingsService` mock.
 - **The agent context budget.** `AgentContextBudget.test.ts` compares the measured size of the
   MCP tool list and agent instructions with `apps/server/src/provider/agentContextBudget.json`
   exactly. The fork's scheduling fields make the tool list larger, so after each merge set the
@@ -894,119 +896,185 @@ Verify:
 - With `{ "key": "mod+arrowup", "command": "thread.previous" }` in `keybindings.json`, Cmd+Up in
   the composer switches threads; with no such binding it moves the caret to the start.
 
-### F20. Folders replace projects in the legacy sidebar and the phone app (web/desktop, client-runtime, mobile)
+### F20. Folders replace projects in the legacy sidebar and the phone app (web/desktop, server, client-runtime, contracts, mobile)
 
-Added November 6, 2026; the phone app November 7, 2026.
+Added November 6, 2026; the phone app November 7, 2026; folders kept on the server November 11, 2026.
 
 What it does: the legacy sidebar's Projects tab lists folders, then Unfiled, instead of projects.
 A folder only labels threads; it never changes where a thread's agent runs. A thread is in folder
 `X` when it has the upstream thread tag `folder:X` (set with F18's `thread.tag.set` client
-command), so no server, schema or migration is involved and archiving keeps the folder. Moving a
-thread adds the new tag before removing old ones, and the newest folder tag wins. Folder order,
-empty folders, collapse state and the folder a draft was started in are per device, in
-localStorage (`t3code:legacy-sidebar-folders:v1`); folders known only from thread tags (another
-device's) list after them by name. Folder names are trimmed, one line, at most 56 characters.
+command), so archiving keeps the folder. Moving a thread adds the new tag before removing old
+ones, and the newest folder tag wins. Folder names are trimmed, one line, at most 56 characters.
+
+Each server keeps the folder list: order, empty folders, collapse state (Unfiled too) and one
+default folder, in `<userdata>/thread-folders.json`. Clients read it through the stream
+`threadFolders.subscribe` (read scope) and change it with `threadFolders.update` (operate scope:
+create, rename, delete, reorder, setCollapsed, setDefault, seedFromDevice); servers advertise
+`threadFolders: true` in their config. Rename and delete run on the server and retag every thread
+in the folder, archived ones included (a deleted folder's threads go to Unfiled). Folders known
+only from thread tags (an older client made them) list after the server's, by name. With several
+servers connected, the one a user changed most recently leads and the others add their folders
+after it; writes go to every connected server that keeps folders. Clients show a change at once
+and drop that guess when the server answers.
+
+Default folder: "New threads go here" in a folder's menu (desktop right-click or "…", phone
+long-press); "Stop sending new threads here" clears it. A muted "default" sits next to the
+folder's name. The server applies it in the `orchestration.launchThread` handler, the RPC only the
+user's own clients call when a draft is sent, by adding the folder tag to `thread.create` (new
+optional `tags`), so the thread is created already filed. A launch's `folder` (the folder's
+new-thread button: its name; Unfiled's: null) wins over the default. Subagent and child threads,
+`delegate_task` and other MCP launches, scheduled tasks, the startup thread, ACP imports and forks
+never pass through that handler, so they never get it; worker threads only become workers after
+they exist.
+
+Migration: a server with no `thread-folders.json` builds one from the folder tags on unarchived
+threads, most recently active folder first (an archived thread's tag may name a folder deleted on
+another device). Until a user changes that list (`updatedAt` null), the first new client that
+still has a saved device list (web localStorage `t3code:legacy-sidebar-folders:v1`; phone
+preferences `threadFolders`, `collapsedThreadFolders`, `unfiledThreadsCollapsed`) sends it once
+with `seedFromDevice`, which puts that order and collapse state first. A client deletes its saved
+list once every connected server that keeps folders has a user-changed list. Folders picked for
+unsent drafts stay on the device (web `t3code:legacy-sidebar-draft-folders:v1`, phone
+`pendingThreadFolders`).
+
+Compatibility: older clients keep working against a new server; they read and write the same
+tags, keep their own order, and their threads get the default folder when they start one. A new
+client against an older server shows folders from tags for the session only (no default folder
+item), retags loaded threads itself on rename and delete, and files a draft's thread after it
+exists, since the older server drops the launch's `folder`.
 
 - Drag folder headers to reorder them; drag a thread row (or the selection) onto a folder, or
   onto Unfiled to take it out of its folder.
 - Thread menu and multi-select menu: "Move to folder ›" (folders, "New folder…") and "Remove from
-  folder". Folder header (right-click or "…"): Rename (retags its threads; a taken name merges)
+  folder". Folder header (right-click or "…"): Rename (a taken name merges), New threads go here,
   and Delete folder (threads go to Unfiled, confirmed when not empty). The tab header's folder
   button makes a folder; "Add project" lives in the command palette.
 - A folder's new-thread button starts a draft in the project of the folder's most recently
-  active thread (else the open thread's, else the first project). The draft's thread is filed in
-  the folder once it exists, when the first message is sent. Other new threads start Unfiled.
+  active thread (else the open thread's, else the first project), and the draft's first message
+  launches the thread in that folder. Other new threads land in the default folder, if any.
 - Until a folder exists, Unfiled offers "Make a folder for each project": one folder per
   project, in project order and named after it, with each listed thread filed under its project.
 - Command palette: "Move to folder…" for the open thread (pick a folder, or type a new name) and
   "New folder".
-- Workers tab: worker threads are grouped by the same folders, with the same menu.
+- Workers tab: worker threads are grouped by the same folders, with the same menu; collapsing a
+  folder there collapses it everywhere.
 - Thread traversal and the Cmd+1–9 jump hints follow the folders as shown. In a folder that mixes
   projects, a row's title tooltip adds the project name (the row itself shows only the title).
 
 Phone app (Android tree, F7): the Projects tab (home list and tablet sidebar) groups threads by
 the same folders, then Unfiled. The Workers tab (F18) lists workers by them too, showing only
-folders that hold a worker, collapsing them for the session, without new-thread buttons. Folder
-order, empty folders, Projects' collapse state and folders picked for unsent drafts are this
-device's, in the app preferences (`threadFolders`, `collapsedThreadFolders`,
-`unfiledThreadsCollapsed`, `pendingThreadFolders`). Search opens every folder and lists only
+folders that hold a worker, without new-thread buttons. Search opens every folder and lists only
 folders with matches; a project or environment filter hides empty folders.
 
 - Thread long-press: "Move to folder ›" (folders, the current one checked, "New folder…") and
   "Remove from folder", on iOS too.
-- Folder header: tap collapses; long-press offers Rename…, New folder…, Arrange folders… (a
-  drag sheet), Move up / Move down and Delete folder (confirmed when not empty). Unfiled's
-  long-press offers New folder… and Arrange; its folder button makes a folder.
+- Folder header: tap collapses; long-press offers Rename…, New threads go here, New folder…,
+  Arrange folders… (a drag sheet), Move up / Move down and Delete folder (confirmed when not
+  empty). Unfiled's long-press offers New folder… and Arrange; its folder button makes a folder.
 - A header's new-thread button opens a draft in the project of the folder's most recently active
-  thread (else the first project). The draft's route `requestId` keys the pending folder;
-  `NewTaskDraftScreen` reports the sent thread, and the thread is tagged once it shows up.
+  thread (else the first project). The draft's route `requestId` keys the picked folder;
+  `NewTaskDraftScreen` records the thread before queueing it, and the outbox's launch carries the
+  folder (kept in memory). The thread is also tagged once it shows up, for older servers
+  and after a restart.
 - Until a folder exists, Unfiled offers "Make a folder for each project" (confirmed).
 
-Limits: rename and delete retag only loaded threads, so an archived thread keeps its old folder
-tag and brings that folder back when unarchived. The sidebar's project sort setting no longer
-applies here; the thread sort and "Visible threads" count still do. The phone has no folder
-drag and drop; iOS keeps the flat list, so its menu moves threads into folders it doesn't show.
+Limits: the sidebar's project sort setting no longer applies here; the thread sort and "Visible
+threads" count still do. The phone has no folder drag and drop; iOS keeps the flat list, so its
+menu moves threads into folders it doesn't show (its new threads get the default folder too).
+"Work locally" on a thread whose worktree setup failed starts a new thread that gets the default
+folder, not the old thread's.
 
 Fork-owned files:
 
-- Shared rules (tag prefix, parsing, name checks, grouping, ordering, rename merge, the
-  folder-per-project plan, the new-thread project): `packages/client-runtime/src/threadFolders.ts`
-  (+ test), exported as `@t3tools/client-runtime/thread-folders`. Hermes has no
-  `Array#toSorted`, so keep it out of this file.
+- Contracts: `packages/contracts/src/threadFolders.ts` (+ test; tag rules, the settings schema,
+  the update input and `applyThreadFolderUpdate`, which the server and the clients' instant
+  updates share).
+- Server: `apps/server/src/threadFolders/ThreadFolderSettings.ts` (+ test; storage, seeding,
+  retagging, `launchTags`).
+- Shared client rules (tag helpers, name checks, grouping, ordering, the merged view, the
+  migration step, the folder-per-project plan, the new-thread project):
+  `packages/client-runtime/src/threadFolders.ts` (+ test), exported as
+  `@t3tools/client-runtime/thread-folders`; the server subscription, writes and instant updates:
+  `packages/client-runtime/src/state/threadFolderSettings.ts`
+  (`@t3tools/client-runtime/state/thread-folder-settings`). Hermes has no `Array#toSorted`, so
+  keep it out of these files.
 - Web: `apps/web/src/components/legacySidebarFolders.logic.ts` (+ test; only the row windowing,
-  `resolveGroupPanel`), `legacySidebarFolders.store.ts` (the per-device store, tag writes,
-  per-folder thread atoms), `LegacySidebarFolders.tsx` (dialogs, menus, palette items, the host
-  that files sent drafts).
-- Mobile: `apps/mobile/src/features/threads/threadFolderActions.ts` (folder order atom, tag
+  `resolveGroupPanel`), `legacySidebarFolders.store.ts` (the folder atoms, actions, tag writes,
+  draft folders, per-folder thread atoms), `LegacySidebarFolders.tsx` (dialogs, menus, the default
+  mark, palette items, the host that migrates the saved list and files sent drafts).
+- Mobile: `apps/mobile/src/features/threads/threadFolderActions.ts` (folder atoms and actions, tag
   writes, prompts, draft filing, the row menu), `threadFolderListItems.ts` (the tree's list
   items), `thread-folder-tree.tsx` (grouping, headers and actions for both lists),
-  `use-thread-folders.ts`, `FolderArrangementSheet.tsx`, `projectThreadTree.ts` (+ test;
-  `buildFolderThreadTreeListItems`), `project-thread-tree-items.tsx` (`ThreadFolderHeader`),
-  `apps/mobile/src/persistence/thread-folder-preferences.ts`.
+  `use-thread-folders.ts` (view state and the migration), `FolderArrangementSheet.tsx`,
+  `projectThreadTree.ts` (+ test; `buildFolderThreadTreeListItems`),
+  `project-thread-tree-items.tsx` (`ThreadFolderHeader`),
+  `apps/mobile/src/persistence/thread-folder-preferences.ts`,
+  `apps/mobile/src/state/draftLaunchFolder.ts`.
 
 Touch points:
 
-- `apps/web/src/components/LegacySidebar.tsx` (fork-owned, F1): `SidebarFolderItem`,
-  `SidebarFolderThreadList`, `useLegacySidebarThreads` (groups and traversal keys through
-  `resolveGroupPanel`), draggable `SidebarThreadRow`, `SortableFolderItem`, `UnfiledDropTarget`,
-  the thread `DragOverlay`, `startThreadInFolder`. The project rename, grouping and remove dialogs
-  and the project sort menu are gone from this sidebar (they remain in project settings).
-- `apps/web/src/components/LegacySidebarWorkers.tsx` and `legacySidebarWorkers.logic.ts` (F18):
-  worker threads grouped with `groupWorkers` by folder; `legacyThreadFolderMenu` in the worker
-  thread menu.
-- `apps/web/src/components/CommandPalette.tsx`: one line pushing `legacyFolderPaletteItems(...)`.
-- `apps/web/src/components/AppSidebarLayout.tsx`: mounts `LegacySidebarFoldersHost` beside the
-  sidebar when `isElectron || forceLegacySidebar`, so dialogs and draft filing work while a
-  phone-width sidebar is closed.
-- `packages/client-runtime/package.json`: the `./thread-folders` export.
-- `apps/mobile/src/features/home/HomeScreen.tsx` and `threads/ThreadNavigationSidebar.tsx`:
+- `packages/contracts/src/rpc.ts`: `threadFoldersSubscribe` / `threadFoldersUpdate`, their
+  `Rpc.make` definitions and `WsRpcGroup` entries. `server.ts`: `threadFolders` in `ServerConfig`.
+  `orchestrationV2.ts`: `folder` on `OrchestrationV2ThreadLaunchInput`, `tags` on the
+  `thread.create` command. `clientRpcPermissions.ts`: operate scope for the update. `index.ts`:
+  the export.
+- `apps/server/src/ws.ts`: the import, `threadFolders` beside `voiceDictation`, the two handlers
+  after the voice ones, `threadFolders: true` in the config, and in the `launchThread` handler
+  `Effect.andThen(threadFolders.launchTags(input.folder))` plus the `tags` spread.
+  `server.ts`: `ThreadFolderSettings.layer` after `VoiceDictation.layer`. `RpcAuthorization.ts`
+  (read scope for the stream) and `RpcInstrumentation.ts`. `ws.test.ts`: the mock layer.
+- `apps/server/src/orchestration-v2/ThreadLaunchService.ts`: `tags` on `ThreadLaunchInput`,
+  passed to `thread.create`. `Orchestrator.ts`: `dispatchThreadCreate` stores the command's tags
+  (`runtimeLayer.test.ts`, the lifecycle test, covers it).
+- `packages/client-runtime/src/operations/commands.ts`: `folder` on the bootstrap's `createThread`,
+  sent as the launch's `folder` (+ `commands.test.ts`). `src/rpc/client.ts`: the subscription tag.
+  `package.json`: the two exports.
+- Web: `apps/web/src/components/LegacySidebar.tsx` (fork-owned, F1): `SidebarFolderItem`
+  (`legacyFolderHeaderMenu`, `DefaultFolderMark`), `SidebarFolderThreadList`,
+  `useLegacySidebarThreads` (groups, collapse and traversal keys through `resolveGroupPanel`),
+  draggable `SidebarThreadRow`, `SortableFolderItem`, `UnfiledDropTarget`, the thread
+  `DragOverlay`, `startThreadInFolder`. `LegacySidebarWorkers.tsx` and
+  `legacySidebarWorkers.logic.ts` (F18): workers grouped with `groupWorkers` by folder, folder
+  collapse from the server, `legacyThreadFolderMenu` in the worker thread menu.
+  `CommandPalette.tsx`: one line pushing `legacyFolderPaletteItems(...)`.
+  `AppSidebarLayout.tsx`: mounts `LegacySidebarFoldersHost` beside the sidebar when
+  `isElectron || forceLegacySidebar`. `chat/useComposerSend.ts` and `chat/useMultipleModelSend.ts`:
+  `...draftLaunchFolder(draftId)` in the bootstrap's `createThread`.
+- Mobile: `features/home/HomeScreen.tsx` and `threads/ThreadNavigationSidebar.tsx`:
   `useThreadFolderTree(...)`, `folderTree.groupListItems(...)` in place of the project grouping,
   `folderTree.renderItem(...)` for the folder items and `folderTree.arrangementSheet`;
-  `onNewThreadInProject` takes an optional `requestId`.
-- `apps/mobile/src/features/home/HomeRouteScreen.tsx` and
-  `layout/workspace/WorkspaceThreadSidebar.tsx`: `onNewThreadInProject` uses the given `requestId`.
-- `apps/mobile/src/features/threads/NewTaskDraftScreen.tsx`: one `fileSentDraftInFolder(...)`
-  call after the outbox accepts the first message.
-- `apps/mobile/src/features/threads/thread-list-v2-items.tsx`: `useThreadFolderMenu(thread)` in
-  the row's menu items and event handler.
-- `apps/mobile/src/persistence/mobile-preferences.ts`: `Preferences extends
+  `onNewThreadInProject` takes an optional `requestId`. `home/HomeRouteScreen.tsx` and
+  `layout/workspace/WorkspaceThreadSidebar.tsx`: `onNewThreadInProject` uses the given
+  `requestId`. `threads/NewTaskDraftScreen.tsx`: one `fileSentDraftInFolder(...)` call before the
+  outbox queues the first message. `lib/projectThreadStartTurn.ts`: `folder` in the spec and the
+  bootstrap. `state/threadOutboxDelivery.ts`: `...draftLaunchFolder(...)` in the start-turn spec.
+  `threads/thread-list-v2-items.tsx`: `useThreadFolderMenu(thread)` in the row's menu items and
+  event handler. `persistence/mobile-preferences.ts`: `Preferences extends
   ThreadFolderPreferences` and one `sanitizeThreadFolderPreferences(parsed)` spread.
 
 Verify:
 
-- `vp test run packages/client-runtime/src/threadFolders.test.ts apps/web/src/components/legacySidebarFolders.logic.test.ts apps/web/src/components/legacySidebarWorkers.logic.test.ts`
+- `vp test run packages/contracts/src/threadFolders.test.ts apps/server/src/threadFolders/ThreadFolderSettings.test.ts`
+- `vp test run apps/server/src/orchestration-v2/runtimeLayer.test.ts -t "applies lifecycle commands idempotently"`
+- `vp test run packages/client-runtime/src/threadFolders.test.ts packages/client-runtime/src/operations/commands.test.ts apps/web/src/components/legacySidebarFolders.logic.test.ts apps/web/src/components/legacySidebarWorkers.logic.test.ts`
 - `vp test run apps/mobile/src/features/threads/projectThreadTree.test.ts apps/mobile/src/features/threads/workerThreadGroup.test.ts`
+- `grep -ln "threadFoldersSubscribe" apps/server/src/ws.ts apps/server/src/auth/RpcAuthorization.ts apps/server/src/observability/RpcInstrumentation.ts packages/contracts/src/rpc.ts packages/client-runtime/src/rpc/client.ts`
+  (all five), `grep -n "launchTags\|threadFolders: true" apps/server/src/ws.ts` (two hits) and
+  `grep -n "ThreadFolderSettings.layer" apps/server/src/server.ts`.
+- `grep -n "draftLaunchFolder" apps/web/src/components/chat/useComposerSend.ts apps/web/src/components/chat/useMultipleModelSend.ts apps/mobile/src/state/threadOutboxDelivery.ts`
+  (one call each), and `grep -n "command.tags" apps/server/src/orchestration-v2/Orchestrator.ts`.
 - `grep -n "legacyFolderPaletteItems\|LegacySidebarFoldersHost" apps/web/src/components/CommandPalette.tsx apps/web/src/components/AppSidebarLayout.tsx`
-  (two hits each).
-- `grep -c "useThreadFolderTree\|folderTree\." apps/mobile/src/features/home/HomeScreen.tsx apps/mobile/src/features/threads/ThreadNavigationSidebar.tsx`
+  (two hits each), `grep -c "useThreadFolderTree\|folderTree\." apps/mobile/src/features/home/HomeScreen.tsx apps/mobile/src/features/threads/ThreadNavigationSidebar.tsx`
   (5 or more each), and `grep -n fileSentDraftInFolder apps/mobile/src/features/threads/NewTaskDraftScreen.tsx` (two hits).
-- In the desktop app: make a folder, drag a thread onto it and back to Unfiled, start a thread
-  with the folder's new-thread button and send a message (it lands in the folder), and move a
-  thread with "Move to folder…" from the command palette.
+- In the desktop app: make a folder, drag a thread onto it and back to Unfiled, reorder and
+  collapse folders and see the same on the phone; set "New threads go here" on a folder and start
+  a thread with the sidebar's new-thread shortcut (it lands there); start one with another
+  folder's new-thread button (it lands in that folder); rename a folder that holds an archived
+  thread and unarchive it (it comes back in the renamed folder).
 - In the Android app: long-press a thread, Move to folder › New folder…, and see it under that
-  folder (and in the desktop sidebar); long-press the folder header to rename, arrange and
-  delete it; start a thread from the folder's new-thread button and send it (it lands in the
-  folder); open Workers and see workers under their folders.
+  folder (and in the desktop sidebar); long-press the folder header to rename, arrange, make it
+  the default and delete it; start a thread from a folder's new-thread button and send it (it
+  lands in the folder); open Workers and see workers under their folders.
 
 ### F21. Stay connected for a few minutes after leaving the Android app (mobile, Android only)
 

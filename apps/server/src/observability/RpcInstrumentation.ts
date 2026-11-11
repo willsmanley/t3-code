@@ -99,6 +99,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.serverGetElevenLabsApiKey]: "server",
   [WS_METHODS.voiceDictationAppend]: "server",
   [WS_METHODS.voiceDictationTranscribe]: "server",
+  [WS_METHODS.threadFoldersSubscribe]: "orchestration",
+  [WS_METHODS.threadFoldersUpdate]: "orchestration",
   [WS_METHODS.scheduledTasksSubscribe]: "scheduledTasks",
   [WS_METHODS.scheduledTasksUpsert]: "scheduledTasks",
   [WS_METHODS.scheduledTasksSetEnabled]: "scheduledTasks",

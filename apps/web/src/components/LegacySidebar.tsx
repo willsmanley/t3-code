@@ -160,15 +160,16 @@ import {
   threadsInFolder,
   useFolderExpanded,
   useFolderOrder,
+  useFolderSettingsLoaded,
   useFolderThreadShells,
-  useLegacyFolderStore,
+  useFolderView,
 } from "./legacySidebarFolders.store";
 import {
-  confirmDeleteFolder,
+  DefaultFolderMark,
+  legacyFolderHeaderMenu,
   legacyThreadFolderMenu,
   makeFolderPerProject,
   NewFolderButton,
-  promptRenameFolder,
 } from "./LegacySidebarFolders";
 import { Kbd } from "./ui/kbd";
 import {
@@ -1417,15 +1418,8 @@ const SidebarFolderItem = memo(function SidebarFolderItem(props: SidebarFolderIt
   const showFolderMenu = async (name: string, position: { x: number; y: number }) => {
     const api = readLocalApi();
     if (!api) return;
-    const clicked = await api.contextMenu.show(
-      [
-        { id: "rename", label: "Rename" },
-        { id: "delete", label: "Delete folder", destructive: true, icon: "trash" },
-      ],
-      position,
-    );
-    if (clicked === "rename") await promptRenameFolder(name);
-    if (clicked === "delete") await confirmDeleteFolder(name);
+    const menu = legacyFolderHeaderMenu(name);
+    await menu.handle(await api.contextMenu.show(menu.items, position));
   };
 
   const handleFolderButtonContextMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -1955,6 +1949,7 @@ const SidebarFolderItem = memo(function SidebarFolderItem(props: SidebarFolderIt
             >
               {folderLabel}
             </span>
+            {folder !== null ? <DefaultFolderMark folder={folder} /> : null}
           </span>
           <span
             aria-hidden
@@ -2380,6 +2375,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
   const handleThreadPreviewCountChange = (count: SidebarThreadPreviewCount) => {
     updateClientSettings({ sidebarThreadPreviewCount: count });
   };
+  const folderSettingsLoaded = useFolderSettingsLoaded();
   const handleMakeFolderPerProject = () => {
     void makeFolderPerProject(sidebarProjects);
   };
@@ -2404,7 +2400,10 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
         collapseThreadListForGroup={collapseThreadListForGroup}
         projectIndex={projectIndex}
         onMakeFolderPerProject={
-          folder === null && folderOrder.length === 0 && sidebarProjects.length > 0
+          folder === null &&
+          folderSettingsLoaded &&
+          folderOrder.length === 0 &&
+          sidebarProjects.length > 0
             ? handleMakeFolderPerProject
             : null
         }
@@ -2625,8 +2624,7 @@ function useLegacySidebarThreads(input: {
   const sidebarThreads = useThreadShells();
   const withoutSnoozed = useWithoutLegacySnoozed();
   const delegatedUnderParent = useDelegatedUnderParent();
-  const collapsedFolders = useLegacyFolderStore((state) => state.collapsedFolders);
-  const unfiledCollapsed = useLegacyFolderStore((state) => state.unfiledCollapsed);
+  const { collapsed: collapsedFolders, unfiledCollapsed } = useFolderView();
   const sidebarThreadByKey = new Map(
     sidebarThreads.map(
       (thread) =>
@@ -2652,7 +2650,7 @@ function useLegacySidebarThreads(input: {
         keys: threads.map((thread) =>
           scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
         ),
-        expanded: folder === null ? !unfiledCollapsed : !collapsedFolders.includes(folder),
+        expanded: folder === null ? !unfiledCollapsed : !collapsedFolders.has(folder),
         showAll: expandedThreadListsByGroup.has(folderGroupKey(folder)),
         previewCount: sidebarThreadPreviewCount,
         activeKey: routeThreadKey,
@@ -2826,7 +2824,7 @@ export default function LegacySidebar({ routeReveal }: { routeReveal: SidebarRou
         );
         return;
       }
-      if (folder !== null && result.value !== null) {
+      if (result.value !== null) {
         rememberDraftFolder(
           result.value.draftId,
           scopeThreadRef(projectRef.environmentId, result.value.threadId),

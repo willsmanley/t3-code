@@ -1,21 +1,21 @@
 // Fork (F20): thread folders on the phone. A thread is in folder `X` when it has the thread tag
 // `folder:X`, set with the existing `thread.tag.set` command, so desktop and phone show the same
-// folders. Folder order, empty folders and collapse state stay on this device (preferences).
+// folders. The folder list, collapse state and default folder live on each server
+// (`threadFolders.*`); only folders picked for unsent drafts stay on this device (preferences).
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { arrayElementsEqual } from "@t3tools/client-runtime/state/entities";
 import {
   isAtomCommandInterrupted,
   runAtomCommand,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import { createThreadFolderSettingsAtoms } from "@t3tools/client-runtime/state/thread-folder-settings";
 import {
+  type DeviceFolderState,
   folderNameProblem,
   folderOfTags,
-  orderFolders,
   planFolderPerProject,
   planFolderTagChange,
-  renameFolderInList,
 } from "@t3tools/client-runtime/thread-folders";
 import {
   AuthOrchestrationOperateScope,
@@ -23,19 +23,28 @@ import {
   isListedThreadLineage,
   ThreadId,
   type ProjectId,
+  type ThreadFolderUpdateInput,
 } from "@t3tools/contracts";
 import type { MenuAction } from "@react-native-menu/menu";
 import { AsyncResult, Atom } from "effect/reactivity";
 import * as Haptics from "expo-haptics";
 
 import * as Dialog from "../../components/ui/Dialog";
+import { connectionAtomRuntime } from "../../connection/runtime";
 import { scopedProjectKey } from "../../lib/scopedEntities";
 import type { Preferences } from "../../persistence/mobile-preferences";
 import type { PendingThreadFolder } from "../../persistence/thread-folder-preferences";
 import { appAtomRegistry } from "../../state/atom-registry";
+import { rememberLaunchFolder } from "../../state/draftLaunchFolder";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
+import { environmentServerConfigsAtom } from "../../state/server";
 import { readEnvironmentScope } from "../../state/session";
 import { environmentThreadShells, threadEnvironment } from "../../state/threads";
+
+export const threadFolderSettings = createThreadFolderSettingsAtoms(connectionAtomRuntime, {
+  serverConfigsAtom: environmentServerConfigsAtom,
+  threadShellsAtom: environmentThreadShells.threadShellsAtom,
+});
 
 type FolderThread = Pick<EnvironmentThreadShell, "environmentId" | "id" | "source">;
 
@@ -60,66 +69,82 @@ function readThreadShells(): ReadonlyArray<EnvironmentThreadShell> {
   return appAtomRegistry.get(environmentThreadShells.threadShellsAtom);
 }
 
-function folderNamesOf(threads: ReadonlyArray<EnvironmentThreadShell>): string[] {
-  const names = new Set<string>();
-  for (const thread of threads) {
-    if (thread.archivedAt !== null) continue;
-    const folder = folderOfThread(thread);
-    if (folder !== null) names.add(folder);
-  }
-  return [...names].sort();
-}
-
-let previousThreadFolderNames: readonly string[] = [];
-const threadFolderNamesAtom = Atom.make((get) => {
-  const next = folderNamesOf(get(environmentThreadShells.threadShellsAtom));
-  if (arrayElementsEqual(previousThreadFolderNames, next)) return previousThreadFolderNames;
-  previousThreadFolderNames = next;
-  return next;
-}).pipe(Atom.withLabel("mobile:thread-folders:names"));
-
-let previousFolderOrder: readonly string[] = [];
-/** Every folder in this device's order, then folders known only from thread tags, by name. */
-export const threadFolderOrderAtom = Atom.make((get): readonly string[] => {
-  const preferences = get(mobilePreferencesAtom);
-  const stored = AsyncResult.isSuccess(preferences) ? (preferences.value.threadFolders ?? []) : [];
-  const next = orderFolders(stored, get(threadFolderNamesAtom));
-  if (arrayElementsEqual(previousFolderOrder, next)) return previousFolderOrder;
-  previousFolderOrder = next;
-  return next;
-}).pipe(Atom.withLabel("mobile:thread-folders:order"));
+/** Every folder in the servers' order, then folders known only from thread tags, by name. */
+export const threadFolderOrderAtom = Atom.make(
+  (get): readonly string[] => get(threadFolderSettings.viewAtom).folders,
+).pipe(Atom.withLabel("mobile:thread-folders:order"));
 
 function readFolderOrder(): readonly string[] {
   return appAtomRegistry.get(threadFolderOrderAtom);
 }
 
-/** Full order from a preferences snapshot, for transforms that must build on pending writes. */
-function folderOrderOf(current: Preferences): string[] {
-  return orderFolders(current.threadFolders ?? [], appAtomRegistry.get(threadFolderNamesAtom));
+async function updateFolders(change: ThreadFolderUpdateInput, failureTitle: string) {
+  const outcome = await threadFolderSettings.apply(appAtomRegistry, change);
+  if (outcome.failure !== null) {
+    Dialog.alert(
+      failureTitle,
+      outcome.failure instanceof Error ? outcome.failure.message : "Try again.",
+    );
+  } else if (outcome.unmovedThreads > 0) {
+    Dialog.alert(
+      failureTitle,
+      `${outcome.unmovedThreads} thread${outcome.unmovedThreads === 1 ? "" : "s"} kept the old folder. Try again.`,
+    );
+  }
+  return outcome.failure === null;
 }
 
 function addFolders(names: readonly string[]): void {
-  if (names.length === 0) return;
-  savePreferences((current) => {
-    const stored = current.threadFolders ?? [];
-    const missing = names.filter((name) => !stored.includes(name));
-    return missing.length === 0 ? {} : { threadFolders: [...stored, ...new Set(missing)] };
-  });
+  const listed = new Set(readFolderOrder());
+  const missing = [...new Set(names)].filter((name) => !listed.has(name));
+  if (missing.length === 0) return;
+  void updateFolders({ _tag: "create", names: missing }, "Could not make the folder");
 }
 
 export function setFolderOrder(transform: (order: readonly string[]) => readonly string[]): void {
-  savePreferences((current) => ({ threadFolders: [...transform(folderOrderOf(current))] }));
+  void updateFolders(
+    { _tag: "reorder", order: transform(readFolderOrder()) },
+    "Could not save the folder order",
+  );
 }
 
 export function toggleFolderCollapsed(folder: string | null): void {
-  savePreferences((current) => {
-    if (folder === null)
-      return { unfiledThreadsCollapsed: current.unfiledThreadsCollapsed !== true };
-    const collapsed = new Set(current.collapsedThreadFolders ?? []);
-    if (collapsed.has(folder)) collapsed.delete(folder);
-    else collapsed.add(folder);
-    return { collapsedThreadFolders: [...collapsed] };
-  });
+  const view = appAtomRegistry.get(threadFolderSettings.viewAtom);
+  const collapsed = folder === null ? view.unfiledCollapsed : view.collapsed.has(folder);
+  void updateFolders(
+    { _tag: "setCollapsed", name: folder, collapsed: !collapsed },
+    "Could not save the folder",
+  );
+}
+
+/** New threads started without a folder land in `folder` (null: in no folder). */
+export function setDefaultFolder(folder: string | null): void {
+  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  void updateFolders({ _tag: "setDefault", name: folder }, "Could not change the default folder");
+}
+
+/** This device's folder list from before servers kept folders, if it is still saved. */
+export function legacyDeviceFolders(preferences: Preferences): DeviceFolderState | null {
+  if (
+    preferences.threadFolders === undefined &&
+    preferences.collapsedThreadFolders === undefined &&
+    preferences.unfiledThreadsCollapsed === undefined
+  ) {
+    return null;
+  }
+  return {
+    folders: preferences.threadFolders ?? [],
+    collapsed: preferences.collapsedThreadFolders ?? [],
+    unfiledCollapsed: preferences.unfiledThreadsCollapsed ?? false,
+  };
+}
+
+export function forgetLegacyDeviceFolders(): void {
+  savePreferences(() => ({
+    threadFolders: undefined,
+    collapsedThreadFolders: undefined,
+    unfiledThreadsCollapsed: undefined,
+  }));
 }
 
 function threadsInFolder(folder: string): EnvironmentThreadShell[] {
@@ -245,25 +270,34 @@ export function promptNewFolder(threads: readonly FolderThread[] = []): void {
   );
 }
 
-/** Renames a folder on this device and retags its threads; a taken name merges the two. */
-async function renameFolder(from: string, to: string): Promise<void> {
-  const threads = threadsInFolder(from);
-  savePreferences((current) => {
-    const collapsed = current.collapsedThreadFolders ?? [];
-    return {
-      threadFolders: renameFolderInList(folderOrderOf(current), from, to),
-      collapsedThreadFolders: collapsed.includes(from)
-        ? renameFolderInList(collapsed, from, to)
-        : collapsed.filter((name) => name !== from),
-      pendingThreadFolders: Object.fromEntries(
-        Object.entries(current.pendingThreadFolders ?? {}).map(([requestId, pending]) => [
-          requestId,
-          pending.folder === from ? { ...pending, folder: to } : pending,
-        ]),
+/** Loaded threads on servers that can't retag folders themselves (older servers, or none). */
+function threadsServersWontRetag(folder: string): EnvironmentThreadShell[] {
+  const retagging = new Set<EnvironmentId>(
+    appAtomRegistry.get(threadFolderSettings.supportedEnvironmentIdsAtom),
+  );
+  return threadsInFolder(folder).filter((thread) => !retagging.has(thread.environmentId));
+}
+
+function renameDraftFolders(from: string, to: string | null) {
+  savePreferences((current) => ({
+    pendingThreadFolders: Object.fromEntries(
+      Object.entries(current.pendingThreadFolders ?? {}).flatMap(([requestId, pending]) =>
+        pending.folder !== from
+          ? [[requestId, pending]]
+          : to === null
+            ? []
+            : [[requestId, { ...pending, folder: to }]],
       ),
-    };
-  });
-  await moveThreadsToFolder(threads, to);
+    ),
+  }));
+}
+
+/** Renames a folder everywhere; servers retag every thread in it, archived ones too. */
+async function renameFolder(from: string, to: string): Promise<void> {
+  const leftover = threadsServersWontRetag(from);
+  renameDraftFolders(from, to);
+  await updateFolders({ _tag: "rename", from, to }, "Could not rename the folder");
+  if (leftover.length > 0) await moveThreadsToFolder(leftover, to);
 }
 
 export function promptRenameFolder(folder: string): void {
@@ -285,19 +319,11 @@ export function promptRenameFolder(folder: string): void {
 /** Deletes a folder; its threads go to Unfiled. */
 export function confirmDeleteFolder(folder: string): void {
   const remove = () => {
-    const threads = threadsInFolder(folder);
-    savePreferences((current) => ({
-      threadFolders: (current.threadFolders ?? []).filter((name) => name !== folder),
-      collapsedThreadFolders: (current.collapsedThreadFolders ?? []).filter(
-        (name) => name !== folder,
-      ),
-      pendingThreadFolders: Object.fromEntries(
-        Object.entries(current.pendingThreadFolders ?? {}).filter(
-          ([, pending]) => pending.folder !== folder,
-        ),
-      ),
-    }));
-    void moveThreadsToFolder(threads, null);
+    const leftover = threadsServersWontRetag(folder);
+    renameDraftFolders(folder, null);
+    void updateFolders({ _tag: "delete", name: folder }, "Could not delete the folder").then(() =>
+      leftover.length > 0 ? moveThreadsToFolder(leftover, null) : true,
+    );
   };
   const count = threadsInFolder(folder).length;
   if (count === 0) {
@@ -353,8 +379,8 @@ export function confirmFolderPerProject(
   });
 }
 
-/** Files the thread a folder's draft becomes; drafts become threads when sent. */
-export function rememberDraftFolder(requestId: string, folder: string): void {
+/** The draft's thread starts in `folder` (null: in no folder); drafts become threads when sent. */
+export function rememberDraftFolder(requestId: string, folder: string | null): void {
   const now = Date.now();
   savePreferences((current) => ({
     pendingThreadFolders: {
@@ -393,10 +419,11 @@ export function watchSentDraftFolder(requestId: string, pending: PendingThreadFo
     if (shell === null || !watchedDraftThreads.has(requestId)) return;
     watchedDraftThreads.delete(requestId);
     unsubscribe?.();
-    // A rename or delete since the draft was sent changes or drops its folder.
+    // A rename or delete since the draft was sent changes or drops its folder. Servers that take
+    // a launch folder already filed the thread; older ones need the tags set here.
     const folder = readPreferences()?.pendingThreadFolders?.[requestId]?.folder;
     forgetDraftFolder(requestId);
-    if (folder !== undefined && folderOfThread(shell) === null) {
+    if (folder !== undefined && folderOfThread(shell) !== folder) {
       void moveThreadsToFolder([shell], folder);
     }
   };
@@ -416,6 +443,7 @@ export function fileSentDraftInFolder(
   if (requestId === undefined) return;
   const pending = readPreferences()?.pendingThreadFolders?.[requestId];
   if (pending === undefined) return;
+  rememberLaunchFolder(environmentId, threadId, pending.folder);
   const sent = { ...pending, thread: { environmentId, threadId } };
   savePreferences((current) =>
     current.pendingThreadFolders?.[requestId] === undefined

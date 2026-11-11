@@ -234,6 +234,7 @@ import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as DirectPush from "./notifications/DirectPush.ts";
 import { readElevenLabsApiKey } from "./voiceInput/elevenLabsApiKey.ts";
 import * as VoiceDictation from "./voiceInput/VoiceDictation.ts";
+import * as ThreadFolderSettings from "./threadFolders/ThreadFolderSettings.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import { requiredScopeForDeviceList, rpcAuthorizationError } from "./auth/RpcAuthorization.ts";
 import * as RpcAuthorization from "./auth/RpcAuthorization.ts";
@@ -1529,6 +1530,7 @@ export const layerWsRpc = (
       const directPush = yield* DirectPush.DirectPush;
       const secretStore = yield* ServerSecretStore.ServerSecretStore;
       const voiceDictation = yield* VoiceDictation.VoiceDictation;
+      const threadFolders = yield* ThreadFolderSettings.ThreadFolderSettingsService;
       const rpcClientIds = yield* Ref.make(new Set<RpcClientId>());
       yield* Effect.addFinalizer(() =>
         Ref.get(rpcClientIds).pipe(
@@ -1985,6 +1987,7 @@ export const layerWsRpc = (
           shellThreadFamilies: true,
           threadLinkMetadata: true,
           shellOlderSettled: true,
+          threadFolders: true,
           threadResumeCompletionMarker: true,
           threadSnapshotPagination: true,
           threadFind: true,
@@ -2250,10 +2253,13 @@ export const layerWsRpc = (
             "orchestration_v2.command_id": input.commandId,
             "orchestration_v2.project_id": input.projectId,
           }).pipe(
-            Effect.andThen(
+            // Fork (F20): only the user's own clients launch here, so only they get the default folder.
+            Effect.andThen(threadFolders.launchTags(input.folder)),
+            Effect.flatMap((tags) =>
               startup
                 .enqueueCommand(
                   ThreadMessageIntake.launchThread({
+                    ...(tags.length === 0 ? {} : { tags }),
                     commandId: input.commandId,
                     ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
                     ...(input.reuseExistingThread === undefined
@@ -2787,6 +2793,8 @@ export const layerWsRpc = (
         [WS_METHODS.serverGetElevenLabsApiKey]: (_input) => readElevenLabsApiKey(secretStore),
         [WS_METHODS.voiceDictationAppend]: (input) => voiceDictation.append(input),
         [WS_METHODS.voiceDictationTranscribe]: (input) => voiceDictation.transcribe(input),
+        [WS_METHODS.threadFoldersSubscribe]: (_input) => threadFolders.changes,
+        [WS_METHODS.threadFoldersUpdate]: (input) => threadFolders.update(input),
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) => relayClient.resolve,
         [WS_METHODS.cloudInstallRelayClient]: (_input) =>
           Stream.callback<RelayClientInstallProgressEvent, RelayClientInstallFailedError>((queue) =>

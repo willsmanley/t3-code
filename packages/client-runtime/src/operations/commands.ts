@@ -155,6 +155,8 @@ interface StartThreadBootstrap {
     readonly branch: string | null;
     readonly worktreePath: string | null;
     readonly createdAt: string;
+    /** Fork (F20): the folder the user picked, null for none; absent takes the server's default. */
+    readonly folder?: string | null;
   };
   readonly prepareWorktree?: {
     readonly requireWorktree?: boolean;
@@ -745,6 +747,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
       runtimeMode: input.runtimeMode,
       interactionMode: input.interactionMode,
       workspaceStrategy,
+      ...(bootstrap?.folder === undefined ? {} : { folder: bootstrap.folder }),
       initialMessage: {
         messageId: input.message.messageId,
         text: input.message.text,

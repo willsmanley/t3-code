@@ -1,9 +1,15 @@
 // Fork (F20): thread folders, shared by the desktop sidebar and the phone app. A thread's folder
-// is an ordinary thread tag, `folder:<name>`; folder order and empty folders are per-device state.
-
-const FOLDER_TAG_PREFIX = "folder:";
-/** Thread tags hold at most 64 characters; this leaves room for the prefix. */
-const MAX_FOLDER_NAME_LENGTH = 56;
+// is an ordinary thread tag, `folder:<name>`. Each server keeps its folder list (order, collapse
+// state, empty folders) and default folder; `resolveThreadFolderView` merges them for display.
+import {
+  type EnvironmentId,
+  MAX_THREAD_FOLDER_NAME_LENGTH,
+  planThreadFolderTagChange,
+  type ThreadFolderSettings,
+  type ThreadFolderTagChange,
+  type ThreadFolderUpdateInput,
+  threadFolderOfTags,
+} from "@t3tools/contracts";
 
 const CONTROL_CHARACTER = /[\p{Cc}]/u;
 const CONTROL_CHARACTERS = /[\p{Cc}]+/gu;
@@ -12,53 +18,23 @@ const CONTROL_CHARACTERS = /[\p{Cc}]+/gu;
 export function folderNameProblem(input: string): string | null {
   const name = input.trim();
   if (name.length === 0) return "Enter a folder name.";
-  if (name.length > MAX_FOLDER_NAME_LENGTH) {
-    return `Folder names can be at most ${MAX_FOLDER_NAME_LENGTH} characters.`;
+  if (name.length > MAX_THREAD_FOLDER_NAME_LENGTH) {
+    return `Folder names can be at most ${MAX_THREAD_FOLDER_NAME_LENGTH} characters.`;
   }
   if (CONTROL_CHARACTER.test(name)) return "A folder name must be a single line.";
   return null;
 }
 
-function folderTag(name: string): string {
-  return `${FOLDER_TAG_PREFIX}${name}`;
-}
-
-function folderNameOfTag(tag: string): string | null {
-  if (!tag.startsWith(FOLDER_TAG_PREFIX)) return null;
-  const name = tag.slice(FOLDER_TAG_PREFIX.length).trim();
-  return name.length > 0 ? name : null;
-}
-
 /** A thread's folder: its last folder tag, the one the server added most recently. */
-export function folderOfTags(tags: ReadonlyArray<string> | undefined): string | null {
-  if (!tags) return null;
-  for (let index = tags.length - 1; index >= 0; index--) {
-    const name = folderNameOfTag(tags[index]!);
-    if (name !== null) return name;
-  }
-  return null;
-}
+export const folderOfTags = threadFolderOfTags;
 
-export interface FolderTagChange {
-  readonly add: string | null;
-  readonly remove: readonly string[];
-}
+export type FolderTagChange = ThreadFolderTagChange;
 
 /**
  * The tag changes that put a thread in `folder` (null for no folder) and out of every other.
  * Apply `add` before `remove`, so a half-finished move leaves the thread in one folder.
  */
-export function planFolderTagChange(
-  tags: ReadonlyArray<string> | undefined,
-  folder: string | null,
-): FolderTagChange {
-  const target = folder === null ? null : folderTag(folder);
-  const current = (tags ?? []).filter((tag) => folderNameOfTag(tag) !== null);
-  return {
-    add: target !== null && !current.includes(target) ? target : null,
-    remove: current.filter((tag) => tag !== target),
-  };
-}
+export const planFolderTagChange = planThreadFolderTagChange;
 
 /** The user's folders in their order, then folders only threads know about, by name. */
 export function orderFolders(stored: readonly string[], fromThreads: Iterable<string>): string[] {
@@ -125,7 +101,7 @@ export function folderNameForProject(displayName: string): string {
   const name = displayName
     .replace(CONTROL_CHARACTERS, " ")
     .trim()
-    .slice(0, MAX_FOLDER_NAME_LENGTH)
+    .slice(0, MAX_THREAD_FOLDER_NAME_LENGTH)
     .trim();
   return name.length > 0 ? name : "Untitled project";
 }
@@ -180,4 +156,141 @@ export function chooseFolderThreadProject<R>(input: {
     if (latest === null || at > latest.at) latest = { project: thread.project, at };
   }
   return latest?.project ?? input.current ?? input.first;
+}
+
+/** Folder state kept on this device for a session when no connected server keeps folders. */
+export interface SessionFolderState {
+  readonly folders: readonly string[];
+  readonly collapsed: readonly string[];
+  readonly unfiledCollapsed: boolean;
+}
+
+export const EMPTY_SESSION_FOLDER_STATE: SessionFolderState = {
+  folders: [],
+  collapsed: [],
+  unfiledCollapsed: false,
+};
+
+export interface ThreadFolderView {
+  /** Every folder in order: the servers' lists, then folders only thread tags know, by name. */
+  readonly folders: readonly string[];
+  readonly collapsed: ReadonlySet<string>;
+  readonly unfiledCollapsed: boolean;
+  /** Where a new thread the user starts without picking a folder lands. */
+  readonly defaultFolder: string | null;
+  /** False when no connected server keeps folders, so the list lasts only this session. */
+  readonly serverBacked: boolean;
+}
+
+function changedAt(settings: ThreadFolderSettings): number {
+  if (settings.updatedAt === null) return Number.NEGATIVE_INFINITY;
+  const at = Date.parse(settings.updatedAt);
+  return Number.isNaN(at) ? Number.NEGATIVE_INFINITY : at;
+}
+
+/**
+ * One view over every connected server's folder settings. The server a user changed most
+ * recently leads; lists only seeded from tags come last, and the others add their folders after.
+ */
+export function resolveThreadFolderView(input: {
+  readonly servers: ReadonlyArray<ThreadFolderSettings>;
+  readonly fromThreads: Iterable<string>;
+  readonly session: SessionFolderState;
+}): ThreadFolderView {
+  if (input.servers.length === 0) {
+    return {
+      folders: orderFolders(input.session.folders, input.fromThreads),
+      collapsed: new Set(input.session.collapsed),
+      unfiledCollapsed: input.session.unfiledCollapsed,
+      defaultFolder: null,
+      serverBacked: false,
+    };
+  }
+  const ranked = [...input.servers].sort((left, right) => changedAt(right) - changedAt(left));
+  const lead = ranked[0]!;
+  const listed: string[] = [];
+  const collapsed = new Set<string>();
+  const seen = new Set<string>();
+  for (const settings of ranked) {
+    for (const entry of settings.folders) {
+      if (seen.has(entry.name)) continue;
+      seen.add(entry.name);
+      listed.push(entry.name);
+      if (entry.collapsed) collapsed.add(entry.name);
+    }
+  }
+  return {
+    folders: orderFolders(listed, input.fromThreads),
+    collapsed,
+    unfiledCollapsed: lead.unfiledCollapsed,
+    defaultFolder: lead.defaultFolder,
+    serverBacked: true,
+  };
+}
+
+export function threadFolderViewsEqual(left: ThreadFolderView, right: ThreadFolderView): boolean {
+  return (
+    left.unfiledCollapsed === right.unfiledCollapsed &&
+    left.defaultFolder === right.defaultFolder &&
+    left.serverBacked === right.serverBacked &&
+    left.folders.length === right.folders.length &&
+    left.folders.every((name, index) => right.folders[index] === name) &&
+    left.collapsed.size === right.collapsed.size &&
+    [...left.collapsed].every((name) => right.collapsed.has(name))
+  );
+}
+
+/** Folders a device saved before servers kept them. */
+export interface DeviceFolderState {
+  readonly folders: readonly string[];
+  readonly collapsed: readonly string[];
+  readonly unfiledCollapsed: boolean;
+}
+
+export type DeviceFolderMigrationStep =
+  | { readonly type: "wait" }
+  | { readonly type: "forget" }
+  | {
+      readonly type: "push";
+      readonly environmentIds: readonly EnvironmentId[];
+      readonly update: Extract<ThreadFolderUpdateInput, { readonly _tag: "seedFromDevice" }>;
+    };
+
+/**
+ * What to do with a device's saved folders. While every server that keeps folders still has only
+ * the list it read from thread tags, the device's order goes to all of them once; after any user
+ * change on any of them it is dropped. With no such server connected it waits.
+ */
+export function deviceFolderMigrationStep(input: {
+  readonly device: DeviceFolderState;
+  readonly environmentIds: readonly EnvironmentId[];
+  readonly settings: ReadonlyMap<EnvironmentId, ThreadFolderSettings>;
+}): DeviceFolderMigrationStep {
+  if (input.environmentIds.length === 0) return { type: "wait" };
+  const loaded = input.environmentIds.flatMap((id) => {
+    const settings = input.settings.get(id);
+    return settings === undefined ? [] : [settings];
+  });
+  if (loaded.length < input.environmentIds.length) return { type: "wait" };
+  const usable = (names: readonly string[]) =>
+    [...new Set(names.map((name) => name.trim()))].filter(
+      (name) => folderNameProblem(name) === null,
+    );
+  const order = usable(input.device.folders);
+  if (
+    loaded.some((settings) => settings.updatedAt !== null) ||
+    (order.length === 0 && !input.device.unfiledCollapsed)
+  ) {
+    return { type: "forget" };
+  }
+  return {
+    type: "push",
+    environmentIds: input.environmentIds,
+    update: {
+      _tag: "seedFromDevice",
+      order,
+      collapsed: usable(input.device.collapsed),
+      unfiledCollapsed: input.device.unfiledCollapsed,
+    },
+  };
 }

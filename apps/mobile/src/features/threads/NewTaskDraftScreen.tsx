@@ -658,6 +658,8 @@ export function NewTaskDraftScreen(props: {
     if (!message) {
       return null;
     }
+    // Before queueing, so the delivery's launch carries a folder picked for this draft.
+    fileSentDraftInFolder(currentRoute.params, message.environmentId, message.threadId);
     // Persist locally before clearing or leaving the draft; server setup runs on the thread.
     flow.setSubmitting(true);
     const queued = await settlePromise(() => enqueueThreadOutboxMessage(message));
@@ -670,7 +672,6 @@ export function NewTaskDraftScreen(props: {
       );
       return null;
     }
-    fileSentDraftInFolder(currentRoute.params, message.environmentId, message.threadId);
     promptInputRef.current?.blur();
     navigation.dispatch(
       CommonActions.setParams(

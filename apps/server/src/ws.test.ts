@@ -57,6 +57,7 @@ import * as ProviderInstallation from "./provider/providerInstallation.ts";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as DirectPush from "./notifications/DirectPush.ts";
 import * as VoiceDictation from "./voiceInput/VoiceDictation.ts";
+import * as ThreadFolderSettings from "./threadFolders/ThreadFolderSettings.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as NativeChildWorkQuery from "./orchestration-v2/NativeChildWorkQuery.ts";
 import * as CommandOutputHub from "./orchestration-v2/CommandOutputHub.ts";
@@ -796,6 +797,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(DeviceService.DeviceService)({}),
   Layer.mock(DirectPush.DirectPush)({}),
   Layer.mock(VoiceDictation.VoiceDictation)({}),
+  Layer.mock(ThreadFolderSettings.ThreadFolderSettingsService)({}),
   Layer.mock(EnvironmentTheme.EnvironmentThemeService)({}),
   Layer.mock(GitWorkflowService.GitWorkflowService)({}),
   Layer.mock(HostResources.HostResources)({}),

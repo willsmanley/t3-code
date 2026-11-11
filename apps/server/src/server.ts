@@ -104,6 +104,7 @@ import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import * as DirectPush from "./notifications/DirectPush.ts";
 import * as DirectPushDevices from "./notifications/DirectPushDevices.ts";
 import * as VoiceDictation from "./voiceInput/VoiceDictation.ts";
+import * as ThreadFolderSettings from "./threadFolders/ThreadFolderSettings.ts";
 import * as FcmClient from "./notifications/FcmClient.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import * as ServerSettings from "./serverSettings.ts";
@@ -669,6 +670,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
     ),
   ),
   VoiceDictation.layer.pipe(Layer.provide(FetchHttpClient.layer)),
+  ThreadFolderSettings.layer,
   HeldHooksWaker.layer,
   layerThreadSettlementWorker,
   layerIdleCompactionWorker,

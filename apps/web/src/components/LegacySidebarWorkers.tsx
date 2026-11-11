@@ -56,7 +56,7 @@ import {
   type WorkerState,
 } from "./legacySidebarWorkers.logic";
 import { legacyThreadFolderMenu } from "./LegacySidebarFolders";
-import { folderOfThread, useFolderOrder } from "./legacySidebarFolders.store";
+import { folderOfThread, setFolderExpanded, useFolderView } from "./legacySidebarFolders.store";
 import { Button } from "./ui/button";
 import {
   SidebarMenu,
@@ -312,7 +312,7 @@ function EnvironmentWorkers(props: EnvironmentWorkersProps) {
     DismissedWorkerRunsSchema,
   );
   const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(() => new Set());
-  const folderOrder = useFolderOrder();
+  const folderView = useFolderView();
   const tasks = tasksQuery.data?.tasks;
   if (!tasks || !shellsReady) return null;
 
@@ -450,7 +450,7 @@ function EnvironmentWorkers(props: EnvironmentWorkersProps) {
   const threadGroups = groupWorkers(
     workerThreads,
     (worker) => folderOfThread(worker.thread) ?? UNFILED_WORKERS_KEY,
-    folderOrder,
+    folderView.folders,
   );
   const orderedJobs = groupWorkers(
     listedJobs,
@@ -463,8 +463,20 @@ function EnvironmentWorkers(props: EnvironmentWorkersProps) {
         <WorkerGroup
           key={`folder:${group.key}`}
           name={group.key === UNFILED_WORKERS_KEY ? "Unfiled" : group.key}
-          expanded={!collapsedGroups.has(`folder:${group.key}`)}
-          onToggle={() => toggleGroup(`folder:${group.key}`)}
+          expanded={
+            group.key === UNFILED_WORKERS_KEY
+              ? !folderView.unfiledCollapsed
+              : !folderView.collapsed.has(group.key)
+          }
+          // Folder collapse is the server's, shared with the Projects tab and the phone.
+          onToggle={() =>
+            setFolderExpanded(
+              group.key === UNFILED_WORKERS_KEY ? null : group.key,
+              group.key === UNFILED_WORKERS_KEY
+                ? folderView.unfiledCollapsed
+                : folderView.collapsed.has(group.key),
+            )
+          }
         >
           {renderThreadRows(group.workers)}
         </WorkerGroup>

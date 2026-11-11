@@ -41,6 +41,7 @@ import {
   startFanoutThread,
 } from "./chatViewSend";
 import type { useLocalDispatchState } from "./useLocalDispatchState";
+import { draftLaunchFolder } from "../legacySidebarFolders.store";
 
 interface MultipleModelSendInput {
   readonly environmentId: EnvironmentId;
@@ -186,6 +187,7 @@ export function useMultipleModelSend(input: MultipleModelSendInput) {
                       branch,
                       worktreePath: null,
                       createdAt: createdAt,
+                      ...draftLaunchFolder(draftId),
                     },
                     prepareWorktree: {
                       projectCwd: project.workspaceRoot,
