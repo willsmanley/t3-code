@@ -8,7 +8,7 @@ import {
   type ElevenLabsRecordings,
   type VoiceTranscriber,
 } from "@t3tools/client-runtime/voice-input";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { File, FileMode, UploadType } from "expo-file-system";
 import * as SecureStore from "expo-secure-store";
 
@@ -18,10 +18,18 @@ import { androidRecordings } from "./savedRecordings";
 
 const serverDictationCommands = createServerDictationCommands(connectionAtomRuntime);
 let dictationEnvironmentId: EnvironmentId | null = null;
+let dictationThreadId: ThreadId | null = null;
 
-/** The server the next dictation streams to: the one that owns the composer's thread (F16). */
-export function setDictationEnvironment(environmentId: EnvironmentId | null): void {
+/**
+ * The server the next dictation streams to, the one that owns the composer's thread (F16), and
+ * that thread, or null for a draft.
+ */
+export function setDictationTarget(
+  environmentId: EnvironmentId | null,
+  threadId: ThreadId | null,
+): void {
   dictationEnvironmentId = environmentId;
+  dictationThreadId = threadId;
 }
 
 const API_KEY_STORAGE_KEY = "voice-input.elevenlabs-api-key";
@@ -58,6 +66,7 @@ export function getElevenLabsTranscriber(): VoiceTranscriber {
     read: readRecordingFrom,
     recordings: androidElevenLabsRecordings,
     source: "mobile",
+    threadId: dictationThreadId,
     locale,
     fallback: createElevenLabsTranscriber(androidElevenLabsRecordings, locale),
   });

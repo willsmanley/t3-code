@@ -715,7 +715,9 @@ does, so an agent that is still working follows the follow-up setting (steer by 
 ✓ (or Shift-clicking it on web and desktop) only puts the words in the draft. Every dictation
 writes one line to `<userdata>/logs/voice-dictation.ndjson` (sizes and timings, no words). The
 server keeps a recording's audio until it is transcribed and the transcript for a week, in
-`<userdata>/voice-dictation/`, so a client that loses its connection can ask again. Web records
+`<userdata>/voice-dictation/`, so a client that loses its connection can ask again. Each file
+name starts with the thread's id and an underscore (no prefix for a draft), so an agent can find a
+dictation that was never sent with `ls "<userdata>/voice-dictation/${T3CODE_THREAD_ID}_"*`. Web records
 Opus at 24 kbps (48 kbps for MP4), Android AAC at 16 kHz and 48 kbps; tests on real and LibriSpeech
 audio found no accuracy loss against lossless at those rates. A client whose server lacks the RPCs
 or stays unreachable uploads straight to ElevenLabs as before, now with a 90-second limit on each

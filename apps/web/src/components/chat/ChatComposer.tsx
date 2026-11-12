@@ -1806,6 +1806,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const commitVoiceInputDraftStable = useStableCallback(commitVoiceInputDraft);
   const voiceInput = useComposerVoiceInput({
     environmentId,
+    threadId: routeThreadRef.threadId,
     ownerKey: voiceInputOwnerKey,
     readDraft: readVoiceInputDraftStable,
     commitDraft: commitVoiceInputDraftStable,

@@ -36,6 +36,7 @@ function setup(transport: ServerDictationTransport, fallback: VoiceTranscriber |
     }),
     recordings: elevenLabs,
     source: "web",
+    threadId: "thread-1",
     locale: () => "en-US",
     fallback,
   });
@@ -54,7 +55,7 @@ describe("createServerDictationTranscriber", () => {
     const transcribeCalls: Array<{ totalBytes: number; source: string }> = [];
     const transport: ServerDictationTransport = {
       append: async ({ offset, data, dictationId }) => {
-        expect(dictationId).toBe("recording-1");
+        expect(dictationId).toBe("thread-1_recording-1");
         const bytes = Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
         appended.push({ offset, text: decoder.decode(bytes) });
         if (offset <= held.length) {

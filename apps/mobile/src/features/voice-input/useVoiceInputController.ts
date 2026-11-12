@@ -5,10 +5,10 @@ import {
   type VoiceInputState,
 } from "@t3tools/client-runtime/voice-input";
 
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 
 import type { ComposerEditorSelection } from "../../components/ComposerEditor";
-import { setDictationEnvironment } from "./elevenLabsTranscription";
+import { setDictationTarget } from "./elevenLabsTranscription";
 import { useGlobalVoiceInput } from "./VoiceInputProvider";
 import { createVoiceInputTarget } from "./voiceInputSession";
 
@@ -18,6 +18,8 @@ export function useVoiceInputController(input: {
   readonly ownerKey: string | null;
   /** The server that transcribes this composer's dictation. */
   readonly environmentId?: EnvironmentId;
+  /** The thread dictated into; absent for a draft or a form with no thread. */
+  readonly threadId?: ThreadId;
   readonly label: string;
   readonly readDraftMessage: () => string | null;
   readonly subscribeToDraftChanges: (onChange: () => void) => () => void;
@@ -52,7 +54,7 @@ export function useVoiceInputController(input: {
   const start = useCallback(() => {
     const captured = latestInput.current;
     if (!captured.ownerKey || captured.disabled) return;
-    setDictationEnvironment(captured.environmentId ?? null);
+    setDictationTarget(captured.environmentId ?? null, captured.threadId ?? null);
     void session.start({
       ...createVoiceInputTarget(
         captured.ownerKey,

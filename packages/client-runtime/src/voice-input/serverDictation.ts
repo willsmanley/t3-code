@@ -111,11 +111,19 @@ function waitFor(milliseconds: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-function dictationIdFor(recordings: ElevenLabsRecordings, uri: string): string {
-  return recordings.storage
-    .idForUri(uri)
-    .replaceAll(/[^A-Za-z0-9_-]/g, "_")
-    .slice(0, 128);
+/**
+ * The server keeps each transcript for a week under this id. It starts with the thread's id, so an
+ * agent in that thread can find a dictation that was never sent.
+ */
+function dictationIdFor(
+  recordings: ElevenLabsRecordings,
+  uri: string,
+  threadId: string | null,
+): string {
+  const clean = (value: string) => value.replaceAll(/[^A-Za-z0-9_-]/g, "_");
+  const id = clean(recordings.storage.idForUri(uri));
+  const withThread = threadId === null ? id : `${clean(threadId)}_${id}`;
+  return (withThread.length <= 128 ? withThread : id).slice(0, 128);
 }
 
 class ServerDictationUnreachable extends Schema.TaggedError<ServerDictationUnreachable>()(
@@ -143,17 +151,20 @@ class ServerDictationUpload {
   private readonly read: RecordingAudioReader;
   private readonly recordings: ElevenLabsRecordings;
   private readonly source: "web" | "mobile";
+  private readonly threadId: string | null;
 
   constructor(
     transport: ServerDictationTransport,
     read: RecordingAudioReader,
     recordings: ElevenLabsRecordings,
     source: "web" | "mobile",
+    threadId: string | null,
   ) {
     this.transport = transport;
     this.read = read;
     this.recordings = recordings;
     this.source = source;
+    this.threadId = threadId;
   }
 
   /** Sends what was recorded since the last call, at most once a second. Never throws. */
@@ -169,7 +180,7 @@ class ServerDictationUpload {
     this.uri = uri;
     const stoppedAt = Date.now();
     let deadline = stoppedAt + SERVER_DEADLINE_MS;
-    const dictationId = dictationIdFor(this.recordings, uri);
+    const dictationId = dictationIdFor(this.recordings, uri, this.threadId);
     let failures = 0;
     let incompleteRounds = 0;
     for (;;) {
@@ -229,7 +240,7 @@ class ServerDictationUpload {
   }
 
   private async sendPending(uri: string): Promise<number> {
-    const dictationId = dictationIdFor(this.recordings, uri);
+    const dictationId = dictationIdFor(this.recordings, uri, this.threadId);
     let stalls = 0;
     for (;;) {
       const offset = this.sentBytes;
@@ -265,6 +276,8 @@ export function createServerDictationTranscriber(options: {
   readonly read: RecordingAudioReader;
   readonly recordings: ElevenLabsRecordings;
   readonly source: "web" | "mobile";
+  /** The thread being dictated into, or null for a draft that has no thread yet. */
+  readonly threadId: string | null;
   readonly locale: () => string;
   readonly fallback: VoiceTranscriber | null;
 }): VoiceTranscriber {
@@ -300,7 +313,13 @@ export function createServerDictationTranscriber(options: {
         }
         return fallback.prepare({ signal });
       }
-      const upload = new ServerDictationUpload(transport, options.read, recordings, options.source);
+      const upload = new ServerDictationUpload(
+        transport,
+        options.read,
+        recordings,
+        options.source,
+        options.threadId,
+      );
       activeUpload = upload;
       return {
         locale: options.locale(),

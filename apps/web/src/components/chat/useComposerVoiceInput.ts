@@ -4,7 +4,7 @@ import {
   type VoiceDraftSnapshot,
   type VoiceInputState,
 } from "@t3tools/client-runtime/voice-input";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useEffect, useRef, useState } from "react";
 
 import {
@@ -28,6 +28,7 @@ const IDLE_STATE: VoiceInputState = { phase: "idle", error: null, errorAction: n
  */
 export function useComposerVoiceInput(input: {
   readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
   readonly ownerKey: string;
   readonly readDraft: () => VoiceDraftSnapshot | null;
   readonly commitDraft: (
@@ -37,7 +38,9 @@ export function useComposerVoiceInput(input: {
 }) {
   const [state, setState] = useState<VoiceInputState>(IDLE_STATE);
   const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null);
-  const getTranscriber = useStableCallback(() => getElevenLabsTranscriber(input.environmentId));
+  const getTranscriber = useStableCallback(() =>
+    getElevenLabsTranscriber(input.environmentId, input.threadId),
+  );
   const [controller] = useState(() => {
     pruneSavedTranscriptsOnce();
     const recorder = new WebVoiceRecorder((status) => {

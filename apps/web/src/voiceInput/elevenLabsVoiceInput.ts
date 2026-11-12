@@ -14,7 +14,7 @@ import {
   type VoiceTranscriber,
 } from "@t3tools/client-runtime/voice-input";
 import { createEnvironmentRpcCommand, runAtomCommand } from "@t3tools/client-runtime/state/runtime";
-import { type EnvironmentId, WS_METHODS } from "@t3tools/contracts";
+import { type EnvironmentId, type ThreadId, WS_METHODS } from "@t3tools/contracts";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 import { randomUUID } from "../lib/utils";
@@ -52,7 +52,10 @@ export function webElevenLabsRecordings(
  * Streams the recording to the thread's server, which transcribes it (F16). An older server,
  * or one that stays unreachable, gets the recording uploaded straight to ElevenLabs instead.
  */
-export function getElevenLabsTranscriber(environmentId: EnvironmentId): VoiceTranscriber {
+export function getElevenLabsTranscriber(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+): VoiceTranscriber {
   const recordings = webElevenLabsRecordings([environmentId]);
   const locale = () => navigator.language;
   return createServerDictationTranscriber({
@@ -60,6 +63,7 @@ export function getElevenLabsTranscriber(environmentId: EnvironmentId): VoiceTra
     read: readRecordingFrom,
     recordings,
     source: "web",
+    threadId,
     locale,
     fallback: createElevenLabsTranscriber(recordings, locale),
   });
