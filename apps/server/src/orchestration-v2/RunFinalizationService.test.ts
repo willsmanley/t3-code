@@ -23,6 +23,7 @@ import * as ProjectEnrichment from "../project/ProjectEnrichmentService.ts";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
 import * as WorkspaceEntries from "../workspace/WorkspaceEntries.ts";
@@ -346,7 +347,16 @@ it.effect("resolves the identity of a project whose remote was added during the 
       );
     }).pipe(
       Effect.scoped,
-      Effect.provide(layerIdentityRefresh(workspaceRoot, RepositoryIdentityResolver.layer)),
+      Effect.provide(
+        layerIdentityRefresh(
+          workspaceRoot,
+          // Fork (F5): the resolver reads the Git-off switch.
+          RepositoryIdentityResolver.layer.pipe(
+            Layer.provide(ServerSettings.layerTest()),
+            Layer.orDie,
+          ),
+        ),
+      ),
     );
   }).pipe(
     Effect.scoped,

@@ -66,6 +66,7 @@ const makeCaptureStore = Effect.fn("test.makeCaptureStore")(function* (
       get: () => Effect.succeed(driver),
       detect: () => Effect.succeed(handle),
       resolve: () => Effect.succeed(handle),
+      sourceControlEnabled: Effect.succeed(true),
     }),
   );
 });

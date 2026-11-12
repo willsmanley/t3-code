@@ -206,15 +206,19 @@ Touch points:
 - `apps/server/src/provider/agentContextBudget.json`: `mcpToolListJsonBytes` is the fork's
   measured size (see "Merge hazards").
 - `apps/web/src/components/settings/ScheduledTasksSettings.tsx`: time zone field, active hours,
-  "Stop after N runs / at" fields (hidden for once), `ScheduledStoppedLabel`, `cadenceLabel`
-  (wraps upstream's label). The Once toggle is upstream's.
+  "Stop after N runs / at" fields (hidden for once), `ScheduledStoppedLabel`. The Once toggle is
+  upstream's. Upstream's short server zone beside "Run at" (`serverZone`, November 12, 2026)
+  shows only while the task's own time zone is blank.
 - `apps/web/src/components/settings/scheduledTasksSettings.logic.ts`: draft fields, the fork's
   checks in upstream's `scheduleDraftErrors` (webhook checks in a private `webhookDraftErrors`),
-  `endsFromDraft`; end times use upstream's `toDateTimeLocalValue` (+ test).
+  `endsFromDraft`; end times use upstream's `toDateTimeLocalValue` (+ test). `scheduleLabel`
+  (upstream moved it here) adds the run limit and end time, and `cadenceLabel` names a task's own
+  zone in full and otherwise upstream's short server zone (`scheduleTimeZoneLabel`).
 - `apps/web/src/components/chat/ThreadAutomationsPanel.tsx`: uses `ScheduledStoppedLabel`.
 - `apps/mobile/src/features/settings/SettingsScheduledTasksRouteScreen.tsx`: the same fields on
   mobile (`TimeOfDayRow`, `InstantRows` for the end time, `stoppedLabel`). The once rows and
-  `runAtPicker` are upstream's.
+  `runAtPicker` are upstream's. `TimeOfDayRow`'s `zone` shows upstream's short server zone while
+  the task has no zone, and `describeCadence` names a task's own zone in full.
 - `apps/mobile/src/features/settings/scheduledTaskDraft.ts`: draft fields; upstream's once branch
   runs first in `scheduleFromDraft`, so stop fields never block a once save (+ test).
 - `packages/client-runtime/package.json`: export `./scheduled-task-schedule`.
@@ -245,7 +249,10 @@ Touch points:
   and `ServerSettingsPatch`.
 - `apps/server/src/serverSettings.ts`: the `sourceControlEnabled` helper.
 - `apps/server/src/vcs/VcsDriverRegistry.ts`: `detect` returns null when off, plus a resolve
-  error message (+ test).
+  error message (+ test), and a `sourceControlEnabled` field for callers that ask a driver
+  directly.
+- `apps/server/src/checkpointing/CheckpointStore.ts`: `isGitRepository` returns false when off
+  instead of asking Git again (upstream's fallback for unreadable repositories, November 2026).
 - `apps/server/src/git/GitManager.ts`: `branchPullRequest` returns null when off (+ test).
 - `apps/server/src/project/RepositoryIdentityResolver.ts`: `resolve` returns null when off
   (+ test).
@@ -259,7 +266,10 @@ Touch points:
 - Wiring only (each adds `ServerSettings.layerTest()`): `CheckpointStore.test.ts` (which also has
   a real test), `CheckpointDiffQuery.test.ts`, `WorkspaceFileSystem.test.ts`,
   `orchestration-v2/testkit/ProviderReplayHarness.ts`, `orchestration-v2/ProviderTurnStartService.testkit.ts`
-  (on its VcsDriverRegistry layer), `apps/server/scripts/evaluate-thread-titles.ts`.
+  (on its VcsDriverRegistry layer), `apps/server/scripts/evaluate-thread-titles.ts`,
+  `orchestration-v2/RunFinalizationService.test.ts` (its RepositoryIdentityResolver layer) and
+  `VcsDriverRegistry.test.ts` (upstream's `makeFailingLayer`). `GitVcsDriver.test.ts` adds
+  `sourceControlEnabled` to its registry stub.
 - `apps/web/src/components/settings/ProjectDefaultsSettings.tsx`: the switch row.
   `settingsSearch.ts`: the `git-integration` search entry.
   `apps/web/src/components/chat/ThreadDetailsPanel.tsx`: the `show.branch` and `show.git` flags
@@ -1054,7 +1064,8 @@ Fork-owned files:
 - Mobile: `apps/mobile/src/features/threads/threadFolderActions.ts` (folder atoms and actions, tag
   writes, prompts, draft filing, the row menu), `threadFolderListItems.ts` (the tree's list
   items), `thread-folder-tree.tsx` (grouping, headers and actions for both lists),
-  `use-thread-folders.ts` (view state and the migration), `FolderArrangementSheet.tsx`,
+  `use-thread-folders.ts` (view state and the migration), `FolderArrangementSheet.tsx` (a
+  `LegendList`, as upstream's `ThreadArrangementSheet`, since FlatList is a restricted import),
   `projectThreadTree.ts` (+ test; `buildFolderThreadTreeListItems`),
   `project-thread-tree-items.tsx` (`ThreadFolderHeader`),
   `apps/mobile/src/persistence/thread-folder-preferences.ts`,
@@ -1100,7 +1111,8 @@ Touch points:
   `NewFolderButton` beside `NewWorkerButton`, and `readNewThreadProjectRef()` first in
   `startThreadInFolder`. `lib/chatThreadActions.ts` (`startNewThreadFromContext`) and
   `routes/_chat.index.tsx` (landing draft): one new-thread-project line each.
-  `settings/ProjectSettingsPanel.tsx`: `<NewThreadProjectSettingsRow …/>`.
+  `settings/ProjectSettingsPanel.tsx`: `<NewThreadProjectSettingsRow …/>`, preferring upstream's
+  `filePickerProject` (a checkout whose server is connected).
   `AppSidebarLayout.tsx`: mounts `LegacySidebarFoldersHost` beside the sidebar when
   `isElectron || forceLegacySidebar`. `chat/useComposerSend.ts` and `chat/useMultipleModelSend.ts`:
   `...draftLaunchFolder(draftId)` in the bootstrap's `createThread`.

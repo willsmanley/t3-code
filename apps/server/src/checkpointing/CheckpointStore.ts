@@ -90,6 +90,8 @@ export const make = Effect.gen(function* () {
     "CheckpointStore.isGitRepository",
   )(function* (cwd) {
     if ((yield* vcsRegistry.detect({ cwd, requestedKind: "git" })) !== null) return true;
+    // Fork (F5): with Git integration off, detect's "none" is the answer; don't ask Git.
+    if (!(yield* vcsRegistry.sourceControlEnabled)) return false;
     const git = yield* vcsRegistry.get("git");
     return (yield* git.detectRepository(cwd)) !== null;
   });

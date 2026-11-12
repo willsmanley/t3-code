@@ -37,6 +37,8 @@ export class VcsDriverRegistry extends Context.Service<
       input: VcsDriverResolveInput,
     ) => Effect.Effect<VcsDriverHandle | null, VcsError>;
     readonly resolve: (input: VcsDriverResolveInput) => Effect.Effect<VcsDriverHandle, VcsError>;
+    /** Fork (F5): false while Git integration is off, for callers that ask a driver directly. */
+    readonly sourceControlEnabled: Effect.Effect<boolean>;
   }
 >()("t3/vcs/VcsDriverRegistry") {}
 
@@ -213,6 +215,7 @@ export const make = Effect.gen(function* () {
     get,
     detect,
     resolve,
+    sourceControlEnabled,
   });
 });
 
