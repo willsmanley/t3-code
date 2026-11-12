@@ -5,6 +5,7 @@ import {
   type ProjectId,
   ScheduledTaskId,
   type ScheduledTask,
+  type ScheduledTaskSchedule,
   type ScheduledTaskThreadMode,
   type ScheduledTaskUpsertSchedule,
   scheduledTaskThreadMode,
@@ -29,6 +30,7 @@ import {
   timeZoneForSave,
   type ActiveHoursDraft,
 } from "@t3tools/client-runtime/scheduled-task-schedule";
+import { scheduleTimeZoneLabel } from "@t3tools/client-runtime/scheduled-task-time-zone";
 
 import {
   resolveProjectSettings,
@@ -37,6 +39,58 @@ import {
 import type { ProviderInstanceEntry } from "../../providerInstances";
 
 import type { ResolvedSettingsScope } from "./settingsScope";
+
+export const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+
+const ONCE_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+
+export function scheduleLabel(
+  schedule: ScheduledTaskSchedule,
+  timeZone?: string,
+  runAt?: string | null,
+): string {
+  const cadence = cadenceLabel(schedule, timeZone, runAt);
+  if (schedule.type === "once") return cadence;
+  const ends = [
+    ...(schedule.endAfterRuns === undefined ? [] : [`up to ${schedule.endAfterRuns} runs`]),
+    ...(schedule.endAt === undefined
+      ? []
+      : [`until ${ONCE_FORMATTER.format(new Date(schedule.endAt))}`]),
+  ];
+  return [cadence, ...ends].join(", ");
+}
+
+function cadenceLabel(
+  schedule: ScheduledTaskSchedule,
+  timeZone: string | undefined,
+  runAt: string | null | undefined,
+): string {
+  if (schedule.type === "webhook") return "On webhook";
+  if (schedule.type === "once") return `Once, ${ONCE_FORMATTER.format(new Date(schedule.runAt))}`;
+  if (schedule.type === "interval") {
+    const minutes = schedule.everyMs / 60_000;
+    const every = Number.isInteger(minutes)
+      ? `Every ${minutes} min`
+      : `Every ${Math.round(schedule.everyMs / 1000)} sec`;
+    const window = schedule.activeHours;
+    if (window === undefined) return every;
+    return `${every}, ${window.start}–${window.end}${window.timeZone ? ` (${window.timeZone})` : ""}`;
+  }
+  const weekdays = schedule.weekdays ?? [];
+  const days =
+    weekdays.length === 0
+      ? "Daily"
+      : weekdays.length === 5 && weekdays.every((day) => day >= 1 && day <= 5)
+        ? "Weekdays"
+        : weekdays.map((day) => WEEKDAY_LABELS[day]).join(", ");
+  // A zone the task chose (fork F4) is named in full; otherwise the server's zone, short.
+  if (schedule.timeZone) return `${days} at ${schedule.timeOfDay} (${schedule.timeZone})`;
+  const zone = scheduleTimeZoneLabel(timeZone, runAt);
+  return `${days} at ${schedule.timeOfDay}${zone === undefined ? "" : ` ${zone}`}`;
+}
 
 export function matchesScheduledTaskScope(
   scope: ResolvedSettingsScope,

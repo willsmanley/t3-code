@@ -24,6 +24,7 @@ import { museModelCapabilities, resolveMuseReasoningEffort } from "./modelCatalo
 import type { ProviderTextGeneration } from "@t3tools/provider-core/server/textGeneration";
 import { threadFolderAnswer } from "@t3tools/provider-core/server/threadFolderPrompt";
 import {
+  generatedThreadTitle,
   investigationUnsupported,
   TranscriptionPostProcessingOutput,
 } from "@t3tools/provider-core/server/textGenerationOperations";
@@ -36,7 +37,6 @@ import {
 import {
   sanitizeCommitSubject,
   sanitizePrTitle,
-  sanitizeThreadTitle,
   toJsonSchemaObject,
 } from "@t3tools/provider-core/server/textGenerationUtils";
 
@@ -350,7 +350,7 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
       modelSelection: input.modelSelection,
     });
     return {
-      title: sanitizeThreadTitle(generated.title),
+      title: yield* generatedThreadTitle(generated.title),
       ...threadFolderAnswer(generated),
     };
   });

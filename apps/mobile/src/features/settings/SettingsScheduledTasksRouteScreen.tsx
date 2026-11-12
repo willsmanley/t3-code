@@ -38,6 +38,7 @@ import {
   WEBHOOK_FILTER_OPS,
   type WebhookFilterDraft,
 } from "@t3tools/client-runtime/scheduled-task-webhook";
+import { scheduleTimeZoneLabel } from "@t3tools/client-runtime/scheduled-task-time-zone";
 import { useRef, useState, type ReactNode } from "react";
 import { useFocusEffect, useNavigation, usePreventRemove } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -68,6 +69,7 @@ import {
 import { tryCopyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { usePreparedConnection } from "../../state/session";
 import { buildModelOptions } from "../../lib/modelOptions";
+import { withImplicitFastModeSelection } from "../../lib/providerOptions";
 import { useProjects, useEnvironmentServerConfig } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
@@ -125,8 +127,8 @@ const THREAD_MODE_LABELS: Record<ScheduledTaskThreadMode, string> = {
   fresh_session: "One thread, fresh session",
 };
 
-function describeSchedule(task: ScheduledTask): string {
-  const cadence = describeCadence(task);
+function describeSchedule(task: ScheduledTask, timeZone?: string): string {
+  const cadence = describeCadence(task, timeZone);
   if (task.schedule.type === "once") return cadence;
   const { endAfterRuns, endAt } = task.schedule;
   return [
@@ -136,7 +138,7 @@ function describeSchedule(task: ScheduledTask): string {
   ].join(", ");
 }
 
-function describeCadence(task: ScheduledTask): string {
+function describeCadence(task: ScheduledTask, timeZone: string | undefined): string {
   if (task.schedule.type === "webhook") return "On webhook";
   if (task.schedule.type === "once") {
     const runAt = new Date(task.schedule.runAt);
@@ -150,8 +152,12 @@ function describeCadence(task: ScheduledTask): string {
     return `${every}, ${formatTime(window.start)}–${formatTime(window.end)}${zone}`;
   }
   const days = task.schedule.weekdays?.length ? repeatLabel(task.schedule.weekdays) : "Every day";
-  const zone = task.schedule.timeZone ? ` (${task.schedule.timeZone})` : "";
-  return `${days} at ${formatTime(task.schedule.timeOfDay)}${zone}`;
+  // A zone the task chose (fork F4) is named in full; otherwise the server's zone, short.
+  if (task.schedule.timeZone) {
+    return `${days} at ${formatTime(task.schedule.timeOfDay)} (${task.schedule.timeZone})`;
+  }
+  const zone = scheduleTimeZoneLabel(timeZone, task.nextRunAt);
+  return `${days} at ${formatTime(task.schedule.timeOfDay)}${zone === undefined ? "" : ` ${zone}`}`;
 }
 
 function formatDateTime(value: Date): string {
@@ -291,12 +297,14 @@ function DateTimePickerRow(props: {
 function TimeOfDayRow(props: {
   readonly label: string;
   readonly value: string;
+  /** Upstream's short server zone, shown after the time when the task has no zone of its own. */
+  readonly zone?: string | undefined;
   readonly onChange: (value: string) => void;
 }) {
   return (
     <DateTimePickerRow
       label={props.label}
-      valueLabel={formatTime(props.value)}
+      valueLabel={`${formatTime(props.value)}${props.zone ? ` ${props.zone}` : ""}`}
       mode="time"
       value={timePickerValue(props.value)}
       onChange={(selected) =>
@@ -830,6 +838,7 @@ function TaskForm({
     draft.task !== null &&
     tasks.data !== null &&
     !tasks.data.tasks.some((task) => task.id === draft.task?.id);
+  const runAtZone = scheduleTimeZoneLabel(tasks.data?.timeZone);
   const environmentUnavailable = !availableTargets.some(
     (target) => target.environmentId === environmentId,
   );
@@ -940,7 +949,7 @@ function TaskForm({
       title: draft.title.trim(),
       prompt: draft.prompt.trim(),
       projectId: draft.projectId,
-      modelSelection: draft.modelSelection,
+      modelSelection: withImplicitFastModeSelection(draft.modelSelection, config?.providers ?? []),
       schedule,
       enabled: draft.enabled,
       threadId: draft.threadId,
@@ -1231,6 +1240,7 @@ function TaskForm({
               <TimeOfDayRow
                 label="Time"
                 value={draft.schedule.timeOfDay}
+                zone={draft.schedule.timeZone.trim() ? undefined : runAtZone}
                 onChange={(timeOfDay) =>
                   setDraft({ ...draft, schedule: { ...draft.schedule, timeOfDay } })
                 }
@@ -1767,7 +1777,7 @@ function EnvironmentTasks({
                 {task.title}
               </Text>
               <Text className="text-sm text-foreground-muted" numberOfLines={2}>
-                {describeSchedule(task)}
+                {describeSchedule(task, tasks.data?.timeZone)}
                 {!task.enabled
                   ? ` · ${stoppedLabel(task, now)}`
                   : task.nextRunAt

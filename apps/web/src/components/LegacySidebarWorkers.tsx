@@ -41,11 +41,8 @@ import { buildThreadRouteParams } from "../threadRoutes";
 import { useUiStateStore } from "../uiStateStore";
 import type { SidebarThreadSummary } from "../types";
 import { RelativeTime } from "./RelativeTime";
-import {
-  ScheduledRelativeLabel,
-  ScheduledStoppedLabel,
-  scheduleLabel,
-} from "./settings/ScheduledTasksSettings";
+import { ScheduledRelativeLabel, ScheduledStoppedLabel } from "./settings/ScheduledTasksSettings";
+import { scheduleLabel } from "./settings/scheduledTasksSettings.logic";
 import { resolveThreadLastVisitedAt, resolveThreadStatusPill } from "./Sidebar.logic";
 import { ThreadStatusLabel } from "./ThreadStatusIndicators";
 import {
