@@ -27,6 +27,7 @@ import {
 
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useThreadActions } from "../hooks/useThreadActions";
+import { useArchivedThreadSnapshots } from "../lib/archivedThreadsState";
 import { readLocalApi } from "../localApi";
 import { cn } from "../lib/utils";
 import { useAllEnvironmentShellsBootstrapped, useThreadShells } from "../state/entities";
@@ -48,8 +49,10 @@ import { ThreadStatusLabel } from "./ThreadStatusIndicators";
 import {
   groupWorkers,
   type LegacySidebarTab,
+  resolveJobThreadState,
   resolveWorkerState,
   resolveWorkerThreadState,
+  soonestRunAt,
   type WorkerState,
 } from "./legacySidebarWorkers.logic";
 import { legacyThreadFolderMenu } from "./LegacySidebarFolders";
@@ -216,6 +219,18 @@ interface WorkerEntry {
   readonly state: WorkerState;
 }
 
+/**
+ * A project thread, open or archived, with the jobs that post into it. A job that starts a new
+ * thread each run has no thread of its own, so it gets a row to itself.
+ */
+interface JobThreadEntry {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId | null;
+  readonly thread: SidebarThreadSummary | null;
+  readonly jobs: readonly [WorkerEntry, ...WorkerEntry[]];
+  readonly state: WorkerState;
+}
+
 /** A thread the user moved to Workers, with the jobs that post into it. */
 interface WorkerThreadEntry {
   readonly environmentId: EnvironmentId;
@@ -372,9 +387,25 @@ function EnvironmentWorkers(props: EnvironmentWorkersProps) {
         }),
       };
     });
-  const projectThreadJobs = jobs.filter(
-    (job) => job.thread === null || !isWorkerThread(job.thread.source),
-  );
+  // One row per project thread, however many jobs post into it.
+  const projectThreadJobs = groupWorkers(
+    jobs.filter((job) => job.thread === null || !isWorkerThread(job.thread.source)),
+    (job) => (job.task.threadId === null ? `job:${job.task.id}` : `thread:${job.task.threadId}`),
+    [],
+  ).flatMap((group): JobThreadEntry[] => {
+    const [first, ...rest] = group.workers;
+    if (!first) return [];
+    const threadJobs: JobThreadEntry["jobs"] = [first, ...rest];
+    return [
+      {
+        environmentId,
+        threadId: first.task.threadId,
+        thread: first.thread,
+        jobs: threadJobs,
+        state: resolveJobThreadState(threadJobs.map((job) => job.state)),
+      },
+    ];
+  });
 
   const dismiss = (task: ScheduledTask) => {
     if (task.lastRunAt === null) return;
@@ -392,12 +423,12 @@ function EnvironmentWorkers(props: EnvironmentWorkersProps) {
   const isRouteThread = (threadId: ThreadId | null) =>
     threadId !== null &&
     routeThreadKey === scopedThreadKey(scopeThreadRef(environmentId, threadId));
-  const renderJobRows = (entries: readonly WorkerEntry[]) =>
-    entries.map((worker) => (
-      <SidebarWorkerRow
-        key={worker.task.id}
-        worker={worker}
-        isActive={isRouteThread(worker.task.threadId)}
+  const renderJobRows = (entries: readonly JobThreadEntry[]) =>
+    entries.map((entry) => (
+      <SidebarJobThreadRow
+        key={entry.threadId ?? entry.jobs[0].task.id}
+        entry={entry}
+        isActive={isRouteThread(entry.threadId)}
         showLastRun={mode === "needs-you"}
         onDismiss={dismiss}
       />
@@ -451,7 +482,7 @@ function EnvironmentWorkers(props: EnvironmentWorkersProps) {
   );
   const orderedJobs = groupWorkers(
     listedJobs,
-    (worker) => projectKeyOf(worker.task.projectId),
+    (entry) => projectKeyOf(entry.jobs[0].task.projectId),
     projects.order,
   ).flatMap((group) => group.workers);
   return (
@@ -520,19 +551,52 @@ function WorkerGroup(props: {
   );
 }
 
-function SidebarWorkerRow(props: {
-  worker: WorkerEntry;
+/** Turns each job on or off, skipping the ones already there. */
+function useSetJobsEnabled(environmentId: EnvironmentId) {
+  const setEnabled = useAtomCommand(serverEnvironment.setScheduledTaskEnabled, {
+    label: "worker enabled",
+  });
+  return async (tasks: readonly ScheduledTask[], enabled: boolean) => {
+    for (const task of tasks) {
+      if (task.enabled === enabled) continue;
+      reportCommandFailure(
+        "Could not update job",
+        await setEnabled({ environmentId, input: { id: task.id, enabled } }),
+      );
+    }
+  };
+}
+
+/** The job a row reports on when none runs soon: the one that ran last, or changed last. */
+function latestJob(tasks: readonly [ScheduledTask, ...ScheduledTask[]]): ScheduledTask {
+  const ranAt = (task: ScheduledTask) => task.lastRunAt ?? task.updatedAt;
+  return tasks.reduce((latest, task) => (ranAt(task) > ranAt(latest) ? task : latest));
+}
+
+/** An archived thread's title. Thread lists leave archived threads out, so it comes from the archive. */
+function ArchivedThreadTitle(props: {
+  environmentId: EnvironmentId;
+  threadId: ThreadId;
+  fallback: string;
+}) {
+  const { snapshots } = useArchivedThreadSnapshots([props.environmentId]);
+  const title = snapshots
+    .find((entry) => entry.environmentId === props.environmentId)
+    ?.snapshot.threads.find((thread) => thread.id === props.threadId)?.title;
+  return <>{title ?? props.fallback}</>;
+}
+
+function SidebarJobThreadRow(props: {
+  entry: JobThreadEntry;
   isActive: boolean;
   showLastRun: boolean;
   onDismiss: (task: ScheduledTask) => void;
 }) {
-  const { worker, isActive, showLastRun, onDismiss } = props;
-  const { environmentId, task, thread, state } = worker;
+  const { entry, isActive, showLastRun, onDismiss } = props;
+  const { environmentId, threadId, thread, jobs, state } = entry;
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
-  const setEnabled = useAtomCommand(serverEnvironment.setScheduledTaskEnabled, {
-    label: "worker enabled",
-  });
+  const setJobsEnabled = useSetJobsEnabled(environmentId);
   const runNow = useAtomCommand(serverEnvironment.runScheduledTaskNow, {
     label: "worker run now",
   });
@@ -541,27 +605,36 @@ function SidebarWorkerRow(props: {
   });
   const { unarchiveThread } = useThreadActions();
   const setWorkerThread = useSetWorkerThread();
+  const tasks: readonly [ScheduledTask, ...ScheduledTask[]] = [
+    jobs[0].task,
+    ...jobs.slice(1).map((job) => job.task),
+  ];
+  const onlyTask = tasks.length === 1 ? tasks[0] : null;
+  const latest = latestJob(tasks);
   // Archived threads can't be opened, and the scheduler can't post into them either.
-  const threadArchived = task.threadId !== null && (thread === null || thread.archivedAt !== null);
+  const threadArchived = threadId !== null && (thread === null || thread.archivedAt !== null);
   const brokenByArchive = threadArchived && state.needsYou;
+  const failedJobs = threadArchived
+    ? []
+    : jobs.filter((job) => job.state.needsYou && job.task.lastRunStatus === "failed");
 
   const openSettings = () => {
     if (isMobile) setOpenMobile(false);
     void navigate({
       to: "/settings/scheduled-tasks",
-      search: { environmentId, taskId: task.id },
+      search: onlyTask ? { environmentId, taskId: onlyTask.id } : { environmentId },
     });
   };
-  // A worker's runs land in its thread, so that is where its history lives, archived or not.
+  // A job's runs land in its thread, so that is where its history lives, archived or not.
   const open = () => {
-    if (task.threadId === null) {
+    if (threadId === null) {
       openSettings();
       return;
     }
     if (isMobile) setOpenMobile(false);
     void navigate({
       to: "/$environmentId/$threadId",
-      params: buildThreadRouteParams(scopeThreadRef(environmentId, task.threadId)),
+      params: buildThreadRouteParams(scopeThreadRef(environmentId, threadId)),
       search: threadArchived ? { archived: true } : {},
     });
   };
@@ -570,97 +643,113 @@ function SidebarWorkerRow(props: {
     const api = readLocalApi();
     if (!api) return;
     const canOperate = readEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
-    const canDismiss = state.needsYou && task.lastRunStatus === "failed" && !threadArchived;
+    const jobsLabel = onlyTask ? "" : " jobs";
     const clicked = await api.contextMenu.show(
       [
-        { id: "run-now", label: "Run now", disabled: !canOperate },
-        task.enabled
-          ? { id: "pause", label: "Pause", disabled: !canOperate }
-          : { id: "resume", label: "Resume", disabled: !canOperate },
+        ...(onlyTask ? [{ id: "run-now", label: "Run now", disabled: !canOperate }] : []),
+        tasks.some((task) => task.enabled)
+          ? { id: "pause", label: `Pause${jobsLabel}`, disabled: !canOperate }
+          : { id: "resume", label: `Resume${jobsLabel}`, disabled: !canOperate },
         ...(thread !== null && !threadArchived
           ? [{ id: "move-to-workers", label: "Move thread to Workers", disabled: !canOperate }]
           : []),
         ...(threadArchived
           ? [{ id: "unarchive", label: "Unarchive thread", disabled: !canOperate }]
           : []),
-        ...(canDismiss ? [{ id: "dismiss", label: "Mark done" }] : []),
-        { id: "edit", label: "Edit job" },
-        {
-          id: "delete",
-          label: "Delete job",
-          destructive: true,
-          icon: "trash",
-          disabled: !canOperate,
-        },
+        ...(failedJobs.length > 0 ? [{ id: "dismiss", label: "Mark done" }] : []),
+        { id: "edit", label: onlyTask ? "Edit job" : "Edit jobs" },
+        ...(onlyTask
+          ? [
+              {
+                id: "delete",
+                label: "Delete job",
+                destructive: true,
+                icon: "trash" as const,
+                disabled: !canOperate,
+              },
+            ]
+          : []),
       ],
       { x: event.clientX, y: event.clientY },
     );
     if (clicked === "edit") return openSettings();
-    if (clicked === "dismiss") return onDismiss(task);
+    if (clicked === "dismiss") {
+      for (const job of failedJobs) onDismiss(job.task);
+      return;
+    }
     if (clicked === "move-to-workers" && thread !== null) {
       await setWorkerThread(scopeThreadRef(environmentId, thread.id), true);
       return;
     }
-    if (clicked === "unarchive" && task.threadId !== null) {
-      const result = await unarchiveThread(scopeThreadRef(environmentId, task.threadId));
+    if (clicked === "unarchive" && threadId !== null) {
+      const result = await unarchiveThread(scopeThreadRef(environmentId, threadId));
       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
         toastFailure("Could not unarchive thread", squashAtomCommandFailure(result));
       }
       return;
     }
-    if (clicked === "run-now") {
+    if (clicked === "run-now" && onlyTask) {
       reportCommandFailure(
         "Could not run job",
-        await runNow({ environmentId, input: { id: task.id } }),
+        await runNow({ environmentId, input: { id: onlyTask.id } }),
       );
       return;
     }
     if (clicked === "pause" || clicked === "resume") {
-      reportCommandFailure(
-        "Could not update job",
-        await setEnabled({ environmentId, input: { id: task.id, enabled: clicked === "resume" } }),
-      );
+      await setJobsEnabled(tasks, clicked === "resume");
       return;
     }
-    if (clicked !== "delete") return;
+    if (clicked !== "delete" || !onlyTask) return;
     const confirmed = await api.dialogs.confirm(
-      [`Delete job "${task.title}"?`, "Its thread and history stay where they are."].join("\n"),
+      [`Delete job "${onlyTask.title}"?`, "Its thread and history stay where they are."].join("\n"),
       { variant: "destructive" },
     );
     if (!confirmed) return;
     reportCommandFailure(
       "Could not delete job",
-      await remove({ environmentId, input: { id: task.id } }),
+      await remove({ environmentId, input: { id: onlyTask.id } }),
     );
   };
 
+  const nextRunAt = soonestRunAt(tasks);
   const meta = showLastRun ? (
-    <RelativeTime compact timestamp={task.lastRunAt ?? thread?.updatedAt ?? task.updatedAt} />
-  ) : !task.enabled ? (
-    <ScheduledStoppedLabel task={task} />
-  ) : task.schedule.type === "webhook" ? (
+    <RelativeTime compact timestamp={latest.lastRunAt ?? thread?.updatedAt ?? latest.updatedAt} />
+  ) : nextRunAt !== null ? (
+    <ScheduledRelativeLabel value={nextRunAt} />
+  ) : tasks.some((task) => task.enabled && task.schedule.type === "webhook") ? (
     "Webhook"
-  ) : task.nextRunAt !== null ? (
-    <ScheduledRelativeLabel value={task.nextRunAt} />
-  ) : task.lastRunAt !== null ? (
-    <RelativeTime compact timestamp={task.lastRunAt} />
+  ) : !latest.enabled ? (
+    <ScheduledStoppedLabel task={latest} />
+  ) : latest.lastRunAt !== null ? (
+    <RelativeTime compact timestamp={latest.lastRunAt} />
   ) : null;
 
   return (
     <WorkerRowLayout
-      testId={`worker-row-${task.id}`}
+      testId={`worker-job-thread-row-${threadId ?? tasks[0].id}`}
       isActive={isActive}
       pill={state.pill}
-      title={task.title}
+      title={
+        thread?.title ??
+        (threadId === null ? (
+          tasks[0].title
+        ) : (
+          <ArchivedThreadTitle
+            environmentId={environmentId}
+            threadId={threadId}
+            fallback={tasks[0].title}
+          />
+        ))
+      }
       tooltip={
         <>
-          {scheduleLabel(task.schedule)}
+          {tasks.map((task) => `${task.title}: ${scheduleLabel(task.schedule)}`).join(" · ")}
           {brokenByArchive
             ? " · Can't run: its thread is archived"
             : threadArchived
               ? " · Thread archived"
               : ""}
-          {task.lastRunError ? ` · ${task.lastRunError}` : ""}
+          {tasks.flatMap((task) => (task.lastRunError ? [` · ${task.lastRunError}`] : [])).join("")}
         </>
       }
       meta={meta}
@@ -680,9 +769,7 @@ function SidebarWorkerThreadRow(props: {
   const { environmentId, thread, jobs, state } = worker;
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
-  const setEnabled = useAtomCommand(serverEnvironment.setScheduledTaskEnabled, {
-    label: "worker enabled",
-  });
+  const setJobsEnabled = useSetJobsEnabled(environmentId);
   const runNow = useAtomCommand(serverEnvironment.runScheduledTaskNow, {
     label: "worker run now",
   });
@@ -707,15 +794,7 @@ function SidebarWorkerThreadRow(props: {
       search: onlyTask ? { environmentId, taskId: onlyTask.id } : { environmentId },
     });
   };
-  const setAllEnabled = async (enabled: boolean) => {
-    for (const task of tasks) {
-      if (task.enabled === enabled) continue;
-      reportCommandFailure(
-        "Could not update job",
-        await setEnabled({ environmentId, input: { id: task.id, enabled } }),
-      );
-    }
-  };
+  const setAllEnabled = (enabled: boolean) => setJobsEnabled(tasks, enabled);
   const handleContextMenu = async (event: React.MouseEvent) => {
     event.preventDefault();
     const api = readLocalApi();
@@ -771,11 +850,7 @@ function SidebarWorkerThreadRow(props: {
     }
   };
 
-  const nextRunAt =
-    tasks
-      .filter((task) => task.enabled && task.nextRunAt !== null)
-      .map((task) => task.nextRunAt!)
-      .toSorted()[0] ?? null;
+  const nextRunAt = soonestRunAt(tasks);
   const meta = showLastRun ? (
     <RelativeTime compact timestamp={thread.latestRun?.completedAt ?? thread.updatedAt} />
   ) : nextRunAt !== null ? (
@@ -811,7 +886,7 @@ function WorkerRowLayout(props: {
   testId: string;
   isActive: boolean;
   pill: WorkerState["pill"];
-  title: string;
+  title: React.ReactNode;
   tooltip: React.ReactNode;
   meta: React.ReactNode;
   onOpen: () => void;

@@ -818,7 +818,10 @@ What it does: a thread is either a normal thread (Projects) or a worker, chosen 
 worker is a thread with the upstream thread tag `worker` (`WORKER_THREAD_TAG`, `isWorkerThread`),
 so no schema or migration is involved. The legacy sidebar gets Projects and Workers tabs. Workers
 lists worker threads by folder (F20), with the same New folder button as Projects, then "Jobs in
-project threads" (scheduled tasks outside worker threads); jobs whose thread is archived and that won't run again hide behind "Show archived".
+project threads": one row per project thread that has scheduled jobs, titled by the thread, with
+its jobs' combined status and soonest next run (a job that starts a new thread each run keeps a
+row of its own). An archived thread's title comes from the archived-thread list. Rows whose
+thread is archived and whose jobs won't run again hide behind "Show archived".
 A "Needs you" group at the top of Projects shows a worker that waits on the user (question,
 approval) or failed, a job whose last run failed (until "Mark done", kept in localStorage), and a
 job that would still run into an archived thread. Right-click a project thread for "Move to

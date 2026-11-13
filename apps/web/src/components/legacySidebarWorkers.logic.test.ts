@@ -5,8 +5,10 @@ import type { ScheduledTask } from "@t3tools/contracts";
 import type { ThreadStatusPill } from "./Sidebar.logic";
 import {
   groupWorkers,
+  resolveJobThreadState,
   resolveWorkerState,
   resolveWorkerThreadState,
+  soonestRunAt,
 } from "./legacySidebarWorkers.logic";
 
 const pill = (label: ThreadStatusPill["label"]): ThreadStatusPill => ({
@@ -159,6 +161,38 @@ describe("resolveWorkerThreadState", () => {
     expect(resolveWorkerThreadState({ threadPill: null, jobStates: [runningJob] })).toEqual(
       runningJob,
     );
+  });
+});
+
+describe("resolveJobThreadState", () => {
+  const quiet = { pill: null, needsYou: false, archived: false };
+  const archived = { pill: null, needsYou: false, archived: true };
+  const failedJob = { pill: pill("Failed"), needsYou: true, archived: false };
+  const runningJob = { pill: pill("Working"), needsYou: false, archived: false };
+
+  it("shows the job that needs the user, else the one with a dot", () => {
+    expect(resolveJobThreadState([runningJob, failedJob])).toEqual(failedJob);
+    expect(resolveJobThreadState([quiet, runningJob])).toEqual(runningJob);
+    expect(resolveJobThreadState([quiet, quiet])).toEqual(quiet);
+  });
+
+  it("counts as archived only when every job is", () => {
+    expect(resolveJobThreadState([archived, archived])).toEqual(archived);
+    expect(resolveJobThreadState([archived, quiet])).toEqual(quiet);
+  });
+});
+
+describe("soonestRunAt", () => {
+  it("picks the earliest next run among jobs that are on", () => {
+    expect(
+      soonestRunAt([
+        { enabled: true, nextRunAt: "2026-11-14T15:00:00.000Z" },
+        { enabled: false, nextRunAt: "2026-11-13T15:00:00.000Z" },
+        { enabled: true, nextRunAt: "2026-11-13T18:00:00.000Z" },
+        { enabled: true, nextRunAt: null },
+      ]),
+    ).toBe("2026-11-13T18:00:00.000Z");
+    expect(soonestRunAt([{ enabled: false, nextRunAt: "2026-11-13T15:00:00.000Z" }])).toBeNull();
   });
 });
 

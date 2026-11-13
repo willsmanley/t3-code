@@ -94,6 +94,30 @@ export function resolveWorkerThreadState(input: {
   return jobStates.find((state) => state.pill !== null) ?? QUIET;
 }
 
+/**
+ * A project thread's row speaks for every job that posts into it: the first that needs the user,
+ * else the first with a dot. It counts as archived only when all of its jobs are.
+ */
+export function resolveJobThreadState(jobStates: readonly WorkerState[]): WorkerState {
+  const shown =
+    jobStates.find((state) => state.needsYou) ?? jobStates.find((state) => state.pill !== null);
+  if (shown) return shown;
+  return jobStates.length > 0 && jobStates.every((state) => state.archived)
+    ? { ...QUIET, archived: true }
+    : QUIET;
+}
+
+/** When the next of these jobs runs, or null when none is on and scheduled ahead. */
+export function soonestRunAt(
+  tasks: readonly Pick<ScheduledTask, "enabled" | "nextRunAt">[],
+): string | null {
+  return (
+    tasks
+      .flatMap((task) => (task.enabled && task.nextRunAt !== null ? [task.nextRunAt] : []))
+      .toSorted()[0] ?? null
+  );
+}
+
 export interface WorkerGroup<T> {
   readonly key: string;
   readonly workers: readonly T[];
