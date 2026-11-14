@@ -41,7 +41,7 @@ Measurements in the hotspot table are from fork main `ea7c8bf901` and upstream `
   logic). Renames turn upstream
   edits near those names into conflicts. Prefer keeping the upstream name.
 - **Dead-code sweeps.** Upstream deletes or un-exports code nothing upstream reaches (for
-  example `readEnvironmentSupportsSnooze`, `logRegistrationDebug`, `useWorkspaceListNavigation`
+  example `readEnvironmentSupportsSnooze`, `logRegistrationDebug`
   and the `SettingsActionRow` re-export in October 2026), even when the fork uses it. The
   typecheck finds these. Prefer a small copy in the fork-owned file over restoring upstream's.
 - **New upstream rules reach fork-owned files.** Upstream adds lint rules and compile checks
@@ -272,8 +272,8 @@ Touch points:
   `sourceControlEnabled` to its registry stub.
 - `apps/web/src/components/settings/ProjectDefaultsSettings.tsx`: the switch row.
   `settingsSearch.ts`: the `git-integration` search entry.
-  `apps/web/src/components/chat/ThreadDetailsPanel.tsx`: the `show.branch` and `show.git` flags
-  are false when off, so the details card has no Git rows.
+  `apps/web/src/components/chat/ThreadDetailsPanel.tsx`: `sourceControlEnabled` in upstream's
+  `offersGit`, so the details card has no Git rows when off.
 - `apps/mobile/src/features/settings/SettingsServerControlsRouteScreen.tsx`: a "Git" section with
   the switch row, first on the `source-control` page.
 - `docs/user/source-control.md`.
@@ -500,10 +500,9 @@ Touch points:
 - `apps/mobile/src/features/threads/ThreadHeader.tsx`: the `onArchiveThread` prop; the action is
   pushed onto upstream's single AppBar `actions` list with `overflowOnly`, Android only.
 - `apps/mobile/src/features/threads/ThreadRouteScreen.tsx`: wires
-  `useOpenThreadArchiveAction(useWorkspaceListNavigation("threads"))`, only when the thread can
-  be changed, isn't being created and isn't archived.
-- `apps/mobile/src/features/layout/workspace/useAndroidWorkspaceNavigation.ts`: exports
-  `useWorkspaceListNavigation`, which upstream keeps private.
+  `useOpenThreadArchiveAction(useWorkspaceBackNavigation())`, only when the thread can be
+  changed, isn't being created and isn't archived. Since November 14, 2026 upstream's Back on
+  Android skips parent threads to reach the list, so the fork no longer exports a list helper.
 - `apps/mobile/src/features/home/useThreadListActions.ts`: `useOpenThreadArchiveAction`
   (+ `useThreadListActions.test.ts`).
 
@@ -536,17 +535,11 @@ Verify:
 - `vp test run apps/mobile/src/lib/composerImages.test.ts`
 - Typecheck catches a dropped prop. `grep -n '"camera"' apps/mobile/src/features/threads/ComposerAttachmentButton.tsx`
 
-### F12. Thread list recovers after a subscription defect (client-runtime; all clients)
+### F12. Thread list recovers after a subscription defect (retired)
 
-Commit `d49219f55d`.
-
-What it does: if the subscription feeding the thread list dies with a defect, it retries with
-backoff (1 s up to 30 s). Before, the list stayed frozen until the app restarted.
-
-Touch points: `packages/client-runtime/src/state/shell.ts` (+ `shell-sync.test.ts`).
-
-Verify: `vp test run packages/client-runtime/src/state/shell-sync.test.ts -t "resubscribes after a defect"`.
-If upstream adds its own retry here, drop this one.
+Commit `d49219f55d`. Retired November 14, 2026: upstream's shell subscription now resubscribes
+after a defect itself (`onDefect` with backoff in `packages/client-runtime/src/state/shell.ts`), so
+the fork's retry and its test were dropped and the file matches upstream.
 
 ### F13. T3 Code as Android's digital assistant (mobile, Android only)
 
@@ -898,27 +891,13 @@ Verify:
   Pulls; "Move to Workers" on a Projects thread moves it to the Workers tab, and "Move to
   Projects" brings it back.
 
-### F19. Rebound Cmd+arrow shortcuts work from the composer (web/desktop, Mac)
+### F19. Rebound Cmd+arrow shortcuts work from the composer (retired)
 
-Added November 6, 2026.
-
-What it does: on a Mac the composer takes Cmd+Up/Down (start or end of the message) and
-Cmd+Left/Right (start or end of the line) and stops the key there. When a keybinding is bound to
-one of those keys, such as `mod+arrowup` for `thread.previous`, the composer now leaves the key to
-the app, so the shortcut works while typing. Unbound, the keys move the caret as before.
-
-Touch points:
-
-- `apps/web/src/components/ComposerPromptEditorTiptap.tsx`: the `isAppShortcut` prop, in
-  `readCallbacks`, checked at the top of the Mac boundary branch in `handleKeyDown`.
-- `apps/web/src/components/chat/ChatComposer.tsx`: `isAppShortcutStable` (resolves the key with
-  `composerFocus`) passed to the editor.
-
-Verify:
-
-- `vp run --filter ./apps/web typecheck`
-- With `{ "key": "mod+arrowup", "command": "thread.previous" }` in `keybindings.json`, Cmd+Up in
-  the composer switches threads; with no such binding it moves the caret to the start.
+Added November 6, 2026. Retired November 14, 2026: upstream's composer now leaves a Cmd+arrow
+bound to thread navigation (`thread.previous`, `thread.next`, jumps) to the app
+(`isThreadNavigationShortcut` in `ComposerPromptEditorTiptap.tsx`), which covers Wills's
+`mod+arrowup` / `mod+arrowdown` bindings. The fork's `isAppShortcut` prop is gone and both files
+match upstream there. Other commands bound to Cmd+arrow move the caret again.
 
 ### F20. Folders replace projects in the legacy sidebar and the phone app (web/desktop, server, client-runtime, contracts, mobile)
 

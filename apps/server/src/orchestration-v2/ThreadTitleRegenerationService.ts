@@ -8,6 +8,7 @@ import {
   type OrchestrationV2ConversationMessage,
   type RunId,
   type ServerSettingsError,
+  TextGenerationError,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -17,6 +18,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
+import * as Schema from "effect/Schema";
 
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
@@ -47,10 +49,28 @@ export class ThreadTitleRegenerationService extends Context.Service<
   }
 >()("t3/orchestration-v2/ThreadTitleRegenerationService") {}
 
-type TitleOutcome =
-  | { readonly type: "stale" }
-  // `folder`: the auto-file answer, when the title call was offered folders (fork, F20).
-  | { readonly type: "complete"; readonly title?: string; readonly folder?: string | null };
+type Outcome =
+  | { readonly status: "renamed"; readonly title: string }
+  | { readonly status: "unchanged" }
+  | { readonly status: "failed"; readonly message: string };
+
+const MAX_FAILURE_MESSAGE_LENGTH = 300;
+const isTextGenerationError = Schema.is(TextGenerationError);
+
+function failureMessage(cause: Cause.Cause<unknown>): string {
+  const error = Cause.squash(cause);
+  const lines = isTextGenerationError(error)
+    ? error.detail
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+    : [];
+  const detail = lines.at(-1);
+  if (detail === undefined) return "Title generation failed.";
+  return detail.length > MAX_FAILURE_MESSAGE_LENGTH
+    ? `${detail.slice(0, MAX_FAILURE_MESSAGE_LENGTH - 1)}…`
+    : detail;
+}
 
 const make = Effect.gen(function* () {
   const threads = yield* ThreadManagementService.ThreadManagementService;
@@ -63,7 +83,8 @@ const make = Effect.gen(function* () {
   const complete = (input: {
     readonly threadId: ThreadId;
     readonly requestId: CommandId;
-    readonly title?: string;
+    readonly kind: { readonly type: "initial" | "regenerate" };
+    readonly outcome: Outcome;
   }) =>
     threads
       .dispatch({
@@ -71,7 +92,15 @@ const make = Effect.gen(function* () {
         commandId: CommandId.make(`${input.requestId}:title-complete`),
         threadId: input.threadId,
         requestId: input.requestId,
-        ...(input.title === undefined ? {} : { title: input.title }),
+        ...(input.outcome.status === "renamed" ? { title: input.outcome.title } : {}),
+        ...(input.kind.type === "regenerate"
+          ? {
+              outcome: {
+                status: input.outcome.status,
+                ...(input.outcome.status === "failed" ? { message: input.outcome.message } : {}),
+              },
+            }
+          : {}),
       })
       .pipe(Effect.asVoid);
 
@@ -117,7 +146,9 @@ const make = Effect.gen(function* () {
   const execute: ThreadTitleRegenerationService["Service"]["execute"] = Effect.fn(
     "ThreadTitleRegenerationService.execute",
   )(function* (input) {
-    const outcome: TitleOutcome = yield* Effect.gen(function* () {
+    // Fork (F20): the auto-file answer, when the title call was offered folders.
+    let folderAnswer: string | null = null;
+    const outcome: Outcome | { readonly status: "stale" } = yield* Effect.gen(function* () {
       const projection = yield* threads.getThreadRecords(
         input.threadId,
         ["messages"],
@@ -126,12 +157,12 @@ const make = Effect.gen(function* () {
           : { messageRoles: ["user", "assistant"] },
       );
       if (projection.thread.titleRegeneration?.requestId !== input.requestId) {
-        return { type: "stale" as const };
+        return { status: "stale" as const };
       }
 
       const project = yield* projects.get(projection.thread.projectId);
       if (Option.isNone(project)) {
-        return { type: "complete" as const };
+        return { status: "failed" as const, message: "This thread's project no longer exists." };
       }
 
       let context: {
@@ -156,7 +187,10 @@ const make = Effect.gen(function* () {
         );
       }
       if (context.message.length === 0 && context.attachments.length === 0) {
-        return { type: "complete" as const };
+        return {
+          status: "failed" as const,
+          message: "This thread has no messages to title yet.",
+        };
       }
 
       // A deleted source should not cost the fork its title.
@@ -187,11 +221,11 @@ const make = Effect.gen(function* () {
         projectId: projection.thread.projectId,
       });
       const generatedTitle = result.title.trim();
-      const folder = result.folder === undefined ? {} : { folder: result.folder };
+      folderAnswer = result.folder ?? null;
       return generatedTitle === "New thread" ||
         (input.kind.type === "regenerate" && generatedTitle === projection.thread.title.trim())
-        ? { type: "complete" as const, ...folder }
-        : { type: "complete" as const, title: result.title, ...folder };
+        ? { status: "unchanged" as const }
+        : { status: "renamed" as const, title: result.title };
     }).pipe(
       Effect.retry({
         times: input.kind.type === "initial" ? 2 : 0,
@@ -204,21 +238,19 @@ const make = Effect.gen(function* () {
               threadId: input.threadId,
               requestId: input.requestId,
               cause,
-            }).pipe(Effect.as({ type: "complete" as const })),
+            }).pipe(Effect.as({ status: "failed" as const, message: failureMessage(cause) })),
       ),
     );
 
-    if (outcome.type !== "stale") {
-      yield* complete({
-        ...input,
-        ...(outcome.title === undefined ? {} : { title: outcome.title }),
-      });
+    if (outcome.status !== "stale") {
+      yield* complete({ ...input, outcome });
     }
+    // A thread waiting to be filed is released even when its title went stale or failed.
     if (input.kind.type === "initial") {
       yield* autoFile.finish({
         threadId: input.threadId,
         requestId: input.requestId,
-        answer: outcome.type === "complete" ? (outcome.folder ?? null) : null,
+        answer: outcome.status === "stale" || outcome.status === "failed" ? null : folderAnswer,
       });
     }
   });
